@@ -4,7 +4,7 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::Vector;
 use near_sdk::{env, near, require, AccountId};
 
-use crate::events::{EpochCutoff, X207Event};
+use crate::events::{ClearingSubmitted, EpochCutoff, X207Event};
 use crate::params::Params;
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::{ClearingEdge, EpochId};
@@ -252,6 +252,45 @@ impl X207Circle {
             next_cutoff_at: U64(next_cutoff_at),
         }
         .emit();
+    }
+
+    /// Permissionless; the solver is the predecessor. Stores the proposal only when it beats the
+    /// stored one (spec 4.3); D2 stays untouched until `commit_epoch` (ADR-21). Returns `cleared_total`.
+    pub fn submit_clearing(&mut self, epoch: EpochId, edges: Vec<ClearingEdge>) -> U128 {
+        let now = env::block_timestamp();
+        let e = self.epoch_or_panic(epoch);
+        e.require_phase(EpochPhase::Clearing);
+        let deadline = e.proposal_deadline.expect("clearing epoch has proposal_deadline");
+        require!(now < deadline, format!("ERR_PROPOSAL_WINDOW_CLOSED: proposal_deadline {deadline}"));
+        let cleared_total = self.verify_clearing(epoch, &edges).unwrap_or_else(|reason| env::panic_str(&reason));
+        let edge_count = edges.len() as u32;
+        require!(
+            self.beats_stored(epoch, cleared_total, edge_count),
+            "ERR_PROPOSAL_NOT_BETTER: stored proposal is at least as good"
+        );
+        let solver = env::predecessor_account_id();
+        let replaced = self.proposals.insert(
+            epoch,
+            ClearingProposal {
+                epoch,
+                solver: solver.clone(),
+                edges,
+                edge_count,
+                cleared_total: U128(cleared_total),
+                submitted_at: U64(now),
+                committed: false,
+            },
+        );
+        ClearingSubmitted {
+            epoch,
+            solver,
+            cleared_total: U128(cleared_total),
+            edge_count,
+            replaced_solver: replaced.as_ref().map(|p| p.solver.clone()),
+            replaced_cleared_total: replaced.as_ref().map(|p| p.cleared_total),
+        }
+        .emit();
+        U128(cleared_total)
     }
 }
 
@@ -622,5 +661,228 @@ mod tests {
             .build());
         c.close_epoch(1);
         assert_eq!(c.current_epoch, 2);
+    }
+}
+
+#[cfg(test)]
+mod submit_tests {
+    use near_sdk::json_types::U128;
+    use near_sdk::serde_json::{self, json};
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::testing_env;
+
+    use super::*;
+    use crate::params::{Admission, Fees};
+    use crate::types::MAX_EDGES_PER_TX;
+    use crate::voucher::PairState;
+
+    const SEC: u64 = NS_PER_SEC;
+    const CREDIT: u128 = 1_000_000;
+    const T_CLOSE: u64 = 3600 * SEC;
+    const T_PROP: u64 = T_CLOSE + 600 * SEC;
+
+    fn acc(s: &str) -> AccountId {
+        format!("{s}.near").parse().unwrap()
+    }
+
+    fn edge(d: &str, c: &str, cleared: u128) -> ClearingEdge {
+        ClearingEdge { debtor: acc(d), creditor: acc(c), cleared: U128(cleared * CREDIT) }
+    }
+
+    fn as_solver(solver: &str, now: u64) {
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(solver)).block_timestamp(now).build());
+    }
+
+    /// Epoch 1 in `clearing`: 3-cycle x->y->z->x of 10 each, 2-cycle p<->q of 20 each.
+    fn s2() -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(0).build());
+        let params = Params {
+            epoch_length: 3600,
+            payment_window: 1800,
+            proposal_window: 600,
+            base_limit_ratio: 8000,
+            limit_growth: 1000,
+            limit_cap: U128(1_000_000_000),
+            limit_decay: 0,
+            fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
+            admission: Admission::Open,
+        };
+        let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), params, 0);
+        for (d, k, v) in [("x", "y", 10), ("y", "z", 10), ("z", "x", 10), ("p", "q", 20), ("q", "p", 20)] {
+            c.pairs.insert((1, acc(d), acc(k)), PairState { cumulative: v * CREDIT, last_seq: 1, cleared: 0 });
+            c.epochs.get_mut(&1).unwrap().edges.push((acc(d), acc(k)));
+        }
+        c.epochs.get_mut(&1).unwrap().start_clearing(T_CLOSE);
+        c
+    }
+
+    /// 30 total, 3 edges.
+    fn p3c() -> Vec<ClearingEdge> {
+        vec![edge("x", "y", 10), edge("y", "z", 10), edge("z", "x", 10)]
+    }
+
+    /// 30 total, 2 edges.
+    fn p2c() -> Vec<ClearingEdge> {
+        vec![edge("p", "q", 15), edge("q", "p", 15)]
+    }
+
+    /// 40 total, 5 edges.
+    fn popt() -> Vec<ClearingEdge> {
+        let mut e = p3c();
+        e.extend([edge("p", "q", 5), edge("q", "p", 5)]);
+        e
+    }
+
+    fn submit(c: &mut X207Circle, solver: &str, edges: Vec<ClearingEdge>) -> U128 {
+        as_solver(solver, T_CLOSE + SEC);
+        c.submit_clearing(1, edges)
+    }
+
+    fn event() -> serde_json::Value {
+        let line = get_logs().into_iter().rev().find(|l| l.contains("clearing_submitted")).unwrap();
+        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone()
+    }
+
+    #[test]
+    fn tc_ct_027_01_first_proposal() {
+        let mut c = s2();
+        assert_eq!(submit(&mut c, "solver1", p3c()), U128(30 * CREDIT));
+        let p = c.proposals.get(&1).unwrap();
+        assert_eq!((&p.solver, p.edge_count, p.committed), (&acc("solver1"), 3, false));
+        assert_eq!(p.submitted_at, U64(T_CLOSE + SEC));
+        assert_eq!(c.obligation(1, acc("x"), acc("y")).unwrap().cleared, U128(0));
+        assert_eq!(
+            event(),
+            json!({"epoch":1,"solver":"solver1.near","cleared_total":"30000000","edge_count":3,
+                   "replaced_solver":null,"replaced_cleared_total":null})
+        );
+    }
+
+    #[test]
+    fn tc_ct_027_02_bigger_proposal_replaces() {
+        let mut c = s2();
+        submit(&mut c, "solver1", p3c());
+        assert_eq!(submit(&mut c, "solver2", popt()), U128(40 * CREDIT));
+        let p = c.proposals.get(&1).unwrap();
+        assert_eq!((&p.solver, p.cleared_total), (&acc("solver2"), U128(40 * CREDIT)));
+        let ev = event();
+        assert_eq!((&ev["replaced_solver"], &ev["replaced_cleared_total"]), (&json!("solver1.near"), &json!("30000000")));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PROPOSAL_NOT_BETTER")]
+    fn tc_ct_027_03_smaller_proposal_rejected() {
+        let mut c = s2();
+        submit(&mut c, "solver1", popt());
+        submit(&mut c, "solver2", p2c());
+    }
+
+    #[test]
+    fn tc_ct_027_03_rejection_keeps_stored_proposal() {
+        let mut c = s2();
+        submit(&mut c, "solver1", popt());
+        let before = c.proposals.get(&1).unwrap().clone();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| submit(&mut c, "solver2", p2c())));
+        assert!(r.is_err());
+        assert_eq!(c.proposals.get(&1).unwrap(), &before);
+    }
+
+    #[test]
+    fn tc_ct_027_04_same_total_fewer_edges_wins() {
+        let mut c = s2();
+        submit(&mut c, "solver1", p3c());
+        submit(&mut c, "solver2", p2c());
+        let p = c.proposals.get(&1).unwrap();
+        assert_eq!((&p.solver, p.edge_count), (&acc("solver2"), 2));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PROPOSAL_NOT_BETTER")]
+    fn tc_ct_027_05_same_total_more_edges_rejected() {
+        let mut c = s2();
+        submit(&mut c, "solver1", p2c());
+        submit(&mut c, "solver2", p3c());
+    }
+
+    #[test]
+    fn tc_ct_027_06_identical_resubmit_rejected() {
+        let mut c = s2();
+        submit(&mut c, "solver1", p2c());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| submit(&mut c, "solver2", p2c())));
+        assert!(r.is_err());
+        assert_eq!(c.proposals.get(&1).unwrap().solver, acc("solver1"));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_WRONG_PHASE")]
+    fn tc_ct_027_07_before_close() {
+        let mut c = s2();
+        c.epochs.insert(1, Epoch::open(1, 0, T_CLOSE, c.epochs.get(&1).unwrap().params.clone()));
+        submit(&mut c, "solver1", p3c());
+    }
+
+    #[test]
+    fn tc_ct_027_08_one_ns_before_deadline_ok() {
+        let mut c = s2();
+        as_solver("solver1", T_PROP - 1);
+        c.submit_clearing(1, p3c());
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PROPOSAL_WINDOW_CLOSED")]
+    fn tc_ct_027_08_at_deadline_rejected() {
+        let mut c = s2();
+        as_solver("solver1", T_PROP);
+        c.submit_clearing(1, p3c());
+    }
+
+    #[test]
+    fn tc_ct_027_09_invalid_proposals_use_verifier_codes() {
+        let cases: Vec<(Vec<ClearingEdge>, &str)> = vec![
+            (vec![], "ERR_EMPTY_PROPOSAL"),
+            (
+                (0..=MAX_EDGES_PER_TX).map(|_| edge("x", "y", 1)).collect(),
+                "ERR_TOO_MANY_EDGES",
+            ),
+            (vec![edge("x", "y", 0), edge("y", "z", 10), edge("z", "x", 10)], "ERR_ZERO_CLEARED"),
+            (vec![edge("p", "q", 5), edge("p", "q", 5), edge("q", "p", 10)], "ERR_DUPLICATE_EDGE"),
+            (vec![edge("x", "z", 5), edge("z", "x", 5)], "ERR_EDGE_NOT_IN_SNAPSHOT"),
+            (vec![edge("p", "q", 21), edge("q", "p", 21)], "ERR_CLEARED_EXCEEDS_OBLIGATION"),
+            (vec![edge("p", "q", 10), edge("q", "p", 5)], "ERR_UNBALANCED_MEMBER"),
+        ];
+        for (edges, code) in cases {
+            let mut c = s2();
+            as_solver("solver1", T_CLOSE + SEC);
+            let sim = c.simulate_clearing(1, edges.clone()).reason.unwrap();
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.submit_clearing(1, edges)));
+            let msg = r.unwrap_err();
+            let msg = msg.downcast_ref::<String>().cloned().or_else(|| msg.downcast_ref::<&str>().map(|s| s.to_string())).unwrap();
+            assert!(msg.contains(code) && sim.starts_with(code), "{code}: {msg} / {sim}");
+            assert!(c.proposals.get(&1).is_none());
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_UNKNOWN_EPOCH")]
+    fn tc_ct_027_10_unknown_epoch() {
+        let mut c = s2();
+        as_solver("solver1", T_CLOSE + SEC);
+        c.submit_clearing(99, p3c());
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_WRONG_PHASE")]
+    fn tc_ct_027_11_after_commit() {
+        let mut c = s2();
+        c.epochs.get_mut(&1).unwrap().start_payment_window(T_PROP);
+        as_solver("solver1", T_PROP + SEC);
+        c.submit_clearing(1, p3c());
+    }
+
+    #[test]
+    fn tc_ct_027_14_permissionless_solver_is_predecessor() {
+        let mut c = s2();
+        submit(&mut c, "outsider", p3c());
+        assert_eq!(c.proposals.get(&1).unwrap().solver, acc("outsider"));
     }
 }
