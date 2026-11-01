@@ -6,12 +6,16 @@ use near_sdk::{assert_one_yocto, env, near, AccountId, Gas, NearToken, Promise, 
 
 use crate::clearing::{ClearingProposal, EpochPhase};
 use crate::events::{
-    emit_chunked, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualClaimFailed, ResidualClaimed, ResidualPaid, X207Event,
+    chunked_logs, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualClaimFailed, ResidualClaimed, ResidualPaid, X207Event,
 };
 use crate::member::MemberStatus;
 use crate::risk::{assert_limit_invariant, compute_limit};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClaimDestination, EpochId};
+
+/// Total log bytes one call may write (near protocol), and the room kept for the "left out" line.
+const LOG_LIMIT: usize = 16 * 1024;
+const OMITTED_NOTE_ROOM: usize = 160;
 
 /// Gas constants of spec 4.6; the final values come from CT-043.
 pub const CLAIM_MIN_GAS: Gas = Gas::from_tgas(100);
@@ -298,11 +302,8 @@ impl X207Circle {
         e.claimable_final = claimable_final;
         let (pool, shortfall, finalized_at) = (e.pool, e.shortfall, e.finalized_at.expect("finalized epoch has finalized_at"));
         let defaulted_count = defaulted.len() as u32;
-        for event in defaulted {
-            event.emit();
-        }
-        emit_chunked(&changes, |changes, chunk, chunks| LimitsUpdated { epoch, changes, chunk, chunks });
-        EpochFinalized {
+        let limit_logs = chunked_logs(&changes, |changes, chunk, chunks| LimitsUpdated { epoch, changes, chunk, chunks });
+        let finalized_log = EpochFinalized {
             epoch,
             finalized_at: U64(finalized_at),
             defaulted_count,
@@ -310,7 +311,32 @@ impl X207Circle {
             pool: U128(pool),
             shortfall: U128(shortfall),
         }
-        .emit();
+        .to_log();
+
+        // near caps the total log of one call at 16 KiB. One `member_defaulted` per debtor stops fitting
+        // at about 60 debtors, and a `finalize_epoch` that panics on the cap would lock every claim of the
+        // epoch. So the debtor events are cut when the room runs out, `limits_updated` and `epoch_finalized`
+        // always go out, and one plain line says how many were left out (the positions stay readable
+        // through `list_positions`). Needs an ADR: the spec asks one event per debtor.
+        let reserved: usize = limit_logs.iter().map(String::len).sum::<usize>() + finalized_log.len() + OMITTED_NOTE_ROOM;
+        let mut room = LOG_LIMIT.saturating_sub(reserved);
+        let mut omitted = 0u32;
+        for event in defaulted {
+            let log = event.to_log();
+            if log.len() <= room {
+                room -= log.len();
+                env::log_str(&log);
+            } else {
+                omitted += 1;
+            }
+        }
+        if omitted > 0 {
+            env::log_str(&format!("x207: {omitted} member_defaulted events left out of the log limit, read list_positions({epoch})"));
+        }
+        for log in limit_logs {
+            env::log_str(&log);
+        }
+        env::log_str(&finalized_log);
     }
 }
 
@@ -1157,6 +1183,30 @@ mod finalize_tests {
         assert_eq!(c.epochs.get(&1).unwrap().pool, 45 * CREDIT);
         let f = &named(&all, "epoch_finalized")[0]["data"][0];
         assert_eq!((&f["defaulted_count"], &f["total_defaulted"]), (&json!(2), &json!("45000000")));
+        c.assert_d6(None);
+    }
+
+    #[test]
+    fn many_defaults_stay_inside_the_log_limit() {
+        let mut c = base();
+        let long = |i: usize| format!("{i:03}{}", "a".repeat(55));
+        for i in 0..63 {
+            let name = long(i);
+            member(&mut c, &name, 100 * CREDIT, 80 * CREDIT);
+            c.put_position(1, acc(&name), position(-(CREDIT as i128), PositionRole::Debtor, PositionStatus::Due));
+            c.outstanding_debt.insert(acc(&name), CREDIT);
+        }
+        fin(&mut c);
+        let logs = get_logs();
+        assert!(logs.iter().map(String::len).sum::<usize>() <= 16 * 1024, "total log {}", logs.iter().map(String::len).sum::<usize>());
+        let all = events();
+        assert_eq!(named(&all, "limits_updated").len(), 1);
+        let f = &named(&all, "epoch_finalized")[0]["data"][0];
+        assert_eq!(f["defaulted_count"], json!(63));
+        let shown = named(&all, "member_defaulted").len();
+        assert!(shown < 63 && shown > 30, "{shown} debtor events fit");
+        assert!(logs.iter().any(|l| l.contains(&format!("{} member_defaulted events left out", 63 - shown))));
+        assert!(c.list_positions(1, 0, 100).iter().all(|p| p.status != PositionStatus::Due));
         c.assert_d6(None);
     }
 

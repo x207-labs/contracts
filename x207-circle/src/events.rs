@@ -302,17 +302,20 @@ event!("exit_requested", ExitRequested { account_id: AccountId, epoch: EpochId }
 event!("stake_withdrawn", StakeWithdrawn { account_id: AccountId, amount: U128 });
 event!("stake_withdraw_failed", StakeWithdrawFailed { account_id: AccountId, amount: U128 });
 
-/// Emits one event per chunk of at most `MAX_EVENT_ITEMS` items, in order, in the same receipt.
-/// An empty list still emits one event with `chunk` 0 and `chunks` 1 (K-19). `build` repeats the
-/// scalar fields in every chunk.
-pub fn emit_chunked<T: Clone, E: X207Event>(items: &[T], build: impl Fn(Vec<T>, u32, u32) -> E) {
+/// Logs of one event per chunk of at most `MAX_EVENT_ITEMS` items, in order. An empty list still
+/// gives one event with `chunk` 0 and `chunks` 1 (K-19). `build` repeats the scalar fields in every chunk.
+pub fn chunked_logs<T: Clone, E: X207Event>(items: &[T], build: impl Fn(Vec<T>, u32, u32) -> E) -> Vec<String> {
     let chunks = items.len().div_ceil(MAX_EVENT_ITEMS).max(1) as u32;
     if items.is_empty() {
-        build(Vec::new(), 0, chunks).emit();
-        return;
+        return vec![build(Vec::new(), 0, chunks).to_log()];
     }
-    for (index, chunk) in items.chunks(MAX_EVENT_ITEMS).enumerate() {
-        build(chunk.to_vec(), index as u32, chunks).emit();
+    items.chunks(MAX_EVENT_ITEMS).enumerate().map(|(index, chunk)| build(chunk.to_vec(), index as u32, chunks).to_log()).collect()
+}
+
+/// Emits `chunked_logs` in the same receipt.
+pub fn emit_chunked<T: Clone, E: X207Event>(items: &[T], build: impl Fn(Vec<T>, u32, u32) -> E) {
+    for log in chunked_logs(items, build) {
+        env::log_str(&log);
     }
 }
 
