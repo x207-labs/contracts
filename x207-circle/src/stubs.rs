@@ -34,10 +34,6 @@ impl X207Circle {
     }
 
     // F3 clearing and F6 default.
-    pub fn commit_epoch(&mut self, epoch: EpochId) {
-        not_implemented("commit_epoch")
-    }
-
     pub fn finalize_epoch(&mut self, epoch: EpochId) {
         not_implemented("finalize_epoch")
     }

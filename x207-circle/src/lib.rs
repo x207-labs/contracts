@@ -6,6 +6,7 @@
 pub mod bundle;
 pub mod canonical;
 pub mod clearing;
+pub mod commit;
 pub mod config;
 pub mod events;
 pub mod member;
