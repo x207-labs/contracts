@@ -1,8 +1,12 @@
 //! F2 vouchers: D2/D3, canonical bytes, `register_cumulative`, `register_voucher`.
 
 use near_sdk::json_types::U128;
-use near_sdk::{near, AccountId};
+use near_sdk::{env, near, require, AccountId};
 
+use crate::canonical::{parse_signature, voucher_signing_hash, Voucher};
+use crate::clearing::EpochPhase;
+use crate::events::{VoucherRegistered, X207Event};
+use crate::member::MemberStatus;
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::EpochId;
 
@@ -86,6 +90,134 @@ impl X207Circle {
             .take(limit as usize)
             .filter_map(|(debtor, creditor)| self.obligation(epoch, debtor.clone(), creditor.clone()))
             .collect()
+    }
+}
+
+/// Registration mode (spec 4.2): `cumulative` accepts any `seq > last_seq`; `per_request` (demo)
+/// needs `seq = last_seq + 1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegisterMode {
+    Cumulative,
+    PerRequest,
+}
+
+impl RegisterMode {
+    pub fn wire(self) -> &'static str {
+        match self {
+            RegisterMode::Cumulative => "cumulative",
+            RegisterMode::PerRequest => "per_request",
+        }
+    }
+}
+
+impl X207Circle {
+    fn active_member(&self, account_id: &AccountId, err: &str) -> &crate::member::Member {
+        match self.members.get(account_id) {
+            Some(m) if m.status == MemberStatus::Active => m,
+            _ => env::panic_str(&format!("{err}: {account_id}")),
+        }
+    }
+
+    /// The 12 checks of spec 4.2 in order, then the state change. Nothing is written before the
+    /// last check passes (I-06). Shared by `register_cumulative` and `register_voucher`.
+    pub fn register(&mut self, voucher: Voucher, signature: String, mode: RegisterMode) -> U128 {
+        let now = env::block_timestamp();
+        // 1-3
+        require!(voucher.circle == env::current_account_id(), format!("ERR_WRONG_CIRCLE: {}", voucher.circle));
+        require!(voucher.unit == "credit", format!("ERR_BAD_UNIT: {}", voucher.unit));
+        require!(voucher.resource.is_ascii(), "ERR_RESOURCE_NOT_ASCII: resource must be ASCII");
+        require!(voucher.payer != voucher.payee, "ERR_SELF_PAYMENT: payer equals payee");
+        // 4-5
+        let epoch_id = voucher.epoch;
+        let epoch = self.epochs.get(&epoch_id);
+        let cutoff_at = match epoch {
+            Some(e) if epoch_id == self.current_epoch && e.phase == EpochPhase::Open => e.cutoff_at,
+            _ => env::panic_str(&format!("ERR_EPOCH_MISMATCH: voucher epoch {epoch_id}, current {}", self.current_epoch)),
+        };
+        require!(now < cutoff_at, format!("ERR_PAST_CUTOFF: cutoff_at {cutoff_at}"));
+        // 6-8
+        let payer = self.active_member(&voucher.payer, "ERR_PAYER_NOT_ACTIVE");
+        let payee = self.active_member(&voucher.payee, "ERR_PAYEE_NOT_ACTIVE");
+        for m in [payer, payee] {
+            if let Some(exit) = m.exit_requested_epoch {
+                require!(exit >= epoch_id, format!("ERR_EXITING: {} exit_requested_epoch {exit}", m.account_id));
+            }
+        }
+        let (limit, pubkey) = (payer.limit, payer.pubkey_voucher.clone());
+        // 9-10
+        let key = (epoch_id, voucher.payer.clone(), voucher.payee.clone());
+        let pair = self.pairs.get(&key).cloned();
+        let is_new_pair = pair.is_none();
+        let pair = pair.unwrap_or_default();
+        require!(voucher.seq > pair.last_seq, format!("ERR_SEQ_NOT_INCREASING: seq {} last_seq {}", voucher.seq, pair.last_seq));
+        if mode == RegisterMode::PerRequest {
+            require!(voucher.seq == pair.last_seq + 1, format!("ERR_SEQ_GAP: seq {} last_seq {}", voucher.seq, pair.last_seq));
+        }
+        let cumulative = voucher.cumulative_amount.0;
+        require!(
+            cumulative >= pair.cumulative,
+            format!("ERR_CUMULATIVE_DECREASED: {cumulative} < {}", pair.cumulative)
+        );
+        // 11
+        let delta = cumulative - pair.cumulative;
+        let debt = self.outstanding_debt.get(&voucher.payer).copied().unwrap_or(0);
+        let headroom = limit.saturating_sub(debt);
+        require!(delta <= headroom, format!("ERR_INSUFFICIENT_CREDIT: delta {delta} headroom {headroom}"));
+        // 12
+        let verified = parse_signature(&signature)
+            .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
+            .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &voucher_signing_hash(&voucher), &pk));
+        require!(verified, "ERR_BAD_SIGNATURE: ed25519 verification failed");
+
+        // State change.
+        let new_debt = debt + delta;
+        let obligation = cumulative - pair.cleared;
+        self.pairs.insert(key, crate::voucher::PairState { cumulative, last_seq: voucher.seq, cleared: pair.cleared });
+        self.outstanding_debt.insert(voucher.payer.clone(), new_debt);
+        let mut new_participants = 0;
+        for (account, out, inn) in [(&voucher.payer, delta, 0), (&voucher.payee, 0, delta)] {
+            let tkey = (epoch_id, account.clone());
+            let is_new = self.totals.get(&tkey).is_none();
+            let mut t = self.totals.get(&tkey).cloned().unwrap_or_default();
+            t.owed_out += out;
+            t.owed_in += inn;
+            self.totals.insert(tkey, t);
+            if is_new {
+                new_participants += 1;
+                self.epochs.get_mut(&epoch_id).unwrap().participants.push(account.clone());
+            }
+        }
+        let e = self.epochs.get_mut(&epoch_id).unwrap();
+        e.participant_count += new_participants;
+        e.total_obligation += delta;
+        if is_new_pair {
+            e.edges.push((voucher.payer.clone(), voucher.payee.clone()));
+            e.edge_count += 1;
+        }
+        for id in [&voucher.payer, &voucher.payee] {
+            self.members.get_mut(id).unwrap().last_active_epoch = epoch_id;
+        }
+        VoucherRegistered {
+            payer: voucher.payer,
+            payee: voucher.payee,
+            epoch: epoch_id,
+            seq: voucher.seq,
+            cumulative_amount: U128(cumulative),
+            delta: U128(delta),
+            obligation: U128(obligation),
+            outstanding_debt: U128(new_debt),
+            mode: mode.wire().to_string(),
+        }
+        .emit();
+        U128(obligation)
+    }
+}
+
+#[near]
+impl X207Circle {
+    /// Default registration (ADR-17): returns the pair obligation after registration.
+    pub fn register_cumulative(&mut self, voucher: Voucher, signature: String) -> U128 {
+        self.register(voucher, signature, RegisterMode::Cumulative)
     }
 }
 
@@ -179,5 +311,340 @@ mod tests {
         assert!(c.list_obligations(1, 6, 4).is_empty());
         assert!(c.list_obligations(1, 0, 0).is_empty());
         assert!(c.list_obligations(9, 0, 4).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod register_tests {
+    use ed25519_dalek::{Signer, SigningKey};
+    use near_sdk::json_types::U128;
+    use near_sdk::serde_json::{self, json};
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::{testing_env, AccountId, CurveType, PublicKey};
+
+    use super::*;
+    use crate::member::Member;
+    use crate::params::Params;
+
+    const CREDIT: u128 = 1_000_000;
+    const SEC: u64 = 1_000_000_000;
+    const CIRCLE: &str = "x207-circle.near";
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    fn signing_key(name: &str) -> SigningKey {
+        let mut seed = [7u8; 32];
+        seed[..name.len().min(32)].copy_from_slice(&name.as_bytes()[..name.len().min(32)]);
+        SigningKey::from_bytes(&seed)
+    }
+
+    fn at(ns: u64) {
+        testing_env!(VMContextBuilder::new().current_account_id(acc(CIRCLE)).block_timestamp(ns).build());
+    }
+
+    fn add(c: &mut X207Circle, name: &str, status: MemberStatus, limit: u128) {
+        let id = acc(&format!("{name}.near"));
+        let pk = PublicKey::from_parts(CurveType::ED25519, signing_key(name).verifying_key().to_bytes().to_vec()).unwrap();
+        c.members.insert(
+            id.clone(),
+            Member {
+                account_id: id.clone(),
+                pubkey_voucher: pk,
+                terms_hash: "a".repeat(64),
+                stake: 100 * CREDIT,
+                limit,
+                status,
+                admitted: false,
+                joined_at: 0,
+                settled_history: 0,
+                last_active_epoch: 0,
+                exit_requested_epoch: None,
+                withdraw_pending: false,
+                reactivate_epoch: None,
+            },
+        );
+        c.member_index.push(id);
+    }
+
+    /// translator, scraper, gpu active with limit 80; `pending` is pending.
+    fn circle() -> X207Circle {
+        at(1_000);
+        let mut c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), 1_000);
+        for n in ["translator", "scraper", "gpu"] {
+            add(&mut c, n, MemberStatus::Active, 80 * CREDIT);
+        }
+        add(&mut c, "pending", MemberStatus::Pending, 0);
+        c
+    }
+
+    fn v(payer: &str, payee: &str, epoch: u64, seq: u64, cumulative: u128) -> Voucher {
+        Voucher {
+            circle: acc(CIRCLE),
+            payer: acc(&format!("{payer}.near")),
+            payee: acc(&format!("{payee}.near")),
+            epoch,
+            seq,
+            cumulative_amount: U128(cumulative),
+            unit: "credit".into(),
+            resource: "https://scraper.example/api".into(),
+        }
+    }
+
+    fn sig_with(key_of: &str, voucher: &Voucher) -> String {
+        let s = signing_key(key_of).sign(&voucher_signing_hash(voucher)).to_bytes();
+        format!("ed25519:{}", near_sdk::bs58::encode(s).into_string())
+    }
+
+    fn reg(c: &mut X207Circle, voucher: Voucher) -> U128 {
+        let sig = sig_with(&voucher.payer.as_str().trim_end_matches(".near").to_string(), &voucher);
+        c.register_cumulative(voucher, sig)
+    }
+
+    fn last_event() -> serde_json::Value {
+        let line = get_logs().into_iter().rev().find(|l| l.contains("voucher_registered")).unwrap();
+        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone()
+    }
+
+    #[test]
+    fn tc_ct_020_01_first_registration() {
+        let mut c = circle();
+        assert_eq!(reg(&mut c, v("translator", "scraper", 1, 1, 10 * CREDIT)), U128(10 * CREDIT));
+        let ob = c.obligation(1, acc("translator.near"), acc("scraper.near")).unwrap();
+        assert_eq!((ob.obligation, ob.last_seq), (U128(10 * CREDIT), 1));
+        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(10 * CREDIT));
+        assert_eq!(
+            last_event(),
+            json!({"payer":"translator.near","payee":"scraper.near","epoch":1,"seq":1,"cumulative_amount":"10000000",
+                   "delta":"10000000","obligation":"10000000","outstanding_debt":"10000000","mode":"cumulative"})
+        );
+        assert_eq!(c.member(acc("translator.near")).unwrap().last_active_epoch, 1);
+        assert_eq!(c.member(acc("scraper.near")).unwrap().last_active_epoch, 1);
+        let e = c.get_epoch(Some(1)).unwrap();
+        assert_eq!((e.edge_count, e.participant_count, e.total_obligation), (1, 2, U128(10 * CREDIT)));
+    }
+
+    #[test]
+    fn tc_ct_020_02_to_04_increase_zero_delta_and_retry() {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 1, 10 * CREDIT));
+        assert_eq!(reg(&mut c, v("translator", "scraper", 1, 5, 25 * CREDIT)), U128(25 * CREDIT));
+        assert_eq!(last_event()["delta"], json!("15000000"));
+        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 5);
+        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(25 * CREDIT));
+        reg(&mut c, v("translator", "scraper", 1, 6, 25 * CREDIT));
+        assert_eq!(last_event()["delta"], json!("0"));
+        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 6);
+        assert_eq!(c.obligation(1, acc("translator.near"), acc("scraper.near")).unwrap().obligation, U128(25 * CREDIT));
+        // still one edge and two participants
+        let e = c.get_epoch(Some(1)).unwrap();
+        assert_eq!((e.edge_count, e.participant_count), (1, 2));
+    }
+
+    fn setup_25() -> X207Circle {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 6, 25 * CREDIT));
+        c
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_SEQ_NOT_INCREASING")]
+    fn tc_ct_020_04_retry_same_seq_rejected() {
+        reg(&mut setup_25(), v("translator", "scraper", 1, 6, 25 * CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_SEQ_NOT_INCREASING")]
+    fn tc_ct_020_05_lower_seq_rejected() {
+        reg(&mut setup_25(), v("translator", "scraper", 1, 4, 30 * CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_CUMULATIVE_DECREASED")]
+    fn tc_ct_020_06_cumulative_decrease_rejected() {
+        reg(&mut setup_25(), v("translator", "scraper", 1, 7, 24 * CREDIT));
+    }
+
+    #[test]
+    fn tc_ct_020_07_exactly_at_headroom() {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 1, 80 * CREDIT));
+        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(80 * CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_INSUFFICIENT_CREDIT")]
+    fn tc_ct_020_08_headroom_plus_one_rejected() {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 1, 80 * CREDIT));
+        reg(&mut c, v("translator", "gpu", 1, 1, 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_INSUFFICIENT_CREDIT")]
+    fn tc_ct_020_09_headroom_across_payees() {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 1, 50 * CREDIT));
+        reg(&mut c, v("translator", "gpu", 1, 1, 30 * CREDIT));
+        reg(&mut c, v("translator", "gpu", 1, 2, 30 * CREDIT + 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_WRONG_CIRCLE")]
+    fn tc_ct_020_10_wrong_circle() {
+        let mut x = v("translator", "scraper", 1, 1, CREDIT);
+        x.circle = acc("other.test.near");
+        reg(&mut circle(), x);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_BAD_UNIT")]
+    fn tc_ct_020_11_wrong_unit() {
+        let mut x = v("translator", "scraper", 1, 1, CREDIT);
+        x.unit = "usd".into();
+        reg(&mut circle(), x);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_RESOURCE_NOT_ASCII")]
+    fn tc_ct_020_12_resource_not_ascii() {
+        let mut x = v("translator", "scraper", 1, 1, CREDIT);
+        x.resource = "https://x.example/caf\u{e9}".into();
+        reg(&mut circle(), x);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_SELF_PAYMENT")]
+    fn tc_ct_020_13_self_payment() {
+        reg(&mut circle(), v("translator", "translator", 1, 1, CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_EPOCH_MISMATCH")]
+    fn tc_ct_020_14_epoch_ahead() {
+        reg(&mut circle(), v("translator", "scraper", 2, 1, CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_EPOCH_MISMATCH")]
+    fn tc_ct_020_14_epoch_zero() {
+        reg(&mut circle(), v("translator", "scraper", 0, 1, CREDIT));
+    }
+
+    #[test]
+    fn tc_ct_020_15_one_ns_before_cutoff_ok() {
+        let mut c = circle();
+        at(1_000 + 3600 * SEC - 1);
+        reg(&mut c, v("translator", "scraper", 1, 1, CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PAST_CUTOFF")]
+    fn tc_ct_020_15_at_cutoff_rejected() {
+        let mut c = circle();
+        at(1_000 + 3600 * SEC);
+        reg(&mut c, v("translator", "scraper", 1, 1, CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PAYER_NOT_ACTIVE")]
+    fn tc_ct_020_16_payer_pending() {
+        reg(&mut circle(), v("pending", "scraper", 1, 1, 0));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PAYER_NOT_ACTIVE")]
+    fn tc_ct_020_16_payer_not_member() {
+        let x = v("outsider", "scraper", 1, 1, 0);
+        let sig = sig_with("translator", &x);
+        circle().register_cumulative(x, sig);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PAYEE_NOT_ACTIVE")]
+    fn tc_ct_020_17_payee_pending() {
+        reg(&mut circle(), v("translator", "pending", 1, 1, CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_PAYER_NOT_ACTIVE")]
+    fn tc_ct_020_18_payer_suspended() {
+        let mut c = circle();
+        c.members.get_mut(&acc("scraper.near")).unwrap().status = MemberStatus::Suspended;
+        reg(&mut c, v("scraper", "gpu", 1, 1, CREDIT));
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_BAD_SIGNATURE")]
+    fn tc_ct_020_19_signed_with_wrong_key() {
+        let x = v("translator", "scraper", 1, 1, CREDIT);
+        let sig = sig_with("account-access-key", &x);
+        circle().register_cumulative(x, sig);
+    }
+
+    #[test]
+    fn tc_ct_020_20_tampered_fields_rejected() {
+        let signed = v("translator", "scraper", 1, 1, 10 * CREDIT);
+        let sig = sig_with("translator", &signed);
+        let tampered = [
+            Voucher { cumulative_amount: U128(11 * CREDIT), ..signed.clone() },
+            Voucher { payee: acc("gpu.near"), ..signed.clone() },
+            Voucher { resource: "https://evil.example".into(), ..signed.clone() },
+            Voucher { seq: 2, ..signed.clone() },
+        ];
+        for t in tampered {
+            let mut c = circle();
+            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(t, sig.clone())));
+            let msg = *err.unwrap_err().downcast::<String>().unwrap_or_else(|e| Box::new(e.downcast_ref::<&str>().unwrap().to_string()));
+            assert!(msg.contains("ERR_BAD_SIGNATURE"), "{msg}");
+            assert_eq!(c.outstanding_debt(acc("translator.near")), U128(0));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_BAD_SIGNATURE")]
+    fn tc_ct_020_21_malformed_signature_string() {
+        circle().register_cumulative(v("translator", "scraper", 1, 1, CREDIT), "ed25519:abc".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_WRONG_CIRCLE")]
+    fn tc_ct_020_22_cheap_checks_before_signature_wrong_circle() {
+        let mut x = v("translator", "scraper", 1, 1, CREDIT);
+        x.circle = acc("other.test.near");
+        circle().register_cumulative(x, "ed25519:abc".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_INSUFFICIENT_CREDIT")]
+    fn tc_ct_020_22_credit_before_signature() {
+        circle().register_cumulative(v("translator", "scraper", 1, 1, 81 * CREDIT), "ed25519:abc".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_EXITING")]
+    fn exiting_member_rejected_for_later_epoch() {
+        let mut c = circle();
+        c.members.get_mut(&acc("scraper.near")).unwrap().exit_requested_epoch = Some(0);
+        reg(&mut c, v("translator", "scraper", 1, 1, CREDIT));
+    }
+
+    #[test]
+    fn exiting_member_still_registers_in_exit_epoch() {
+        let mut c = circle();
+        c.members.get_mut(&acc("scraper.near")).unwrap().exit_requested_epoch = Some(1);
+        reg(&mut c, v("translator", "scraper", 1, 1, CREDIT));
+    }
+
+    #[test]
+    fn state_unchanged_after_rejected_registration() {
+        let mut c = setup_25();
+        let before = (c.get_epoch(Some(1)).unwrap(), c.outstanding_debt(acc("translator.near")));
+        let x = v("translator", "scraper", 1, 7, 24 * CREDIT);
+        let sig = sig_with("translator", &x);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(x, sig)));
+        assert!(r.is_err());
+        assert_eq!(before, (c.get_epoch(Some(1)).unwrap(), c.outstanding_debt(acc("translator.near"))));
     }
 }
