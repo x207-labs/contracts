@@ -9,9 +9,8 @@
 #![allow(unused_variables)]
 
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId, PromiseOrValue, PublicKey};
+use near_sdk::{env, near, AccountId, PromiseOrValue};
 
-use crate::member::MemberView;
 use crate::params::Params;
 use crate::settlement::PositionView;
 use crate::state::{PendingParams, X207Circle, X207CircleExt};
@@ -24,11 +23,6 @@ fn not_implemented(method: &str) -> ! {
 #[near]
 impl X207Circle {
     // F1 onboarding.
-    #[payable]
-    pub fn join(&mut self, circle_id: String, pubkey_voucher: PublicKey, terms_hash: String) -> MemberView {
-        not_implemented("join")
-    }
-
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
         not_implemented("ft_on_transfer")
     }

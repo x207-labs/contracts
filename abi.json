@@ -479,6 +479,12 @@
       },
       {
         "name": "join",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/MemberView"
+          }
+        },
         "kind": "call",
         "modifiers": [
           "payable"
@@ -505,12 +511,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "$ref": "#/definitions/MemberView"
-          }
         }
       },
       {

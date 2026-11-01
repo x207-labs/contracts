@@ -1,10 +1,16 @@
 //! F1 onboarding: D1 members, `join`, member views.
 
 use near_sdk::json_types::{U128, U64};
-use near_sdk::{near, AccountId, PublicKey};
+use near_sdk::{env, near, AccountId, CurveType, NearToken, Promise, PublicKey};
 
+use crate::events::{MemberJoined, X207Event};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::EpochId;
+
+/// Minimum attached deposit of `join`: 0.01 NEAR for the D1 entry (spec 9.3). Not refunded on exit.
+pub const JOIN_STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(10);
+/// Most registered members, including `exited` ones (spec 9.3, tuned in the gas item).
+pub const MAX_MEMBERS: u32 = 64;
 
 /// Spec 3.5, ADR-26. JSON values are `snake_case`.
 #[near(serializers = [borsh, json])]
@@ -76,6 +82,70 @@ pub struct MemberView {
 
 #[near]
 impl X207Circle {
+    /// Registers the caller as a `pending` member (spec 4.7 order): deposit, `circle_id`, key curve,
+    /// `terms_hash` (64 lowercase hex), not yet registered, member cap. Stake and admission come later.
+    /// The deposit above `JOIN_STORAGE_DEPOSIT` goes back to the caller in the same receipt chain.
+    #[payable]
+    pub fn join(&mut self, circle_id: String, pubkey_voucher: PublicKey, terms_hash: String) -> MemberView {
+        let deposit = env::attached_deposit();
+        if deposit < JOIN_STORAGE_DEPOSIT {
+            env::panic_str(&format!(
+                "ERR_INSUFFICIENT_STORAGE_DEPOSIT: attached {deposit}, need {JOIN_STORAGE_DEPOSIT}"
+            ));
+        }
+        if circle_id != self.circle_id {
+            env::panic_str(&format!("ERR_WRONG_CIRCLE_ID: {circle_id}"));
+        }
+        if pubkey_voucher.curve_type() != CurveType::ED25519 {
+            env::panic_str("ERR_BAD_PUBKEY: pubkey_voucher must be an ed25519 key");
+        }
+        if terms_hash.len() != 64 || !terms_hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+            env::panic_str("ERR_BAD_TERMS_HASH: terms_hash must be 64 lowercase hex characters");
+        }
+        let account_id = env::predecessor_account_id();
+        if self.members.contains_key(&account_id) {
+            env::panic_str(&format!("ERR_ALREADY_MEMBER: {account_id}"));
+        }
+        if self.member_count >= MAX_MEMBERS {
+            env::panic_str(&format!("ERR_MAX_MEMBERS: {MAX_MEMBERS}"));
+        }
+
+        let joined_at = env::block_timestamp();
+        let member = Member {
+            account_id: account_id.clone(),
+            pubkey_voucher: pubkey_voucher.clone(),
+            terms_hash: terms_hash.clone(),
+            stake: 0,
+            limit: 0,
+            status: MemberStatus::Pending,
+            admitted: false,
+            joined_at,
+            settled_history: 0,
+            last_active_epoch: self.current_epoch,
+            exit_requested_epoch: None,
+            withdraw_pending: false,
+            reactivate_epoch: None,
+        };
+        let view = member.to_view();
+        self.members.insert(account_id.clone(), member);
+        self.member_index.push(account_id.clone());
+        self.member_count += 1;
+        MemberJoined {
+            account_id: account_id.clone(),
+            pubkey_voucher: String::from(&pubkey_voucher),
+            terms_hash,
+            status: "pending".to_string(),
+            joined_at: U64(joined_at),
+        }
+        .emit();
+
+        let excess = deposit.saturating_sub(JOIN_STORAGE_DEPOSIT);
+        if !excess.is_zero() {
+            Promise::new(account_id).transfer(excess).detach();
+        }
+        view
+    }
+
     pub fn member(&self, account_id: AccountId) -> Option<MemberView> {
         self.members.get(&account_id).map(Member::to_view)
     }
@@ -222,5 +292,212 @@ mod tests {
         let mut c = circle();
         add(&mut c, "a.near", MemberStatus::Active, 1);
         assert!(c.list_members(0, 0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod join_tests {
+    use near_sdk::serde_json::{self, json};
+    use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
+    use near_sdk::testing_env;
+
+    use super::*;
+    use crate::params::Params;
+
+    const KEY: &str = "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp";
+    const SECP: &str = "secp256k1:qMoRgcoXai4mBPsdbHi1wfyxF9TdbPCF4qSDQTRP3TfescSRoUdSx6nmeQoN3aiwGzwMyGXAb1gUjBTv5AY8DXj";
+    const HASH: &str = "9f2c0000000000000000000000000000000000000000000000000000000000e1";
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    fn key(s: &str) -> PublicKey {
+        s.parse().unwrap()
+    }
+
+    /// `F0`: fresh circle `agents-main`; the next call is made by `caller` with `deposit`.
+    fn circle(caller: &str, deposit: NearToken) -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
+        let c = X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".to_string(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            1_000,
+        );
+        as_caller(caller, deposit);
+        c
+    }
+
+    fn as_caller(caller: &str, deposit: NearToken) {
+        testing_env!(VMContextBuilder::new()
+            .block_timestamp(5_000)
+            .predecessor_account_id(acc(caller))
+            .attached_deposit(deposit)
+            .build());
+    }
+
+    fn join_ok(c: &mut X207Circle) -> MemberView {
+        c.join("agents-main".to_string(), key(KEY), HASH.to_string())
+    }
+
+    // TC-CT-016-01
+    #[test]
+    fn tc_ct_016_01_valid_join_exact_deposit() {
+        let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+        let v = serde_json::to_value(join_ok(&mut c)).unwrap();
+        assert_eq!(v["status"], json!("pending"));
+        assert_eq!(v["admitted"], json!(false));
+        assert_eq!((&v["stake"], &v["limit"]), (&json!("0"), &json!("0")));
+        assert_eq!(v["account_id"], json!("translator.near"));
+        assert_eq!(v["joined_at"], json!("5000"));
+        assert_eq!(c.member_count, 1);
+        assert_eq!(c.member(acc("translator.near")).unwrap().status, MemberStatus::Pending);
+        let log = get_logs().into_iter().find(|l| l.contains("member_joined")).expect("member_joined event");
+        let e: serde_json::Value = serde_json::from_str(log.trim_start_matches("EVENT_JSON:")).unwrap();
+        assert_eq!(
+            e["data"][0],
+            json!({"account_id":"translator.near","pubkey_voucher":KEY,"terms_hash":HASH,"status":"pending","joined_at":"5000"})
+        );
+        assert!(get_created_receipts().is_empty(), "exact deposit has nothing to refund");
+    }
+
+    // TC-CT-016-02 (unit part): excess is sent back to the caller
+    #[test]
+    fn tc_ct_016_02_excess_deposit_refunded() {
+        let mut c = circle("translator.near", NearToken::from_near(1));
+        join_ok(&mut c);
+        let receipts = get_created_receipts();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].receiver_id, acc("translator.near"));
+        assert!(format!("{:?}", receipts[0].actions).contains(&(NearToken::from_near(1).as_yoctonear() - JOIN_STORAGE_DEPOSIT.as_yoctonear()).to_string()));
+    }
+
+    // TC-CT-016-03
+    #[test]
+    #[should_panic(expected = "ERR_INSUFFICIENT_STORAGE_DEPOSIT")]
+    fn tc_ct_016_03_one_yocto_short() {
+        let mut c = circle("translator.near", NearToken::from_yoctonear(JOIN_STORAGE_DEPOSIT.as_yoctonear() - 1));
+        join_ok(&mut c);
+    }
+
+    // TC-CT-016-04
+    #[test]
+    #[should_panic(expected = "ERR_INSUFFICIENT_STORAGE_DEPOSIT")]
+    fn tc_ct_016_04_no_deposit() {
+        let mut c = circle("translator.near", NearToken::from_yoctonear(0));
+        join_ok(&mut c);
+    }
+
+    // TC-CT-016-05
+    #[test]
+    #[should_panic(expected = "ERR_WRONG_CIRCLE_ID")]
+    fn tc_ct_016_05_wrong_circle_id() {
+        let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+        c.join("agents-test".to_string(), key(KEY), HASH.to_string());
+    }
+
+    // TC-CT-016-06
+    #[test]
+    #[should_panic(expected = "ERR_BAD_PUBKEY")]
+    fn tc_ct_016_06_not_ed25519() {
+        let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+        c.join("agents-main".to_string(), key(SECP), HASH.to_string());
+    }
+
+    // TC-CT-016-07 (K-16): a broken key never reaches the contract code
+    #[test]
+    fn tc_ct_016_07_broken_key_fails_deserialization() {
+        let err = serde_json::from_value::<PublicKey>(json!("ed25519:xyz")).unwrap_err().to_string();
+        assert!(!err.contains("ERR_"), "{err}");
+    }
+
+    // TC-CT-016-08
+    #[test]
+    fn tc_ct_016_08_bad_terms_hash_cases() {
+        let cases = [
+            String::new(),
+            "a".repeat(63),
+            "a".repeat(65),
+            format!("{}g", "a".repeat(63)),
+            HASH.to_uppercase(),
+        ];
+        for bad in cases {
+            let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.join("agents-main".to_string(), key(KEY), bad.clone());
+            }))
+            .expect_err("expected a panic");
+            let msg = err
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            assert!(msg.contains("ERR_BAD_TERMS_HASH"), "{bad:?}: {msg}");
+            assert_eq!(c.member_count, 0);
+        }
+    }
+
+    // TC-CT-016-09
+    #[test]
+    #[should_panic(expected = "ERR_ALREADY_MEMBER")]
+    fn tc_ct_016_09_double_join() {
+        let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+        join_ok(&mut c);
+        join_ok(&mut c);
+    }
+
+    #[test]
+    fn tc_ct_016_09_first_entry_untouched_after_double_join() {
+        let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+        let first = join_ok(&mut c);
+        as_caller("translator.near", JOIN_STORAGE_DEPOSIT);
+        let other = key("ed25519:7Yk4CPJpnV2VAwYTvHdUKRrHSQbCE8SiJBB9UCjSQbVM");
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.join("agents-main".to_string(), other, "b".repeat(64));
+        }));
+        assert!(res.is_err());
+        assert_eq!(c.member(acc("translator.near")).unwrap(), first);
+        assert_eq!(c.member_count, 1);
+    }
+
+    // TC-CT-016-10
+    #[test]
+    fn tc_ct_016_10_max_members_boundary() {
+        let mut c = circle("m0.near", JOIN_STORAGE_DEPOSIT);
+        for i in 0..MAX_MEMBERS {
+            as_caller(&format!("m{i}.near"), JOIN_STORAGE_DEPOSIT);
+            join_ok(&mut c);
+        }
+        assert_eq!(c.member_count, MAX_MEMBERS);
+        as_caller("late.near", JOIN_STORAGE_DEPOSIT);
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            join_ok(&mut c);
+        }))
+        .expect_err("expected a panic");
+        let msg = err
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        assert!(msg.contains("ERR_MAX_MEMBERS"), "{msg}");
+        assert_eq!(c.member_count, MAX_MEMBERS);
+    }
+
+    // TC-CT-016-12 (K-23): the contract cannot read access keys, so the same key is accepted.
+    #[test]
+    fn tc_ct_016_12_voucher_key_may_equal_access_key() {
+        let mut c = circle("translator.near", JOIN_STORAGE_DEPOSIT);
+        assert_eq!(join_ok(&mut c).pubkey_voucher, key(KEY));
+    }
+
+    // Order of spec 4.7: deposit is checked before circle_id.
+    #[test]
+    #[should_panic(expected = "ERR_INSUFFICIENT_STORAGE_DEPOSIT")]
+    fn deposit_checked_before_circle_id() {
+        let mut c = circle("translator.near", NearToken::from_yoctonear(0));
+        c.join("agents-test".to_string(), key(KEY), HASH.to_string());
     }
 }
