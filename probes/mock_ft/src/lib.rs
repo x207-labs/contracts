@@ -1,20 +1,25 @@
 //! NEP-141 fungible token mock with `ft_transfer_call` and the standard `ft_resolve_transfer`
 //! refund, so sandbox tests see the same refund behaviour as USDT (spec 4.1). `mint` is open to
-//! everyone; NEP-145 `storage_deposit` accepts any account and charges nothing.
+//! everyone; NEP-145 `storage_deposit` accepts any account and charges nothing, and
+//! `storage_unregister` makes later transfers to the caller fail until it deposits again.
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
-use near_sdk::store::LookupMap;
+use near_sdk::store::{LookupMap, LookupSet};
 use near_sdk::{assert_one_yocto, env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue};
 
 const RESOLVE_GAS: Gas = Gas::from_tgas(10);
-const ON_TRANSFER_GAS: Gas = Gas::from_tgas(40);
+/// Kept back for the call itself and `ft_resolve_transfer`; the rest goes to the receiver, like the
+/// reference NEP-141 implementation does, so a low prepaid gas starves `ft_on_transfer` as it would on USDT.
+const RESERVED_GAS: Gas = Gas::from_tgas(15);
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct MockFt {
     balances: LookupMap<AccountId, u128>,
     total_supply: u128,
+    /// Accounts that called `storage_unregister`: a transfer to them fails like on the real token.
+    unregistered: LookupSet<AccountId>,
 }
 
 impl MockFt {
@@ -26,6 +31,7 @@ impl MockFt {
         require!(amount > 0, "The amount should be a positive number");
         let from_balance = self.balance(from);
         require!(from_balance >= amount, "The account doesn't have enough balance");
+        require!(!self.unregistered.contains(to), "The account is not registered");
         self.balances.insert(from.clone(), from_balance - amount);
         let to_balance = self.balance(to);
         self.balances.insert(to.clone(), to_balance + amount);
@@ -36,7 +42,7 @@ impl MockFt {
 impl MockFt {
     #[init]
     pub fn new() -> Self {
-        Self { balances: LookupMap::new(b"b"), total_supply: 0 }
+        Self { balances: LookupMap::new(b"b"), total_supply: 0, unregistered: LookupSet::new(b"u") }
     }
 
     pub fn mint(&mut self, account_id: AccountId, amount: U128) {
@@ -47,8 +53,17 @@ impl MockFt {
 
     #[payable]
     pub fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>) -> near_sdk::serde_json::Value {
-        let _ = (account_id, registration_only);
+        let _ = registration_only;
+        self.unregistered.remove(&account_id.unwrap_or_else(env::predecessor_account_id));
         json!({"total": "1250000000000000000000", "available": "0"})
+    }
+
+    /// NEP-145: the caller (or `account_id`) can no longer receive tokens until `storage_deposit`.
+    #[payable]
+    pub fn storage_unregister(&mut self, force: Option<bool>) -> bool {
+        let _ = force;
+        self.unregistered.insert(env::predecessor_account_id());
+        true
     }
 
     pub fn ft_total_supply(&self) -> U128 {
@@ -71,12 +86,14 @@ impl MockFt {
         assert_one_yocto();
         let _ = memo;
         let sender_id = env::predecessor_account_id();
+        require!(env::prepaid_gas() > RESERVED_GAS, "More gas is required");
+        let receiver_gas = env::prepaid_gas().saturating_sub(RESERVED_GAS);
         self.move_amount(&sender_id, &receiver_id, amount.0);
         let call = near_sdk::Promise::new(receiver_id.clone()).function_call(
             "ft_on_transfer".to_string(),
             json!({"sender_id": sender_id, "amount": amount, "msg": msg}).to_string().into_bytes(),
             NearToken::from_yoctonear(0),
-            ON_TRANSFER_GAS,
+            receiver_gas,
         );
         let resolve = Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).ft_resolve_transfer(sender_id, receiver_id, amount);
         PromiseOrValue::Promise(call.then(resolve))

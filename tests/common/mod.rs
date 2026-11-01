@@ -2,24 +2,24 @@
 #![allow(dead_code)]
 
 use std::process::Command;
-use std::sync::Once;
+use std::sync::Mutex;
 
 /// Path of the wasm of a probe crate under `probes/<dir>`, building it on first use. CI builds only
 /// the contract itself, so a probe test builds its own wasm (cargo-near is installed there).
 pub fn probe_wasm(dir: &str) -> String {
-    static BUILD: Once = Once::new();
+    // One build at a time: tests run in parallel and cargo-near locks the target folder anyway.
+    static BUILD: Mutex<()> = Mutex::new(());
     let wasm = format!("target/near/{dir}/{dir}.wasm");
-    BUILD.call_once(|| {
-        if std::path::Path::new(&wasm).exists() {
-            return;
-        }
-        let status = Command::new("cargo")
-            .args(["near", "build", "non-reproducible-wasm", "--manifest-path"])
-            .arg(format!("probes/{dir}/Cargo.toml"))
-            .status()
-            .expect("run cargo near build");
-        assert!(status.success(), "cargo near build failed for probes/{dir}");
-    });
+    let _guard = BUILD.lock().unwrap_or_else(|e| e.into_inner());
+    if std::path::Path::new(&wasm).exists() {
+        return wasm;
+    }
+    let status = Command::new("cargo")
+        .args(["near", "build", "non-reproducible-wasm", "--manifest-path"])
+        .arg(format!("probes/{dir}/Cargo.toml"))
+        .status()
+        .expect("run cargo near build");
+    assert!(status.success(), "cargo near build failed for probes/{dir}");
     wasm
 }
 
@@ -240,6 +240,8 @@ pub mod funded {
         pub circle: Circle,
         pub usdt: Contract,
         pub palsu: Contract,
+        /// `mock_intents` when deployed with `deploy_with_intents`, as the `intents_id` of the circle.
+        pub intents: Option<Contract>,
         pub accounts: BTreeMap<String, Account>,
     }
 
@@ -253,22 +255,39 @@ pub mod funded {
     impl Funded {
         /// `F0`: contract with default or short params, USDT mock, wrong-token mock. No members yet.
         pub async fn deploy(params: Option<Value>) -> anyhow::Result<Funded> {
+            Self::deploy_inner(params, false).await
+        }
+
+        /// Same, with the `mock_intents` receiver as `intents_id` (claims to Intents, ADR-19).
+        pub async fn deploy_with_intents(params: Option<Value>) -> anyhow::Result<Funded> {
+            Self::deploy_inner(params, true).await
+        }
+
+        async fn deploy_inner(params: Option<Value>, with_intents: bool) -> anyhow::Result<Funded> {
             let worker = near_workspaces::sandbox().await?;
             let usdt = token(&worker).await?;
             let palsu = token(&worker).await?;
             let wasm = std::fs::read("target/near/x207_circle.wasm")?;
             let contract = worker.dev_deploy(&wasm).await?;
+            let intents = if with_intents {
+                let mock = worker.dev_deploy(&std::fs::read(super::probe_wasm("mock_intents"))?).await?;
+                mock.call("new").transact().await?.into_result()?;
+                Some(mock)
+            } else {
+                None
+            };
+            let intents_id = intents.as_ref().map_or_else(|| account_of("intents"), |m| m.id().to_string());
             contract
                 .call("new")
                 .args_json(json!({
                     "owner_id": account_of("dao"), "circle_id": "agents-main", "usdt_token_id": usdt.id(),
-                    "intents_id": account_of("intents"), "params": params
+                    "intents_id": intents_id, "params": params
                 }))
                 .transact()
                 .await?
                 .into_result()?;
             let circle = Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new() };
-            Ok(Funded { circle, usdt, palsu, accounts: BTreeMap::new() })
+            Ok(Funded { circle, usdt, palsu, intents, accounts: BTreeMap::new() })
         }
 
         pub fn params_short() -> Value {
@@ -361,7 +380,11 @@ pub mod flow {
     /// scraper->gpu 60, gpu->translator 25, translator->scraper 25, closed, cleared by one cycle of 25,
     /// and committed. scraper now owes 35, gpu is owed 35. The clock stands at `commit`.
     pub async fn s1_committed() -> anyhow::Result<Funded> {
-        let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+        s1_committed_on(Funded::deploy(Some(Funded::params_short())).await?).await
+    }
+
+    /// Same on a circle deployed by the caller (for example `deploy_with_intents`).
+    pub async fn s1_committed_on(mut f: Funded) -> anyhow::Result<Funded> {
         for name in ["scraper", "gpu", "translator"] {
             let account = f.account(name).await?;
             let join = f.join(name, Funded::join_deposit()).await?;

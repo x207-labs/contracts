@@ -12,7 +12,6 @@ use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId, PromiseOrValue};
 
 use crate::state::{X207Circle, X207CircleExt};
-use crate::types::{ClaimDestination, EpochId};
 
 fn not_implemented(method: &str) -> ! {
     env::panic_str(&format!("ERR_NOT_IMPLEMENTED: {method}"))
@@ -20,23 +19,6 @@ fn not_implemented(method: &str) -> ! {
 
 #[near]
 impl X207Circle {
-    // F4 settlement.
-    #[payable]
-    pub fn claim(&mut self, epoch: EpochId, destination: ClaimDestination) -> near_sdk::Promise {
-        not_implemented("claim")
-    }
-
-    #[private]
-    pub fn on_claim_resolved(
-        &mut self,
-        epoch: EpochId,
-        account_id: AccountId,
-        amount: U128,
-        destination: ClaimDestination,
-    ) -> U128 {
-        not_implemented("on_claim_resolved")
-    }
-
     // ADR-29 exit.
     #[payable]
     pub fn request_exit(&mut self) {

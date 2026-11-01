@@ -1,14 +1,23 @@
 //! F4 settlement: D5 positions, D6 accounting, `ft_on_transfer`, `finalize_epoch`, `claim`.
 
 use near_sdk::json_types::{I128, U128, U64};
-use near_sdk::{env, near, AccountId, PromiseOrValue};
+use near_sdk::serde_json::json;
+use near_sdk::{assert_one_yocto, env, near, AccountId, Gas, NearToken, Promise, PromiseOrValue};
 
 use crate::clearing::{ClearingProposal, EpochPhase};
-use crate::events::{emit_chunked, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualPaid, X207Event};
+use crate::events::{
+    emit_chunked, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualClaimFailed, ResidualClaimed, ResidualPaid, X207Event,
+};
 use crate::member::MemberStatus;
 use crate::risk::{assert_limit_invariant, compute_limit};
 use crate::state::{X207Circle, X207CircleExt};
-use crate::types::EpochId;
+use crate::types::{ClaimDestination, EpochId};
+
+/// Gas constants of spec 4.6; the final values come from CT-043.
+pub const CLAIM_MIN_GAS: Gas = Gas::from_tgas(100);
+pub const CLAIM_CALLBACK_GAS: Gas = Gas::from_tgas(15);
+pub const FT_TRANSFER_GAS: Gas = Gas::from_tgas(15);
+pub const FT_TRANSFER_CALL_GAS: Gas = Gas::from_tgas(50);
 
 /// Spec 3.5. Debtor: `due -> paid | defaulted`. Creditor: `claimable <-> claimed` (ADR-24).
 #[near(serializers = [borsh, json])]
@@ -302,6 +311,128 @@ impl X207Circle {
             shortfall: U128(shortfall),
         }
         .emit();
+    }
+}
+
+fn destination_wire(destination: ClaimDestination) -> &'static str {
+    match destination {
+        ClaimDestination::Near => "near",
+        ClaimDestination::Intents => "intents",
+    }
+}
+
+#[near]
+impl X207Circle {
+    /// Creditor takes the residual of a finalized epoch (ADR-24). Order of checks (spec 4.7):
+    /// `assert_one_yocto`, `ERR_GAS_TOO_LOW`, `ERR_UNKNOWN_EPOCH`, `ERR_NOT_FINALIZED`, `ERR_NO_POSITION`,
+    /// `ERR_NOT_CREDITOR`, `ERR_NOT_CLAIMABLE`, `ERR_POOL_INSUFFICIENT`. The funds always go to the
+    /// predecessor (to its Intents balance for `intents`, ADR-19); `on_claim_resolved` settles the outcome.
+    #[payable]
+    pub fn claim(&mut self, epoch: EpochId, destination: ClaimDestination) -> Promise {
+        assert_one_yocto();
+        if env::prepaid_gas() < CLAIM_MIN_GAS {
+            env::panic_str(&format!("ERR_GAS_TOO_LOW: need {} TGas", CLAIM_MIN_GAS.as_tgas()));
+        }
+        let account = env::predecessor_account_id();
+        let e = self.epoch_or_panic(epoch);
+        if e.phase != EpochPhase::Finalized {
+            env::panic_str(&format!("ERR_NOT_FINALIZED: epoch {epoch}"));
+        }
+        let Some(position) = self.positions.get(&(epoch, account.clone())) else {
+            env::panic_str(&format!("ERR_NO_POSITION: {account} in epoch {epoch}"))
+        };
+        if position.role != PositionRole::Creditor {
+            env::panic_str(&format!("ERR_NOT_CREDITOR: {account}"));
+        }
+        if position.status != PositionStatus::Claimable {
+            env::panic_str(&format!("ERR_NOT_CLAIMABLE: {account} is {:?}", position.status));
+        }
+        // Full amount, or the frozen ratio when the pool came up short (K-10). Frozen values keep the
+        // result independent of the order of claims.
+        let amount = if e.shortfall > 0 {
+            position.amount.saturating_mul(e.pool_final) / e.claimable_final.max(1)
+        } else {
+            position.amount
+        };
+        if amount > e.pool {
+            env::panic_str(&format!("ERR_POOL_INSUFFICIENT: pay {amount} pool {}", e.pool));
+        }
+
+        let block = env::block_height();
+        self.positions
+            .get_mut(&(epoch, account.clone()))
+            .expect("position checked above")
+            .transition(PositionStatus::Claimed, block)
+            .unwrap_or_else(|reason| env::panic_str(&reason));
+        self.d6_pool_to_in_flight(epoch, amount);
+
+        let usdt = self.usdt_token_id.clone();
+        let transfer = match destination {
+            ClaimDestination::Near => Promise::new(usdt).function_call(
+                "ft_transfer".to_string(),
+                json!({"receiver_id": account, "amount": U128(amount), "memo": null}).to_string().into_bytes(),
+                NearToken::from_yoctonear(1),
+                FT_TRANSFER_GAS,
+            ),
+            ClaimDestination::Intents => Promise::new(usdt).function_call(
+                "ft_transfer_call".to_string(),
+                json!({"receiver_id": self.intents_id, "amount": U128(amount), "memo": null, "msg": account.as_str()})
+                    .to_string()
+                    .into_bytes(),
+                NearToken::from_yoctonear(1),
+                FT_TRANSFER_CALL_GAS,
+            ),
+        };
+        transfer.then(Self::ext(env::current_account_id()).with_static_gas(CLAIM_CALLBACK_GAS).on_claim_resolved(
+            epoch,
+            account,
+            U128(amount),
+            destination,
+        ))
+    }
+
+    /// Callback of the claim transfer (spec 4.6). Never panics. Returns the amount that arrived.
+    #[private]
+    pub fn on_claim_resolved(
+        &mut self,
+        epoch: EpochId,
+        account_id: AccountId,
+        amount: U128,
+        destination: ClaimDestination,
+    ) -> U128 {
+        let sent = amount.0;
+        // `ft_transfer` has no value; `ft_transfer_call` returns the amount the receiver used.
+        let used = match (env::promise_result_checked(0, 64), destination) {
+            (Ok(_), ClaimDestination::Near) => sent,
+            (Ok(bytes), ClaimDestination::Intents) => {
+                near_sdk::serde_json::from_slice::<U128>(&bytes).map_or(0, |v| v.0.min(sent))
+            }
+            (Err(_), _) => 0,
+        };
+        let key = (epoch, account_id.clone());
+        let block = env::block_height();
+        let in_claimed_state = self.positions.get(&key).is_some_and(|p| p.status == PositionStatus::Claimed);
+        if !in_claimed_state {
+            return U128(0);
+        }
+        let wire = destination_wire(destination).to_string();
+        if used > 0 {
+            self.d6_in_flight_out(used);
+        }
+        if used == sent {
+            ResidualClaimed { epoch, account_id, amount: U128(used), destination: wire, status: "claimed".into() }.emit();
+            return U128(used);
+        }
+        let back = sent - used;
+        self.d6_in_flight_to_pool(epoch, back);
+        let position = self.positions.get_mut(&key).expect("position checked above");
+        position.amount = position.amount.saturating_sub(used);
+        position.revert_claim(block).unwrap_or_else(|_| unreachable!("checked claimed above"));
+        if used > 0 {
+            ResidualClaimed { epoch, account_id: account_id.clone(), amount: U128(used), destination: wire.clone(), status: "claimed".into() }.emit();
+        }
+        ResidualClaimFailed { epoch, account_id, amount: U128(back), destination: wire, status: "claimable".into() }.emit();
+        U128(used)
     }
 }
 
@@ -1131,5 +1262,372 @@ mod finalize_tests {
         assert_eq!(limits[0]["data"][0]["changes"].as_array().unwrap().len(), 50);
         assert_eq!(limits[1]["data"][0]["changes"].as_array().unwrap().len(), 14);
         assert_eq!((limits[1]["data"][0]["chunk"].as_u64(), limits[1]["data"][0]["chunks"].as_u64()), (Some(1), Some(2)));
+    }
+}
+
+#[cfg(test)]
+mod claim_tests {
+    use near_sdk::serde_json::{self, json, Value};
+    use near_sdk::mock::MockAction;
+    use near_sdk::test_utils::{get_created_receipts, get_logs, VMContextBuilder};
+    use near_sdk::{test_vm_config, testing_env, Gas, NearToken, PromiseResult, PublicKey, RuntimeFeesConfig};
+
+    use super::*;
+    use crate::clearing::Epoch;
+    use crate::member::{Member, MemberStatus};
+    use crate::params::Params;
+
+    const CREDIT: u128 = 1_000_000;
+
+    fn acc(s: &str) -> AccountId {
+        format!("{s}.near").parse().unwrap()
+    }
+
+    fn ctx(caller: &str, deposit: u128, gas_tgas: u64) -> VMContextBuilder {
+        let mut b = VMContextBuilder::new();
+        b.predecessor_account_id(acc(caller))
+            .current_account_id(acc("circle"))
+            .attached_deposit(NearToken::from_yoctonear(deposit))
+            .prepaid_gas(Gas::from_tgas(gas_tgas))
+            .block_height(300);
+        b
+    }
+
+    fn call_as(caller: &str) {
+        testing_env!(ctx(caller, 1, 300).build());
+    }
+
+    fn member(c: &mut X207Circle, name: &str) {
+        c.members.insert(
+            acc(name),
+            Member {
+                account_id: acc(name),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+                terms_hash: "a".repeat(64),
+                stake: 100 * CREDIT,
+                limit: 80 * CREDIT,
+                status: MemberStatus::Active,
+                admitted: false,
+                joined_at: 0,
+                settled_history: 0,
+                last_active_epoch: 1,
+                exit_requested_epoch: None,
+                withdraw_pending: false,
+                reactivate_epoch: None,
+            },
+        );
+        c.member_index.push(acc(name));
+        c.member_count += 1;
+        c.total_stake += 100 * CREDIT;
+    }
+
+    fn creditor(amount: u128) -> Position {
+        Position { net: amount as i128, role: PositionRole::Creditor, status: PositionStatus::Claimable, amount, recovered: 0, payment_deadline: 9, updated_at_block: 5 }
+    }
+
+    /// Epoch 1 `finalized` with pool 35 and gpu owed 35 (S1.fin without the clearing steps).
+    fn s1_fin() -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(0).build());
+        let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), Params::default(), 0);
+        for n in ["scraper", "gpu", "translator"] {
+            member(&mut c, n);
+        }
+        let e = c.epochs.get_mut(&1).unwrap();
+        e.start_clearing(3_600_000_000_000);
+        e.start_payment_window(4_200_000_000_000);
+        e.finalize(6_000_000_000_000);
+        c.put_position(1, acc("gpu"), creditor(35 * CREDIT));
+        c.put_position(
+            1,
+            acc("scraper"),
+            Position { net: -35 * CREDIT as i128, role: PositionRole::Debtor, status: PositionStatus::Paid, amount: 35 * CREDIT, recovered: 0, payment_deadline: 9, updated_at_block: 5 },
+        );
+        c.d6_deposit_epoch_pool(1, 35 * CREDIT);
+        let e = c.epochs.get_mut(&1).unwrap();
+        e.pool_final = 35 * CREDIT;
+        e.claimable_final = 35 * CREDIT;
+        c
+    }
+
+    fn panics(f: impl FnOnce()) -> String {
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).expect_err("expected a panic");
+        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    fn status(c: &X207Circle, who: &str) -> (PositionStatus, u128) {
+        let p = c.positions.get(&(1, acc(who))).unwrap();
+        (p.status, p.amount)
+    }
+
+    /// `(receiver, method, args)` of every function call the contract created.
+    fn calls() -> Vec<(String, String, Value)> {
+        get_created_receipts()
+            .into_iter()
+            .flat_map(|r| {
+                let receiver = r.receiver_id.to_string();
+                r.actions.into_iter().filter_map(move |a| match a {
+                    MockAction::FunctionCallWeight { method_name, args, .. } => Some((
+                        receiver.clone(),
+                        String::from_utf8(method_name).unwrap(),
+                        serde_json::from_slice(&args).unwrap(),
+                    )),
+                    _ => None,
+                })
+            })
+            .collect()
+    }
+
+    fn resolve(c: &mut X207Circle, result: PromiseResult, amount: u128, destination: ClaimDestination) -> U128 {
+        testing_env!(ctx("circle", 0, 300).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![result]);
+        c.on_claim_resolved(1, acc("gpu"), U128(amount), destination)
+    }
+
+    fn events() -> Vec<Value> {
+        get_logs().iter().filter_map(|l| l.strip_prefix("EVENT_JSON:")).map(|b| serde_json::from_str(b).unwrap()).collect()
+    }
+
+    // TC-CT-035-01 (unit side): state moves before the transfer, the transfer is ft_transfer to the caller
+    #[test]
+    fn tc_ct_035_01_claim_to_near_starts_an_ft_transfer() {
+        let mut c = s1_fin();
+        call_as("gpu");
+        let _ = c.claim(1, ClaimDestination::Near);
+        assert_eq!(status(&c, "gpu"), (PositionStatus::Claimed, 35 * CREDIT));
+        let (pool, in_flight) = (c.epochs.get(&1).unwrap().pool, c.in_flight);
+        assert_eq!((pool, in_flight), (0, 35 * CREDIT));
+        let calls = calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("usdt.near", "ft_transfer"));
+        assert_eq!((&calls[0].2["receiver_id"], &calls[0].2["amount"]), (&json!("gpu.near"), &json!("35000000")));
+        assert_eq!((calls[1].0.as_str(), calls[1].1.as_str()), ("circle.near", "on_claim_resolved"));
+        assert_eq!(calls[1].2, json!({"epoch": 1, "account_id": "gpu.near", "amount": "35000000", "destination": "near"}));
+        c.assert_d6(None);
+    }
+
+    // TC-CT-035-03 (unit side): intents goes through ft_transfer_call with msg = the creditor
+    #[test]
+    fn tc_ct_035_03_claim_to_intents_sends_account_as_msg() {
+        let mut c = s1_fin();
+        call_as("gpu");
+        let _ = c.claim(1, ClaimDestination::Intents);
+        let calls = calls();
+        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("usdt.near", "ft_transfer_call"));
+        assert_eq!(
+            (&calls[0].2["receiver_id"], &calls[0].2["amount"], &calls[0].2["msg"]),
+            (&json!("intents.near"), &json!("35000000"), &json!("gpu.near"))
+        );
+        assert_eq!(calls[1].2["destination"], "intents");
+    }
+
+    // TC-CT-035-04
+    #[test]
+    fn tc_ct_035_04_before_finalization() {
+        let mut c = s1_fin();
+        c.epochs.get_mut(&1).unwrap().phase = EpochPhase::PaymentWindow;
+        call_as("gpu");
+        assert!(panics(|| drop(c.claim(1, ClaimDestination::Near))).contains("ERR_NOT_FINALIZED"));
+        assert_eq!(status(&c, "gpu").0, PositionStatus::Claimable);
+    }
+
+    // TC-CT-035-05
+    #[test]
+    fn tc_ct_035_05_second_claim() {
+        let mut c = s1_fin();
+        call_as("gpu");
+        let _ = c.claim(1, ClaimDestination::Near);
+        call_as("gpu");
+        assert!(panics(|| drop(c.claim(1, ClaimDestination::Near))).contains("ERR_NOT_CLAIMABLE"));
+    }
+
+    // TC-CT-035-06
+    #[test]
+    fn tc_ct_035_06_debtor_cannot_claim() {
+        let mut c = s1_fin();
+        call_as("scraper");
+        assert!(panics(|| drop(c.claim(1, ClaimDestination::Near))).contains("ERR_NOT_CREDITOR"));
+    }
+
+    // TC-CT-035-07
+    #[test]
+    fn tc_ct_035_07_no_position() {
+        let mut c = s1_fin();
+        for who in ["translator", "outsider"] {
+            call_as(who);
+            assert!(panics(|| drop(c.claim(1, ClaimDestination::Near))).contains("ERR_NO_POSITION"), "{who}");
+        }
+    }
+
+    // TC-CT-035-08
+    #[test]
+    fn tc_ct_035_08_needs_exactly_one_yocto() {
+        let mut c = s1_fin();
+        for deposit in [0, 2] {
+            testing_env!(ctx("gpu", deposit, 300).build());
+            let text = panics(|| drop(c.claim(1, ClaimDestination::Near)));
+            assert!(text.contains("Requires attached deposit of exactly 1 yoctoNEAR"), "{deposit}: {text}");
+        }
+        assert_eq!(status(&c, "gpu").0, PositionStatus::Claimable);
+    }
+
+    // TC-CT-035-09
+    #[test]
+    fn tc_ct_035_09_gas_too_low() {
+        let mut c = s1_fin();
+        testing_env!(ctx("gpu", 1, 99).build());
+        assert!(panics(|| drop(c.claim(1, ClaimDestination::Near))).contains("ERR_GAS_TOO_LOW"));
+        assert_eq!(status(&c, "gpu").0, PositionStatus::Claimable);
+        testing_env!(ctx("gpu", 1, 100).build());
+        let _ = c.claim(1, ClaimDestination::Near);
+    }
+
+    // TC-CT-035-15
+    #[test]
+    fn tc_ct_035_15_pool_too_small_is_an_invariant_guard() {
+        let mut c = s1_fin();
+        c.d6_pool_to_in_flight(1, 15 * CREDIT);
+        call_as("gpu");
+        assert!(panics(|| drop(c.claim(1, ClaimDestination::Near))).contains("ERR_POOL_INSUFFICIENT"));
+        assert_eq!(status(&c, "gpu").0, PositionStatus::Claimable);
+    }
+
+    // TC-CT-035-16
+    #[test]
+    fn tc_ct_035_16_pro_rata_when_shortfall() {
+        let mut c = s1_fin();
+        let e = c.epochs.get_mut(&1).unwrap();
+        e.shortfall = 5 * CREDIT;
+        e.pool_final = 30 * CREDIT;
+        c.d6_pool_to_in_flight(1, 5 * CREDIT);
+        c.d6_in_flight_out(5 * CREDIT);
+        call_as("gpu");
+        let _ = c.claim(1, ClaimDestination::Near);
+        assert_eq!(calls()[0].2["amount"], json!("30000000"));
+        assert_eq!(c.epochs.get(&1).unwrap().pool, 0);
+    }
+
+    // TC-CT-035-19
+    #[test]
+    fn tc_ct_035_19_unknown_epoch() {
+        let mut c = s1_fin();
+        call_as("gpu");
+        assert!(panics(|| drop(c.claim(99, ClaimDestination::Near))).contains("ERR_UNKNOWN_EPOCH"));
+    }
+
+    // TC-CT-035-20
+    #[test]
+    fn tc_ct_035_20_ratio_does_not_depend_on_claim_order() {
+        for order in [["a", "b"], ["b", "a"]] {
+            let mut c = s1_fin();
+            c.positions.remove(&(1, acc("gpu")));
+            c.put_position(1, acc("a"), creditor(21 * CREDIT));
+            c.put_position(1, acc("b"), creditor(14 * CREDIT));
+            let e = c.epochs.get_mut(&1).unwrap();
+            e.shortfall = 5 * CREDIT;
+            e.pool_final = 30 * CREDIT;
+            c.d6_pool_to_in_flight(1, 5 * CREDIT);
+            c.d6_in_flight_out(5 * CREDIT);
+            let mut paid = std::collections::BTreeMap::new();
+            for who in order {
+                call_as(who);
+                let before = c.in_flight;
+                let _ = c.claim(1, ClaimDestination::Near);
+                paid.insert(who, c.in_flight - before);
+            }
+            assert_eq!((paid["a"], paid["b"]), (18 * CREDIT, 12 * CREDIT), "order {order:?}");
+        }
+    }
+
+    // TC-CT-035-18
+    #[test]
+    fn tc_ct_035_18_claim_has_no_destination_account_argument() {
+        let abi: Value = serde_json::from_str(include_str!("../../abi.json")).unwrap();
+        let claim = abi["body"]["functions"].as_array().unwrap().iter().find(|f| f["name"] == "claim").unwrap();
+        let args = claim["params"]["args"].as_array().unwrap();
+        assert_eq!(args.iter().map(|a| a["name"].as_str().unwrap()).collect::<Vec<_>>(), ["epoch", "destination"]);
+        assert_eq!(abi["body"]["functions"].as_array().unwrap().iter().filter(|f| f["name"] == "claim").count(), 1);
+        assert_eq!(args[1]["type_schema"]["$ref"], json!("#/definitions/ClaimDestination"));
+    }
+
+    fn after_claim() -> X207Circle {
+        let mut c = s1_fin();
+        call_as("gpu");
+        let _ = c.claim(1, ClaimDestination::Near);
+        c
+    }
+
+    // TC-CT-035-01 callback success
+    #[test]
+    fn callback_success_near() {
+        let mut c = after_claim();
+        assert_eq!(resolve(&mut c, PromiseResult::Successful(vec![]), 35 * CREDIT, ClaimDestination::Near), U128(35 * CREDIT));
+        assert_eq!((status(&c, "gpu"), c.in_flight, c.epochs.get(&1).unwrap().pool), ((PositionStatus::Claimed, 35 * CREDIT), 0, 0));
+        let ev = events();
+        assert_eq!(ev[0]["event"], "residual_claimed");
+        assert_eq!(ev[0]["data"][0], json!({"epoch":1,"account_id":"gpu.near","amount":"35000000","destination":"near","status":"claimed"}));
+        c.assert_d6(None);
+    }
+
+    // TC-CT-035-10 callback failure
+    #[test]
+    fn callback_failure_restores_status_and_pool() {
+        let mut c = after_claim();
+        assert_eq!(resolve(&mut c, PromiseResult::Failed, 35 * CREDIT, ClaimDestination::Near), U128(0));
+        assert_eq!((status(&c, "gpu"), c.in_flight, c.epochs.get(&1).unwrap().pool), ((PositionStatus::Claimable, 35 * CREDIT), 0, 35 * CREDIT));
+        let ev = events();
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0]["data"][0], json!({"epoch":1,"account_id":"gpu.near","amount":"35000000","destination":"near","status":"claimable"}));
+        assert_eq!(ev[0]["event"], "residual_claim_failed");
+        // a claim after the failure works again
+        call_as("gpu");
+        let _ = c.claim(1, ClaimDestination::Near);
+        assert_eq!(status(&c, "gpu").0, PositionStatus::Claimed);
+    }
+
+    // TC-CT-035-11
+    #[test]
+    fn callback_intents_partial_use() {
+        let mut c = after_claim();
+        let used = PromiseResult::Successful(json!("25000000").to_string().into_bytes());
+        assert_eq!(resolve(&mut c, used, 35 * CREDIT, ClaimDestination::Intents), U128(25 * CREDIT));
+        assert_eq!((status(&c, "gpu"), c.in_flight, c.epochs.get(&1).unwrap().pool), ((PositionStatus::Claimable, 10 * CREDIT), 0, 10 * CREDIT));
+        let ev = events();
+        assert_eq!(ev.iter().map(|e| e["event"].as_str().unwrap()).collect::<Vec<_>>(), ["residual_claimed", "residual_claim_failed"]);
+        assert_eq!((&ev[0]["data"][0]["amount"], &ev[1]["data"][0]["amount"]), (&json!("25000000"), &json!("10000000")));
+        assert_eq!(ev[0]["data"][0]["destination"], "intents");
+        c.assert_d6(None);
+    }
+
+    // TC-CT-035-12
+    #[test]
+    fn callback_intents_returns_everything_or_fails() {
+        for result in [PromiseResult::Successful(json!("0").to_string().into_bytes()), PromiseResult::Failed, PromiseResult::Successful(b"garbage".to_vec())] {
+            let mut c = after_claim();
+            assert_eq!(resolve(&mut c, result, 35 * CREDIT, ClaimDestination::Intents), U128(0));
+            assert_eq!((status(&c, "gpu"), c.epochs.get(&1).unwrap().pool, c.in_flight), ((PositionStatus::Claimable, 35 * CREDIT), 35 * CREDIT, 0));
+            assert_eq!(events()[0]["event"], "residual_claim_failed");
+        }
+    }
+
+    #[test]
+    fn callback_intents_full_use_and_overreport() {
+        for reported in ["35000000", "99000000"] {
+            let mut c = after_claim();
+            let result = PromiseResult::Successful(json!(reported).to_string().into_bytes());
+            assert_eq!(resolve(&mut c, result, 35 * CREDIT, ClaimDestination::Intents), U128(35 * CREDIT), "{reported}");
+            assert_eq!((status(&c, "gpu").0, c.in_flight), (PositionStatus::Claimed, 0));
+        }
+    }
+
+    // TC-CT-035-14: no panic on a position that is not `claimed` (a second callback)
+    #[test]
+    fn callback_does_not_panic_on_unexpected_state() {
+        let mut c = s1_fin();
+        assert_eq!(resolve(&mut c, PromiseResult::Failed, 35 * CREDIT, ClaimDestination::Near), U128(0));
+        assert_eq!((status(&c, "gpu").0, c.epochs.get(&1).unwrap().pool), (PositionStatus::Claimable, 35 * CREDIT));
+    }
+
+    #[test]
+    fn epoch_struct_unused_import_guard() {
+        let _ = Epoch::open(2, 0, 1, Params::default());
     }
 }
