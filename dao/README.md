@@ -20,6 +20,14 @@ command, runs it, and confirms any mainnet run.
 3. Check: `get_owner` returns the DAO account; the DAO policy lists the council and a
    `proposal_period` of `3600000000000` ns.
 
+4. Propose a parameter change (a DAO proposal that calls `set_params`) and read the active parameters
+   (CT-046). Out-of-range values still make a proposal; the contract rejects them when the DAO runs it:
+
+   ```bash
+   node dao/propose-set-params.mjs --dao x207.sputnik-dao.testnet --contract x207-circle.testnet --signer a.testnet --params-file params.json
+   node dao/print-params.mjs --contract x207-circle.testnet
+   ```
+
 Tests of the builders: `node --test dao/`.
 
 Not verified yet: the policy shape follows `sputnikdao2` and has not run against the factory wasm.

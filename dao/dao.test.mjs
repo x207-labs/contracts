@@ -62,3 +62,54 @@ test('CLI prints a command and rejects a missing flag', () => {
   const net = spawnSync('node', ['dao/deploy-owned.mjs', '--contract', 'c.near', '--dao', 'd.near', '--circle', 'a', '--network', 'foo']);
   assert.equal(net.status, 1);
 });
+
+// --- CT-046 ---------------------------------------------------------------------------------
+import { addProposalCommand, buildAddProposalArgs, decodeProposalParams, getParamsCommand, parseParamsJson } from './lib.mjs';
+
+const goodParams = {
+  epoch_length: 3600, payment_window: 1800, proposal_window: 600, base_limit_ratio: 8000, limit_growth: 1000,
+  limit_cap: '1000000000', limit_decay: 0, fees: { clearing_fee_bps: 0, solver_fee_bps: 0 }, admission: 'open',
+};
+
+test('proposal: FunctionCall to set_params whose args decode back to the input', () => {
+  const args = buildAddProposalArgs({ contract: 'x207-circle.near', params: goodParams });
+  const call = args.proposal.kind.FunctionCall;
+  assert.equal(call.receiver_id, 'x207-circle.near');
+  assert.equal(call.actions.length, 1);
+  assert.equal(call.actions[0].method_name, 'set_params');
+  assert.equal(call.actions[0].deposit, '0');
+  assert.deepEqual(decodeProposalParams(args), goodParams);
+  assert.deepEqual(JSON.parse(Buffer.from(call.actions[0].args, 'base64')), { params: goodParams });
+});
+
+test('proposal: out-of-range params still build (the contract rejects them at execution)', () => {
+  const args = buildAddProposalArgs({ contract: 'x207-circle.near', params: { ...goodParams, payment_window: 899 } });
+  assert.equal(decodeProposalParams(args).payment_window, 899);
+});
+
+test('params JSON: broken text and non-objects are rejected', () => {
+  assert.throws(() => parseParamsJson('{nope'), /not valid JSON/);
+  assert.throws(() => parseParamsJson('[1]'), /must be a JSON object/);
+  assert.throws(() => parseParamsJson('null'), /must be a JSON object/);
+  assert.deepEqual(parseParamsJson(JSON.stringify(goodParams)), goodParams);
+});
+
+test('commands: add_proposal carries the bond, get_params is read-only', () => {
+  const args = buildAddProposalArgs({ contract: 'x207-circle.near', params: goodParams });
+  const add = addProposalCommand({ dao: 'x207.sputnik-dao.near', signer: 'alice.near', network: 'testnet', addProposalArgs: args });
+  assert.match(add, /call-function as-transaction x207\.sputnik-dao\.near add_proposal json-args /);
+  assert.match(add, /attached-deposit '0\.1 NEAR'/);
+  const view = getParamsCommand({ contract: 'x207-circle.near', network: 'testnet' });
+  assert.equal(view, "near contract call-function as-read-only x207-circle.near get_params json-args '{}' network-config testnet now");
+});
+
+test('CLI: broken params JSON exits non-zero and prints no command', () => {
+  const bad = spawnSync('node', ['dao/propose-set-params.mjs', '--dao', 'd.near', '--contract', 'c.near', '--signer', 's.near', '--params', '{nope']);
+  assert.equal(bad.status, 1);
+  assert.equal(bad.stdout.toString(), '');
+  assert.match(bad.stderr.toString(), /not valid JSON/);
+  const ok = execFileSync('node', ['dao/propose-set-params.mjs', '--dao', 'd.near', '--contract', 'c.near', '--signer', 's.near', '--params', JSON.stringify(goodParams)]).toString();
+  assert.match(ok, /add_proposal/);
+  const view = execFileSync('node', ['dao/print-params.mjs', '--contract', 'c.near']).toString();
+  assert.match(view, /get_params/);
+});

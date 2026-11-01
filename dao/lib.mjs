@@ -105,3 +105,67 @@ export function networkOf(args) {
   if (!['testnet', 'mainnet'].includes(network)) throw new Error(`--network must be testnet or mainnet, got ${network}`);
   return network;
 }
+
+// --- CT-046: proposal that calls `set_params` on the circle -------------------------------------
+
+/** Gas the DAO attaches to the `set_params` call (a small state write). */
+export const SET_PARAMS_GAS = '30000000000000';
+/** Sputnik default proposal bond: 0.1 NEAR, attached to `add_proposal`. */
+export const PROPOSAL_BOND = '0.1 NEAR';
+
+/** `Params` is whatever JSON the owner passes; range checks stay with the contract (`validate_params`). */
+export function parseParamsJson(text) {
+  let params;
+  try {
+    params = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`params is not valid JSON: ${error.message}`);
+  }
+  if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+    throw new Error('params must be a JSON object');
+  }
+  return params;
+}
+
+/** Arguments of Sputnik `add_proposal`: one FunctionCall action to `set_params({ params })`. */
+export function buildAddProposalArgs({ contract, params, description = 'Set x207 circle params' }) {
+  assertAccountId(contract);
+  const args = Buffer.from(JSON.stringify({ params })).toString('base64');
+  return {
+    proposal: {
+      description,
+      kind: {
+        FunctionCall: {
+          receiver_id: contract,
+          actions: [{ method_name: 'set_params', args, deposit: '0', gas: SET_PARAMS_GAS }],
+        },
+      },
+    },
+  };
+}
+
+/** The `params` object back from the base64 args of a proposal built by `buildAddProposalArgs`. */
+export function decodeProposalParams(addProposalArgs) {
+  const action = addProposalArgs.proposal.kind.FunctionCall.actions[0];
+  return JSON.parse(Buffer.from(action.args, 'base64').toString('utf8')).params;
+}
+
+export function addProposalCommand({ dao, signer, network, addProposalArgs }) {
+  assertAccountId(dao);
+  assertAccountId(signer);
+  return [
+    'near contract call-function as-transaction', dao, 'add_proposal',
+    'json-args', sh(JSON.stringify(addProposalArgs)),
+    'prepaid-gas', sh('100 Tgas'), 'attached-deposit', sh(PROPOSAL_BOND),
+    'sign-as', signer, 'network-config', network, 'sign-with-keychain', 'send',
+  ].join(' ');
+}
+
+/** Read-only: prints the active parameters, the same JSON as the view `get_params`. */
+export function getParamsCommand({ contract, network }) {
+  assertAccountId(contract);
+  return [
+    'near contract call-function as-read-only', contract, 'get_params',
+    'json-args', "'{}'", 'network-config', network, 'now',
+  ].join(' ');
+}
