@@ -6,6 +6,10 @@ use near_sdk::{near, AccountId};
 pub type EpochId = u64;
 pub type Seq = u64;
 
+/// Most edges in one clearing proposal (spec 3.6, ADR-32 K-44). CT-004: 300 edges cost 38 Tgas to
+/// verify and 92 Tgas to apply in the probe, about 11x below 1 PGas; CT-043 re-measures the final methods.
+pub const MAX_EDGES_PER_TX: u32 = 300;
+
 /// One clearing edge (spec 3.6). Valid when `0 < cleared <= obligation[(epoch, debtor, creditor)]`.
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Debug, PartialEq, Eq)]

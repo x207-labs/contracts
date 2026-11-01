@@ -516,6 +516,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ct004-clearing-gas"
+version = "0.0.0"
+dependencies = [
+ "near-sdk",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

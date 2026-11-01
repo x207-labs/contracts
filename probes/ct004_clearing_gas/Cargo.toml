@@ -1,0 +1,15 @@
+# CT-004 gas probe: clearing verification and application versus edge count. Never deployed.
+[package]
+name = "ct004-clearing-gas"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.29.1"
+
+[dev-dependencies]
+near-sdk = { version = "=5.29.1", features = ["unit-testing"] }
