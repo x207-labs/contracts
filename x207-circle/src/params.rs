@@ -3,6 +3,8 @@
 use near_sdk::json_types::U128;
 use near_sdk::{env, near};
 
+use crate::state::{X207Circle, X207CircleExt};
+
 // Ranges (spec 3.4, ADR-20). `payment_window` minimum is 15 minutes (ADR-21).
 pub const EPOCH_LENGTH_MIN: u64 = 300;
 pub const EPOCH_LENGTH_MAX: u64 = 604_800;
@@ -95,8 +97,19 @@ pub fn validate_params(p: &Params) {
     require_range(p.fees.solver_fee_bps, 0, SOLVER_FEE_BPS_MAX, "fees.solver_fee_bps");
 }
 
+#[near]
+impl X207Circle {
+    /// Params active in the running epoch: the snapshot of `current_epoch` (spec section 5).
+    pub fn get_params(&self) -> Params {
+        self.epoch_or_panic(self.current_epoch).params.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::testing_env;
+
     use super::*;
 
     fn with(f: impl FnOnce(&mut Params)) -> Params {
@@ -225,5 +238,33 @@ mod tests {
         assert_eq!(serde_json::from_str::<Admission>("\"dao\"").unwrap(), Admission::Dao);
         let err = serde_json::from_str::<Admission>("\"closed\"").unwrap_err().to_string();
         assert!(!err.contains("ERR_"), "{err}");
+    }
+
+    fn circle(params: Params) -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
+        X207Circle::with_config(
+            "dao.near".parse().unwrap(),
+            "agents-main".to_string(),
+            "usdt.near".parse().unwrap(),
+            "intents.near".parse().unwrap(),
+            params,
+            env::block_timestamp(),
+        )
+    }
+
+    // TC-CT-007-01 (default via root) and TC-CT-007-02
+    #[test]
+    fn tc_ct_007_01_get_params_returns_default_and_all_fields() {
+        let c = circle(Params::default());
+        assert_eq!(c.get_params(), Params::default());
+        let json = serde_json::to_value(c.get_params()).unwrap();
+        assert_eq!(json.as_object().unwrap().len(), 9);
+        assert_eq!(json["fees"].as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn get_params_reports_active_epoch_snapshot() {
+        let custom = with(|p| p.epoch_length = 7_200);
+        assert_eq!(circle(custom.clone()).get_params(), custom);
     }
 }
