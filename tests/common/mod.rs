@@ -344,3 +344,52 @@ pub mod funded {
         }
     }
 }
+
+/// Full-flow helpers built on the real `join`, stake, and voucher paths.
+#[allow(dead_code)]
+pub mod flow {
+    use serde_json::{json, Value};
+
+    use super::circle::{account_of, failure_text, Circle, CREDIT};
+    use super::funded::Funded;
+
+    pub fn edge(debtor: &str, creditor: &str, cleared: u128) -> Value {
+        json!({"debtor": account_of(debtor), "creditor": account_of(creditor), "cleared": cleared.to_string()})
+    }
+
+    /// `S1` of the test case file, on a real circle: three staked members (100 each), vouchers
+    /// scraper->gpu 60, gpu->translator 25, translator->scraper 25, closed, cleared by one cycle of 25,
+    /// and committed. scraper now owes 35, gpu is owed 35. The clock stands at `commit`.
+    pub async fn s1_committed() -> anyhow::Result<Funded> {
+        let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+        for name in ["scraper", "gpu", "translator"] {
+            let account = f.account(name).await?;
+            let join = f.join(name, Funded::join_deposit()).await?;
+            assert!(join.is_success(), "join {name}: {:?}", failure_text(&join));
+            let stake = f.stake(&account, 100 * CREDIT).await?;
+            assert!(stake.is_success(), "stake {name}: {:?}", failure_text(&stake));
+        }
+        for (payer, payee, amount) in [("scraper", "gpu", 60), ("gpu", "translator", 25), ("translator", "scraper", 25)] {
+            let result = f.circle.register(payer, payee, 1, amount * CREDIT).await?;
+            assert!(result.is_success(), "register {payer}->{payee}: {:?}", failure_text(&result));
+        }
+        let c = &f.circle;
+        c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
+        let close = c.call_keeper("close_epoch", json!({"epoch": 1})).await?;
+        assert!(close.is_success(), "{:?}", failure_text(&close));
+        let edges = json!([edge("scraper", "gpu", 25 * CREDIT), edge("gpu", "translator", 25 * CREDIT), edge("translator", "scraper", 25 * CREDIT)]);
+        let solver = c.worker.dev_create_account().await?;
+        let submit = c.call_as(&solver, "submit_clearing", json!({"epoch": 1, "edges": edges})).await?;
+        assert!(submit.is_success(), "{:?}", failure_text(&submit));
+        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
+        let commit = c.call_keeper("commit_epoch", json!({"epoch": 1})).await?;
+        assert!(commit.is_success(), "{:?}", failure_text(&commit));
+        Ok(f)
+    }
+
+
+    pub async fn finalize(c: &Circle) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        c.advance_to(c.epoch_ts(1, "payment_deadline").await?).await?;
+        c.call_keeper("finalize_epoch", json!({"epoch": 1})).await
+    }
+}

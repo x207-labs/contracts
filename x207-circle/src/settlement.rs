@@ -4,7 +4,9 @@ use near_sdk::json_types::{I128, U128, U64};
 use near_sdk::{env, near, AccountId, PromiseOrValue};
 
 use crate::clearing::{ClearingProposal, EpochPhase};
-use crate::events::{ResidualPaid, X207Event};
+use crate::events::{emit_chunked, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualPaid, X207Event};
+use crate::member::MemberStatus;
+use crate::risk::{assert_limit_invariant, compute_limit};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::EpochId;
 
@@ -181,6 +183,125 @@ impl X207Circle {
         }
         .emit();
         PromiseOrValue::Value(U128(refunded))
+    }
+}
+
+impl X207Circle {
+    /// Step 1 of spec 4.5 for one debtor: stake first, then the reserve, the rest is `shortfall`.
+    /// The member turns `suspended` with limit 0 and the due leaves `outstanding_debt`.
+    fn default_debtor(&mut self, epoch: EpochId, account: &AccountId, block: u64) -> MemberDefaulted {
+        let key = (epoch, account.clone());
+        let due = self.positions.get(&key).expect("defaulting position exists").amount;
+        let stake = self.members.get(account).map_or(0, |m| m.stake);
+        let from_stake = due.min(stake);
+        let from_reserve = (due - from_stake).min(self.reserve);
+        let shortfall = due - from_stake - from_reserve;
+
+        self.d6_stake_to_pool(epoch, from_stake);
+        self.d6_reserve_to_pool(epoch, from_reserve);
+        self.epoch_mut_or_panic(epoch).shortfall += shortfall;
+
+        let member = self.members.get_mut(account).unwrap_or_else(|| env::panic_str(&format!("ERR_NOT_MEMBER: {account}")));
+        member.stake -= from_stake;
+        member.limit = 0;
+        member.status = MemberStatus::Suspended;
+        let stake_left = member.stake;
+        assert_limit_invariant(member);
+
+        let debt = self.outstanding_debt.get(account).copied().unwrap_or(0);
+        let debt = debt
+            .checked_sub(due)
+            .unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: outstanding_debt below the defaulted due"));
+        self.outstanding_debt.insert(account.clone(), debt);
+
+        let position = self.positions.get_mut(&key).expect("defaulting position exists");
+        position.transition(PositionStatus::Defaulted, block).unwrap_or_else(|reason| env::panic_str(&reason));
+        position.recovered = from_stake + from_reserve;
+
+        MemberDefaulted {
+            epoch,
+            account_id: account.clone(),
+            due: U128(due),
+            from_stake: U128(from_stake),
+            from_reserve: U128(from_reserve),
+            shortfall: U128(shortfall),
+            stake: U128(stake_left),
+            status: "suspended".into(),
+            position_status: "defaulted".into(),
+            outstanding_debt: U128(debt),
+        }
+    }
+
+    /// Step 3 of spec 4.5: `limit = compute_limit` for every `active` member with the params
+    /// snapshot of `epoch` (K-12). Returns the members whose limit changed (K-11).
+    fn recompute_limits(&mut self, epoch: EpochId) -> Vec<LimitChange> {
+        let params = self.epoch_or_panic(epoch).params.clone();
+        let accounts: Vec<AccountId> = self.member_index.iter().cloned().collect();
+        let mut changes = Vec::new();
+        for account in accounts {
+            let member = self.members.get_mut(&account).expect("indexed member");
+            if member.status != MemberStatus::Active {
+                continue;
+            }
+            let new_limit = compute_limit(member.stake, member.settled_history, &params);
+            if new_limit != member.limit {
+                changes.push(LimitChange {
+                    account_id: account,
+                    old_limit: U128(member.limit),
+                    new_limit: U128(new_limit),
+                    status: "active".into(),
+                });
+                member.limit = new_limit;
+            }
+            assert_limit_invariant(member);
+        }
+        changes
+    }
+}
+
+#[near]
+impl X207Circle {
+    /// Permissionless after the payment window (spec 4.5). Every `due` left becomes `defaulted`
+    /// (stake, then reserve, into the epoch pool), active limits are recomputed, and the epoch is
+    /// `finalized`. P1 `limit_decay` (CT-053) and the P2 haircut (CT-057) are not applied.
+    pub fn finalize_epoch(&mut self, epoch: EpochId) {
+        let now = env::block_timestamp();
+        let block = env::block_height();
+        self.epoch_mut_or_panic(epoch).finalize(now);
+
+        let accounts: Vec<AccountId> = self.epoch_or_panic(epoch).position_accounts.iter().cloned().collect();
+        let (mut defaulted, mut total_defaulted, mut claimable_final) = (Vec::new(), 0u128, 0u128);
+        for account in accounts {
+            let position = self.positions.get(&(epoch, account.clone())).expect("indexed position");
+            match (position.role, position.status) {
+                (PositionRole::Debtor, PositionStatus::Due) => {
+                    total_defaulted += position.amount;
+                    defaulted.push(self.default_debtor(epoch, &account, block));
+                }
+                (PositionRole::Creditor, PositionStatus::Claimable) => claimable_final += position.amount,
+                _ => {}
+            }
+        }
+        let changes = self.recompute_limits(epoch);
+
+        let e = self.epoch_mut_or_panic(epoch);
+        e.pool_final = e.pool;
+        e.claimable_final = claimable_final;
+        let (pool, shortfall, finalized_at) = (e.pool, e.shortfall, e.finalized_at.expect("finalized epoch has finalized_at"));
+        let defaulted_count = defaulted.len() as u32;
+        for event in defaulted {
+            event.emit();
+        }
+        emit_chunked(&changes, |changes, chunk, chunks| LimitsUpdated { epoch, changes, chunk, chunks });
+        EpochFinalized {
+            epoch,
+            finalized_at: U64(finalized_at),
+            defaulted_count,
+            total_defaulted: U128(total_defaulted),
+            pool: U128(pool),
+            shortfall: U128(shortfall),
+        }
+        .emit();
     }
 }
 
@@ -644,5 +765,371 @@ mod settle_tests {
         let mut c = s1();
         settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_COMMIT + SEC);
         assert_eq!(c.limit(acc("scraper")), U128(80 * CREDIT));
+    }
+}
+
+#[cfg(test)]
+mod finalize_tests {
+    use near_sdk::serde_json::{self, json, Value};
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::{testing_env, PublicKey};
+
+    use super::*;
+    use crate::clearing::{Epoch, EpochPhase};
+    use crate::member::{Member, MemberStatus};
+    use crate::params::Params;
+
+    const CREDIT: u128 = 1_000_000;
+    const SEC: u64 = 1_000_000_000;
+    const T_COMMIT: u64 = 4_200 * SEC;
+    const T_PAY: u64 = T_COMMIT + 1_800 * SEC;
+
+    fn acc(s: &str) -> AccountId {
+        format!("{s}.near").parse().unwrap()
+    }
+
+    fn at(who: &str, now: u64) {
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(who)).block_timestamp(now).block_height(88).build());
+    }
+
+    fn member(c: &mut X207Circle, name: &str, stake: u128, limit: u128) {
+        c.members.insert(
+            acc(name),
+            Member {
+                account_id: acc(name),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+                terms_hash: "a".repeat(64),
+                stake,
+                limit,
+                status: MemberStatus::Active,
+                admitted: false,
+                joined_at: 0,
+                settled_history: 0,
+                last_active_epoch: 1,
+                exit_requested_epoch: None,
+                withdraw_pending: false,
+                reactivate_epoch: None,
+            },
+        );
+        c.member_index.push(acc(name));
+        c.member_count += 1;
+        c.total_stake += stake;
+    }
+
+    fn position(net: i128, role: PositionRole, status: PositionStatus) -> Position {
+        Position { net, role, status, amount: net.unsigned_abs(), recovered: 0, payment_deadline: T_PAY, updated_at_block: 5 }
+    }
+
+    /// A circle whose epoch 1 is in `payment_window` with three members of stake 100 and limit 80.
+    fn base() -> X207Circle {
+        at("deployer", 0);
+        let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), Params::default(), 0);
+        for n in ["scraper", "gpu", "translator"] {
+            member(&mut c, n, 100 * CREDIT, 80 * CREDIT);
+        }
+        c.epochs.get_mut(&1).unwrap().start_clearing(3_600 * SEC);
+        c.epochs.get_mut(&1).unwrap().start_payment_window(T_COMMIT);
+        c
+    }
+
+    /// S1 after `commit_epoch`: scraper owes 35 (`due`), gpu is owed 35, translator is net zero.
+    fn s1() -> X207Circle {
+        let mut c = base();
+        c.put_position(1, acc("scraper"), position(-35 * CREDIT as i128, PositionRole::Debtor, PositionStatus::Due));
+        c.put_position(1, acc("gpu"), position(35 * CREDIT as i128, PositionRole::Creditor, PositionStatus::Claimable));
+        c.outstanding_debt.insert(acc("scraper"), 35 * CREDIT);
+        c
+    }
+
+    fn pay(c: &mut X207Circle, who: &str, amount: u128) {
+        at("usdt", T_COMMIT + SEC);
+        let _ = c.ft_on_transfer(acc(who), U128(amount), json!({"action": "settle", "epoch": 1}).to_string());
+    }
+
+    fn fin(c: &mut X207Circle) {
+        at("keeper", T_PAY);
+        c.finalize_epoch(1);
+    }
+
+    fn events() -> Vec<Value> {
+        get_logs().iter().filter_map(|l| l.strip_prefix("EVENT_JSON:")).map(|b| serde_json::from_str(b).unwrap()).collect()
+    }
+
+    fn named<'a>(all: &'a [Value], name: &str) -> Vec<&'a Value> {
+        all.iter().filter(|e| e["event"] == name).collect()
+    }
+
+    fn panics(f: impl FnOnce()) -> String {
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).expect_err("expected a panic");
+        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    fn pos(c: &X207Circle, who: &str) -> Position {
+        c.positions.get(&(1, acc(who))).unwrap().clone()
+    }
+
+    // TC-CT-033-01
+    #[test]
+    fn tc_ct_033_01_debtor_defaults() {
+        let mut c = s1();
+        fin(&mut c);
+        let p = pos(&c, "scraper");
+        assert_eq!((p.status, p.recovered, p.updated_at_block), (PositionStatus::Defaulted, 35 * CREDIT, 88));
+        let m = c.members.get(&acc("scraper")).unwrap();
+        assert_eq!((m.stake, m.limit, m.status), (65 * CREDIT, 0, MemberStatus::Suspended));
+        assert_eq!(c.outstanding_debt(acc("scraper")), U128(0));
+        let e = c.epochs.get(&1).unwrap();
+        assert_eq!((e.pool, e.shortfall, e.phase, e.finalized_at), (35 * CREDIT, 0, EpochPhase::Finalized, Some(T_PAY)));
+        assert_eq!(c.reserve, 0);
+        c.assert_d6(None);
+    }
+
+    // TC-CT-033-02, TC-CT-034-06 (order of the log inside one call)
+    #[test]
+    fn tc_ct_033_02_events() {
+        let mut c = s1();
+        fin(&mut c);
+        let all = events();
+        assert_eq!(all.iter().map(|e| e["event"].as_str().unwrap()).collect::<Vec<_>>(), ["member_defaulted", "limits_updated", "epoch_finalized"]);
+        let d = &all[0]["data"][0];
+        assert_eq!(
+            d,
+            &json!({"epoch":1,"account_id":"scraper.near","due":"35000000","from_stake":"35000000","from_reserve":"0","shortfall":"0","stake":"65000000","status":"suspended","position_status":"defaulted","outstanding_debt":"0"})
+        );
+        let f = &all[2]["data"][0];
+        assert_eq!((&f["defaulted_count"], &f["total_defaulted"], &f["pool"], &f["shortfall"]), (&json!(1), &json!("35000000"), &json!("35000000"), &json!("0")));
+        assert_eq!(f["finalized_at"], json!(T_PAY.to_string()));
+    }
+
+    // TC-CT-033-03
+    #[test]
+    fn tc_ct_033_03_all_paid() {
+        let mut c = s1();
+        pay(&mut c, "scraper", 35 * CREDIT);
+        fin(&mut c);
+        let all = events();
+        assert!(named(&all, "member_defaulted").is_empty());
+        let f = &named(&all, "epoch_finalized")[0]["data"][0];
+        assert_eq!((&f["defaulted_count"], &f["pool"]), (&json!(0), &json!("35000000")));
+        assert_eq!(pos(&c, "scraper").status, PositionStatus::Paid);
+        c.assert_d6(None);
+    }
+
+    // TC-CT-033-04
+    #[test]
+    fn tc_ct_033_04_exactly_at_payment_deadline() {
+        let mut c = s1();
+        at("keeper", T_PAY - 1);
+        assert!(panics(|| c.finalize_epoch(1)).contains("ERR_PAYMENT_WINDOW_OPEN"));
+        assert_eq!(c.epochs.get(&1).unwrap().phase, EpochPhase::PaymentWindow);
+        assert_eq!(pos(&c, "scraper").status, PositionStatus::Due);
+        fin(&mut c);
+        assert_eq!(c.epochs.get(&1).unwrap().phase, EpochPhase::Finalized);
+    }
+
+    // TC-CT-033-05
+    #[test]
+    fn tc_ct_033_05_wrong_phase() {
+        let mut open = base();
+        open.epochs.insert(2, Epoch::open(2, 0, 9_999 * SEC, Params::default()));
+        at("keeper", T_PAY);
+        assert!(panics(|| open.finalize_epoch(2)).contains("ERR_WRONG_PHASE"));
+        let mut clearing = base();
+        clearing.epochs.insert(
+            2,
+            {
+                let mut e = Epoch::open(2, 0, 10 * SEC, Params::default());
+                e.start_clearing(11 * SEC);
+                e
+            },
+        );
+        assert!(panics(|| clearing.finalize_epoch(2)).contains("ERR_WRONG_PHASE"));
+        let mut c = s1();
+        fin(&mut c);
+        assert!(panics(|| c.finalize_epoch(1)).contains("ERR_WRONG_PHASE"));
+    }
+
+    // TC-CT-033-06
+    #[test]
+    fn tc_ct_033_06_unknown_epoch() {
+        let mut c = s1();
+        at("keeper", T_PAY);
+        assert!(panics(|| c.finalize_epoch(99)).contains("ERR_UNKNOWN_EPOCH"));
+    }
+
+    // TC-CT-033-07
+    #[test]
+    fn tc_ct_033_07_no_due_left() {
+        let mut c = s1();
+        fin(&mut c);
+        assert!(c.list_positions(1, 0, 100).iter().all(|p| p.status != PositionStatus::Due));
+    }
+
+    // TC-CT-033-08: the status is what `register_*` checks (`active_member`, TC-CT-020-16..18)
+    #[test]
+    fn tc_ct_033_08_suspended_member_is_not_active() {
+        let mut c = s1();
+        fin(&mut c);
+        assert_eq!(c.members.get(&acc("scraper")).unwrap().status, MemberStatus::Suspended);
+        assert_eq!(c.headroom(acc("scraper")), U128(0));
+        assert_eq!(c.limit(acc("scraper")), U128(0));
+    }
+
+    // TC-CT-033-09
+    #[test]
+    fn tc_ct_033_09_only_debtor_stake_is_cut() {
+        let mut c = s1();
+        fin(&mut c);
+        for who in ["translator", "gpu"] {
+            assert_eq!(c.members.get(&acc(who)).unwrap().stake, 100 * CREDIT, "{who}");
+        }
+        assert_eq!(c.total_stake, 265 * CREDIT);
+    }
+
+    // TC-CT-033-10
+    #[test]
+    fn tc_ct_033_10_reserve_and_shortfall() {
+        let mut c = s1();
+        c.members.get_mut(&acc("scraper")).unwrap().stake = 20 * CREDIT;
+        c.members.get_mut(&acc("scraper")).unwrap().limit = 16 * CREDIT;
+        c.total_stake -= 80 * CREDIT;
+        c.reserve = 10 * CREDIT;
+        fin(&mut c);
+        let all = events();
+        let d = &named(&all, "member_defaulted")[0]["data"][0];
+        assert_eq!(
+            (&d["from_stake"], &d["from_reserve"], &d["shortfall"], &d["stake"]),
+            (&json!("20000000"), &json!("10000000"), &json!("5000000"), &json!("0"))
+        );
+        assert_eq!(&named(&all, "epoch_finalized")[0]["data"][0]["shortfall"], &json!("5000000"));
+        let e = c.epochs.get(&1).unwrap();
+        assert_eq!((e.pool, e.shortfall, c.reserve), (30 * CREDIT, 5 * CREDIT, 0));
+        assert_eq!(pos(&c, "scraper").recovered, 30 * CREDIT);
+        c.assert_d6(None);
+    }
+
+    // TC-CT-033-11
+    #[test]
+    fn tc_ct_033_11_two_debtors() {
+        let mut c = base();
+        c.put_position(1, acc("scraper"), position(-35 * CREDIT as i128, PositionRole::Debtor, PositionStatus::Due));
+        c.put_position(1, acc("translator"), position(-10 * CREDIT as i128, PositionRole::Debtor, PositionStatus::Due));
+        c.put_position(1, acc("gpu"), position(45 * CREDIT as i128, PositionRole::Creditor, PositionStatus::Claimable));
+        c.outstanding_debt.insert(acc("scraper"), 35 * CREDIT);
+        c.outstanding_debt.insert(acc("translator"), 10 * CREDIT);
+        fin(&mut c);
+        assert_eq!(c.members.get(&acc("scraper")).unwrap().stake, 65 * CREDIT);
+        assert_eq!(c.members.get(&acc("translator")).unwrap().stake, 90 * CREDIT);
+        assert_eq!(c.members.get(&acc("gpu")).unwrap().stake, 100 * CREDIT);
+        let all = events();
+        assert_eq!(named(&all, "member_defaulted").len(), 2);
+        assert_eq!(c.epochs.get(&1).unwrap().pool, 45 * CREDIT);
+        let f = &named(&all, "epoch_finalized")[0]["data"][0];
+        assert_eq!((&f["defaulted_count"], &f["total_defaulted"]), (&json!(2), &json!("45000000")));
+        c.assert_d6(None);
+    }
+
+    // TC-CT-033-12
+    #[test]
+    fn tc_ct_033_12_epoch_without_positions() {
+        let mut c = base();
+        fin(&mut c);
+        let f = &named(&events(), "epoch_finalized")[0]["data"][0].clone();
+        assert_eq!((&f["defaulted_count"], &f["pool"]), (&json!(0), &json!("0")));
+    }
+
+    #[test]
+    fn finalize_freezes_pool_and_claimable_for_claim() {
+        let mut c = s1();
+        fin(&mut c);
+        let e = c.epochs.get(&1).unwrap();
+        assert_eq!((e.pool_final, e.claimable_final), (35 * CREDIT, 35 * CREDIT));
+        assert_eq!(pos(&c, "gpu").status, PositionStatus::Claimable);
+    }
+
+    // TC-CT-034-01, TC-CT-034-02, TC-CT-034-05
+    #[test]
+    fn tc_ct_034_01_02_05_cash_settlement_raises_limit() {
+        let mut c = s1();
+        c.members.get_mut(&acc("scraper")).unwrap().settled_history = 0;
+        pay(&mut c, "scraper", 35 * CREDIT);
+        fin(&mut c);
+        assert_eq!(c.limit(acc("scraper")), U128(83_500_000));
+        assert_eq!(c.limit(acc("translator")), U128(80 * CREDIT));
+        assert_eq!(c.limit(acc("gpu")), U128(80 * CREDIT));
+        let all = events();
+        let changes = &named(&all, "limits_updated")[0]["data"][0]["changes"];
+        assert_eq!(changes, &json!([{"account_id":"scraper.near","old_limit":"80000000","new_limit":"83500000","status":"active"}]));
+    }
+
+    // TC-CT-034-03
+    #[test]
+    fn tc_ct_034_03_defaulted_member_not_in_changes() {
+        let mut c = s1();
+        fin(&mut c);
+        let all = events();
+        let limits = named(&all, "limits_updated");
+        assert_eq!(limits.len(), 1);
+        assert_eq!(limits[0]["data"][0]["changes"], json!([]));
+        assert_eq!((limits[0]["data"][0]["chunk"].as_u64(), limits[0]["data"][0]["chunks"].as_u64()), (Some(0), Some(1)));
+    }
+
+    // TC-CT-034-04
+    #[test]
+    fn tc_ct_034_04_limit_never_above_stake() {
+        for paid in [true, false] {
+            let mut c = s1();
+            c.members.get_mut(&acc("scraper")).unwrap().settled_history = 500 * CREDIT;
+            if paid {
+                pay(&mut c, "scraper", 35 * CREDIT);
+            }
+            fin(&mut c);
+            for id in c.member_index.iter() {
+                let m = c.members.get(id).unwrap();
+                assert!(m.limit <= m.stake, "{id}");
+            }
+        }
+    }
+
+    // TC-CT-034-07
+    #[test]
+    fn tc_ct_034_07_uses_snapshot_params_of_the_epoch() {
+        let mut c = s1();
+        c.epochs.get_mut(&1).unwrap().params.limit_growth = 2_000;
+        let mut next = Params::default();
+        next.limit_growth = 0;
+        c.epochs.insert(2, Epoch::open(2, T_COMMIT, 9_999 * SEC, next));
+        c.current_epoch = 2;
+        pay(&mut c, "scraper", 35 * CREDIT);
+        fin(&mut c);
+        // 100 * 80% + 35 * 20% = 87
+        assert_eq!(c.limit(acc("scraper")), U128(87 * CREDIT));
+    }
+
+    // TC-CT-034-08
+    #[test]
+    fn tc_ct_034_08_limit_decay_is_not_applied_in_p0() {
+        assert_eq!(Params::default().limit_decay, 0);
+        let mut c = s1();
+        c.epochs.get_mut(&1).unwrap().params.limit_decay = 1_000;
+        c.members.get_mut(&acc("translator")).unwrap().last_active_epoch = 0;
+        fin(&mut c);
+        assert_eq!(c.limit(acc("translator")), U128(80 * CREDIT));
+    }
+
+    // TC-CT-034-09
+    #[test]
+    fn tc_ct_034_09_limits_updated_is_chunked() {
+        let mut c = base();
+        for i in 0..64 {
+            member(&mut c, &format!("m{i}"), 100 * CREDIT, 50 * CREDIT);
+        }
+        fin(&mut c);
+        let all = events();
+        let limits = named(&all, "limits_updated");
+        assert_eq!(limits.len(), 2);
+        assert_eq!(limits[0]["data"][0]["changes"].as_array().unwrap().len(), 50);
+        assert_eq!(limits[1]["data"][0]["changes"].as_array().unwrap().len(), 14);
+        assert_eq!((limits[1]["data"][0]["chunk"].as_u64(), limits[1]["data"][0]["chunks"].as_u64()), (Some(1), Some(2)));
     }
 }

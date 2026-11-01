@@ -68,6 +68,10 @@ pub struct Epoch {
     pub total_cleared: u128,
     pub pool: u128,
     pub shortfall: u128,
+    /// Frozen by `finalize_epoch` (K-10): the pool and the sum of creditor `claimable` amounts, so the
+    /// order of claims cannot change the pro-rata ratio when `shortfall` > 0.
+    pub pool_final: u128,
+    pub claimable_final: u128,
     /// D2 snapshot: edge index -> `(payer, payee)`.
     pub edges: Vector<(AccountId, AccountId)>,
     /// D2 aggregate: participant index -> account.
@@ -96,6 +100,8 @@ impl Epoch {
             total_cleared: 0,
             pool: 0,
             shortfall: 0,
+            pool_final: 0,
+            claimable_final: 0,
             edges: Vector::new(StorageKey::EpochEdges(epoch)),
             participants: Vector::new(StorageKey::EpochParticipants(epoch)),
             position_accounts: Vector::new(StorageKey::EpochPositions(epoch)),

@@ -20,11 +20,6 @@ fn not_implemented(method: &str) -> ! {
 
 #[near]
 impl X207Circle {
-    // F3 clearing and F6 default.
-    pub fn finalize_epoch(&mut self, epoch: EpochId) {
-        not_implemented("finalize_epoch")
-    }
-
     // F4 settlement.
     #[payable]
     pub fn claim(&mut self, epoch: EpochId, destination: ClaimDestination) -> near_sdk::Promise {
