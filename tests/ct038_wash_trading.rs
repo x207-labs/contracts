@@ -1,10 +1,11 @@
 //! CT-038: anti wash trading (ADR-08). Members are written into storage (`seed_member`), because
-//! `join` and stake are separate items. TC-CT-038-01 stops after `commit_epoch` and TC-CT-038-02
-//! is not written: both need `finalize_epoch`. Needs `cargo near build non-reproducible-wasm` first.
+//! `join` and stake were separate items when this file was written. TC-CT-038-01 runs through `finalize_epoch`
+//! on seeded members and TC-CT-038-02 on joined and staked ones. Needs `cargo near build non-reproducible-wasm` first.
 
 mod common;
 
 use common::circle::{account_of, failure_text, short_params, Circle, CREDIT};
+use common::flow::{finalize, s1_committed};
 use near_sdk::borsh;
 use near_sdk::PublicKey;
 use serde_json::{json, Value};
@@ -41,7 +42,7 @@ async fn make_pending(c: &Circle, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-// TC-CT-038-01 (up to commit): a fully cleared cycle leaves no D5 record, `settled_history` 0, limit 80
+// TC-CT-038-01: a fully cleared cycle leaves no D5 record, `settled_history` 0, limit 80, also after finalize
 #[tokio::test]
 async fn cycle_clearing_does_not_raise_limits() -> anyhow::Result<()> {
     let mut c = Circle::deploy(short_params()).await?;
@@ -60,6 +61,8 @@ async fn cycle_clearing_does_not_raise_limits() -> anyhow::Result<()> {
     c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
     let committed = c.call_keeper("commit_epoch", json!({"epoch": 1})).await?;
     assert!(committed.is_success(), "{:?}", failure_text(&committed));
+    let fin = finalize(&c).await?;
+    assert!(fin.is_success(), "{:?}", failure_text(&fin));
 
     let positions = c.view("list_positions", json!({"epoch": 1, "from_index": 0, "limit": 10})).await?;
     assert_eq!(positions, json!([]));
@@ -97,5 +100,21 @@ async fn member_without_stake_cannot_register() -> anyhow::Result<()> {
     assert!(failure_text(&as_payee).expect("rejected").contains("ERR_PAYEE_NOT_ACTIVE"));
     let list = c.view("list_obligations", json!({"epoch": 1, "from_index": 0, "limit": 10})).await?;
     assert_eq!(list, json!([]));
+    Ok(())
+}
+
+// TC-CT-038-02: S1.fin, the debtor pays cash inside the window and finalize raises the limit but never above the stake
+#[tokio::test]
+async fn cash_settlement_raises_the_limit() -> anyhow::Result<()> {
+    let f = s1_committed().await?;
+    let scraper = f.accounts["scraper"].clone();
+    let pay = f.transfer_call(&f.usdt, &scraper, 35 * CREDIT, r#"{"action":"settle","epoch":1}"#).await?;
+    assert!(pay.is_success(), "{:?}", failure_text(&pay));
+    let fin = finalize(&f.circle).await?;
+    assert!(fin.is_success(), "{:?}", failure_text(&fin));
+    let member = f.member("scraper").await?;
+    assert_eq!(member["limit"], "83500000", "{member}");
+    let stake: u128 = member["stake"].as_str().unwrap().parse()?;
+    assert!(83_500_000 <= stake);
     Ok(())
 }
