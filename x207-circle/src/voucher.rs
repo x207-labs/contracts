@@ -219,6 +219,12 @@ impl X207Circle {
     pub fn register_cumulative(&mut self, voucher: Voucher, signature: String) -> U128 {
         self.register(voucher, signature, RegisterMode::Cumulative)
     }
+
+    /// Demo mode (ADR-26): one voucher per request, `seq` must be `last_seq + 1`. Same checks and
+    /// state as `register_cumulative`; returns the pair obligation after registration.
+    pub fn register_voucher(&mut self, voucher: Voucher, signature: String) -> U128 {
+        self.register(voucher, signature, RegisterMode::PerRequest)
+    }
 }
 
 #[cfg(test)]
@@ -646,5 +652,142 @@ mod register_tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(x, sig)));
         assert!(r.is_err());
         assert_eq!(before, (c.get_epoch(Some(1)).unwrap(), c.outstanding_debt(acc("translator.near"))));
+    }
+
+    fn reg_demo(c: &mut X207Circle, voucher: Voucher) -> U128 {
+        let sig = sig_with(&voucher.payer.as_str().trim_end_matches(".near").to_string(), &voucher);
+        c.register_voucher(voucher, sig)
+    }
+
+    fn panic_code(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
+        let err = std::panic::catch_unwind(f).expect_err("expected a panic");
+        let msg = err
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        // The mocked host wraps `env::panic_str` text in a `HostError`, so pick the code out of the message.
+        let start = msg.find("ERR_").unwrap_or_else(|| panic!("no ERR_ code in: {msg}"));
+        msg[start..].chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect()
+    }
+
+    // TC-CT-022-01
+    #[test]
+    fn tc_ct_022_01_first_per_request_registration() {
+        let mut c = circle();
+        assert_eq!(reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000)), U128(20_000));
+        let e = last_event();
+        assert_eq!(e["mode"], json!("per_request"));
+        assert_eq!(e["delta"], json!("20000"));
+        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(20_000));
+    }
+
+    // TC-CT-022-02
+    #[test]
+    fn tc_ct_022_02_next_seq() {
+        let mut c = circle();
+        reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000));
+        assert_eq!(reg_demo(&mut c, v("translator", "scraper", 1, 2, 40_000)), U128(40_000));
+        assert_eq!(last_event()["delta"], json!("20000"));
+    }
+
+    // TC-CT-022-03
+    #[test]
+    fn tc_ct_022_03_seq_gap() {
+        let mut c = circle();
+        reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000));
+        reg_demo(&mut c, v("translator", "scraper", 1, 2, 40_000));
+        let code = panic_code(std::panic::AssertUnwindSafe(|| {
+            reg_demo(&mut c, v("translator", "scraper", 1, 4, 80_000));
+        }));
+        assert_eq!(code, "ERR_SEQ_GAP");
+        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 2);
+    }
+
+    // TC-CT-022-04
+    #[test]
+    fn tc_ct_022_04_same_seq_not_increasing() {
+        let mut c = circle();
+        reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000));
+        reg_demo(&mut c, v("translator", "scraper", 1, 2, 40_000));
+        let code = panic_code(std::panic::AssertUnwindSafe(|| {
+            reg_demo(&mut c, v("translator", "scraper", 1, 2, 40_000));
+        }));
+        assert_eq!(code, "ERR_SEQ_NOT_INCREASING");
+    }
+
+    /// TC-CT-022-05: one test per negative fixture and mode, so each gets its own mocked storage
+    /// (`testing_env!` keeps storage inside one test). Both modes must give the same error code.
+    fn negative_case(demo: bool, prior: Option<(u64, u128)>, mutate: fn(&mut Voucher), signer: &str, now: u64, expected: &str) {
+        let mut c = circle();
+        if let Some((seq, cumulative)) = prior {
+            reg(&mut c, v("translator", "scraper", 1, seq, cumulative));
+        }
+        at(now);
+        let mut voucher = v("translator", "scraper", 1, if prior.is_some() { 2 } else { 1 }, CREDIT);
+        mutate(&mut voucher);
+        let sig = sig_with(signer, &voucher);
+        let code = panic_code(std::panic::AssertUnwindSafe(|| {
+            if demo {
+                c.register_voucher(voucher, sig);
+            } else {
+                c.register_cumulative(voucher, sig);
+            }
+        }));
+        assert_eq!(code, expected);
+    }
+
+    macro_rules! negative_cases {
+        ($($name:ident: $prior:expr, $mutate:expr, $signer:expr, $now:expr => $code:expr;)*) => {
+            mod tc_ct_022_05 {
+                use super::*;
+                $(
+                    mod $name {
+                        use super::*;
+                        #[test]
+                        fn register_cumulative() { negative_case(false, $prior, $mutate, $signer, $now, $code); }
+                        #[test]
+                        fn register_voucher() { negative_case(true, $prior, $mutate, $signer, $now, $code); }
+                    }
+                )*
+            }
+        };
+    }
+
+    negative_cases! {
+        wrong_circle: None, |x| x.circle = acc("other.test.near"), "translator", 1_000 => "ERR_WRONG_CIRCLE";
+        bad_unit: None, |x| x.unit = "usd".into(), "translator", 1_000 => "ERR_BAD_UNIT";
+        non_ascii_resource: None, |x| x.resource = "caf\u{e9}".into(), "translator", 1_000 => "ERR_RESOURCE_NOT_ASCII";
+        self_payment: None, |x| x.payee = x.payer.clone(), "translator", 1_000 => "ERR_SELF_PAYMENT";
+        epoch_ahead: None, |x| x.epoch = 2, "translator", 1_000 => "ERR_EPOCH_MISMATCH";
+        past_cutoff: None, |_| {}, "translator", 1_000 + 3600 * SEC => "ERR_PAST_CUTOFF";
+        payer_pending: None, |x| x.payer = acc("pending.near"), "pending", 1_000 => "ERR_PAYER_NOT_ACTIVE";
+        payee_pending: None, |x| x.payee = acc("pending.near"), "translator", 1_000 => "ERR_PAYEE_NOT_ACTIVE";
+        lower_seq: Some((5, 25 * CREDIT)), |x| x.seq = 4, "translator", 1_000 => "ERR_SEQ_NOT_INCREASING";
+        same_seq: Some((1, 25 * CREDIT)), |x| x.seq = 1, "translator", 1_000 => "ERR_SEQ_NOT_INCREASING";
+        cumulative_decrease: Some((1, 25 * CREDIT)), |x| x.cumulative_amount = U128(24 * CREDIT), "translator", 1_000 => "ERR_CUMULATIVE_DECREASED";
+        headroom_exceeded: None, |x| x.cumulative_amount = U128(81 * CREDIT), "translator", 1_000 => "ERR_INSUFFICIENT_CREDIT";
+        wrong_signer: None, |_| {}, "gpu", 1_000 => "ERR_BAD_SIGNATURE";
+    }
+
+    // TC-CT-022-06 (K-23): both modes share the pair state
+    #[test]
+    fn tc_ct_022_06_mixed_modes_share_pair_state() {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 3, 30_000));
+        assert_eq!(last_event()["mode"], json!("cumulative"));
+        assert_eq!(reg_demo(&mut c, v("translator", "scraper", 1, 4, 50_000)), U128(50_000));
+        assert_eq!(last_event()["mode"], json!("per_request"));
+        assert_eq!(last_event()["delta"], json!("20000"));
+        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 4);
+    }
+
+    // TC-CT-021-07
+    #[test]
+    fn tc_ct_021_07_last_seq_other_epoch_is_zero() {
+        let mut c = circle();
+        reg(&mut c, v("translator", "scraper", 1, 5, CREDIT));
+        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 5);
+        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 2), 0);
     }
 }
