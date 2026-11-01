@@ -1,230 +1,20 @@
 {
-  "interface_version": "0.0.1",
-  "schema_version": "0.4.0",
-  "metadata": {
-    "name": "x207-circle",
-    "version": "0.0.1"
-  },
-  "event_standard": "x207",
-  "events": [
-    {
-      "name": "member_joined",
-      "fields": [
-        "account_id",
-        "pubkey_voucher",
-        "terms_hash",
-        "status",
-        "joined_at"
-      ]
-    },
-    {
-      "name": "stake_added",
-      "fields": [
-        "account_id",
-        "sender_id",
-        "amount",
-        "stake",
-        "limit",
-        "status"
-      ]
-    },
-    {
-      "name": "voucher_registered",
-      "fields": [
-        "payer",
-        "payee",
-        "epoch",
-        "seq",
-        "cumulative_amount",
-        "delta",
-        "obligation",
-        "outstanding_debt",
-        "mode"
-      ]
-    },
-    {
-      "name": "epoch_cutoff",
-      "fields": [
-        "epoch",
-        "closed_at",
-        "proposal_deadline",
-        "edge_count",
-        "participant_count",
-        "total_obligation",
-        "next_epoch",
-        "next_cutoff_at"
-      ]
-    },
-    {
-      "name": "clearing_submitted",
-      "fields": [
-        "epoch",
-        "solver",
-        "cleared_total",
-        "edge_count",
-        "replaced_solver",
-        "replaced_cleared_total"
-      ]
-    },
-    {
-      "name": "clearing_applied",
-      "fields": [
-        "epoch",
-        "solver",
-        "cleared_total",
-        "edges",
-        "clearing_fee",
-        "solver_fee",
-        "chunk",
-        "chunks"
-      ],
-      "list_item_fields": [
-        "debtor",
-        "creditor",
-        "cleared"
-      ]
-    },
-    {
-      "name": "epoch_committed",
-      "fields": [
-        "epoch",
-        "committed_at",
-        "payment_deadline",
-        "total_due",
-        "total_claimable",
-        "positions",
-        "chunk",
-        "chunks"
-      ],
-      "list_item_fields": [
-        "account_id",
-        "net",
-        "role",
-        "status",
-        "amount",
-        "outstanding_debt"
-      ]
-    },
-    {
-      "name": "residual_paid",
-      "fields": [
-        "epoch",
-        "account_id",
-        "sender_id",
-        "amount",
-        "refunded",
-        "settled_history"
-      ]
-    },
-    {
-      "name": "member_defaulted",
-      "fields": [
-        "epoch",
-        "account_id",
-        "due",
-        "from_stake",
-        "from_reserve",
-        "shortfall",
-        "stake",
-        "status",
-        "position_status",
-        "outstanding_debt"
-      ]
-    },
-    {
-      "name": "limits_updated",
-      "fields": [
-        "epoch",
-        "changes",
-        "chunk",
-        "chunks"
-      ],
-      "list_item_fields": [
-        "account_id",
-        "old_limit",
-        "new_limit",
-        "status"
-      ]
-    },
-    {
-      "name": "epoch_finalized",
-      "fields": [
-        "epoch",
-        "finalized_at",
-        "defaulted_count",
-        "total_defaulted",
-        "pool",
-        "shortfall"
-      ]
-    },
-    {
-      "name": "residual_claimed",
-      "fields": [
-        "epoch",
-        "account_id",
-        "amount",
-        "destination",
-        "status"
-      ]
-    },
-    {
-      "name": "residual_claim_failed",
-      "fields": [
-        "epoch",
-        "account_id",
-        "amount",
-        "destination",
-        "status"
-      ]
-    },
-    {
-      "name": "params_updated",
-      "fields": [
-        "old",
-        "new",
-        "changed",
-        "effective_epoch"
-      ]
-    },
-    {
-      "name": "exit_requested",
-      "fields": [
-        "account_id",
-        "epoch"
-      ]
-    },
-    {
-      "name": "stake_withdrawn",
-      "fields": [
-        "account_id",
-        "amount"
-      ]
-    },
-    {
-      "name": "stake_withdraw_failed",
-      "fields": [
-        "account_id",
-        "amount"
-      ]
-    }
-  ],
   "body": {
     "functions": [
       {
-        "name": "claim",
         "kind": "call",
         "modifiers": [
           "payable"
         ],
+        "name": "claim",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
@@ -233,7 +23,8 @@
                 "$ref": "#/definitions/ClaimDestination"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
         },
         "result": {
           "serialization_type": "json",
@@ -243,61 +34,60 @@
         }
       },
       {
+        "kind": "call",
         "name": "close_epoch",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             }
-          ]
-        },
-        "kind": "call"
-      },
-      {
-        "name": "commit_epoch",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            }
-          ]
-        },
-        "kind": "call"
-      },
-      {
-        "name": "finalize_epoch",
-        "kind": "call",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            }
-          ]
+          ],
+          "serialization_type": "json"
         }
       },
       {
-        "name": "ft_on_transfer",
         "kind": "call",
+        "name": "commit_epoch",
         "params": {
-          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "finalize_epoch",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "ft_on_transfer",
+        "params": {
           "args": [
             {
               "name": "sender_id",
@@ -317,7 +107,8 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
         },
         "result": {
           "serialization_type": "json",
@@ -327,8 +118,8 @@
         }
       },
       {
-        "name": "get_circle",
         "kind": "view",
+        "name": "get_circle",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -337,7 +128,21 @@
         }
       },
       {
+        "kind": "view",
         "name": "get_clearing_proposal",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -350,24 +155,27 @@
               }
             ]
           }
-        },
+        }
+      },
+      {
         "kind": "view",
+        "name": "get_epoch",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
               }
             }
-          ]
-        }
-      },
-      {
-        "name": "get_epoch",
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -380,28 +188,11 @@
               }
             ]
           }
-        },
-        "kind": "view",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": [
-                  "integer",
-                  "null"
-                ],
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            }
-          ]
         }
       },
       {
-        "name": "get_owner",
         "kind": "view",
+        "name": "get_owner",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -410,18 +201,18 @@
         }
       },
       {
+        "kind": "view",
         "name": "get_params",
         "result": {
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/Params"
           }
-        },
-        "kind": "view"
+        }
       },
       {
-        "name": "get_pending_params",
         "kind": "view",
+        "name": "get_pending_params",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -437,8 +228,8 @@
         }
       },
       {
-        "name": "get_pool",
         "kind": "view",
+        "name": "get_pool",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -447,16 +238,9 @@
         }
       },
       {
-        "name": "headroom",
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
-        },
         "kind": "view",
+        "name": "headroom",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "account_id",
@@ -464,12 +248,9 @@
                 "type": "string"
               }
             }
-          ]
-        }
-      },
-      {
-        "name": "interface_version",
-        "kind": "view",
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -478,19 +259,22 @@
         }
       },
       {
-        "name": "join",
+        "kind": "view",
+        "name": "interface_version",
         "result": {
           "serialization_type": "json",
           "type_schema": {
-            "$ref": "#/definitions/MemberView"
+            "type": "string"
           }
-        },
+        }
+      },
+      {
         "kind": "call",
         "modifiers": [
           "payable"
         ],
+        "name": "join",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "circle_id",
@@ -510,22 +294,20 @@
                 "type": "string"
               }
             }
-          ]
-        }
-      },
-      {
-        "name": "last_seq",
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0.0
+            "$ref": "#/definitions/MemberView"
           }
-        },
+        }
+      },
+      {
         "kind": "view",
+        "name": "last_seq",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "payer",
@@ -542,158 +324,166 @@
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
         }
       },
       {
+        "kind": "view",
         "name": "limit",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
             "type": "string"
           }
-        },
-        "kind": "view",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "account_id",
-              "type_schema": {
-                "type": "string"
-              }
-            }
-          ]
         }
       },
       {
+        "kind": "view",
         "name": "list_members",
+        "params": {
+          "args": [
+            {
+              "name": "from_index",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
-            "type": "array",
             "items": {
               "$ref": "#/definitions/MemberView"
-            }
+            },
+            "type": "array"
           }
-        },
+        }
+      },
+      {
         "kind": "view",
+        "name": "list_obligations",
         "params": {
-          "serialization_type": "json",
           "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
             {
               "name": "from_index",
               "type_schema": {
-                "type": "integer",
                 "format": "uint32",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
               "name": "limit",
               "type_schema": {
-                "type": "integer",
                 "format": "uint32",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             }
-          ]
-        }
-      },
-      {
-        "name": "list_obligations",
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
-            "type": "array",
             "items": {
               "$ref": "#/definitions/ObligationView"
-            }
+            },
+            "type": "array"
           }
-        },
+        }
+      },
+      {
         "kind": "view",
+        "name": "list_positions",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
               "name": "from_index",
               "type_schema": {
-                "type": "integer",
                 "format": "uint32",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
               "name": "limit",
               "type_schema": {
-                "type": "integer",
                 "format": "uint32",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             }
-          ]
-        }
-      },
-      {
-        "name": "list_positions",
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
-            "type": "array",
             "items": {
               "$ref": "#/definitions/PositionView"
-            }
+            },
+            "type": "array"
           }
-        },
-        "kind": "view",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            },
-            {
-              "name": "from_index",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0.0
-              }
-            },
-            {
-              "name": "limit",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0.0
-              }
-            }
-          ]
         }
       },
       {
-        "name": "member",
         "kind": "view",
+        "name": "member",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "account_id",
@@ -701,7 +491,8 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
         },
         "result": {
           "serialization_type": "json",
@@ -718,7 +509,27 @@
         }
       },
       {
+        "kind": "view",
         "name": "net_position",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -731,32 +542,15 @@
               }
             ]
           }
-        },
-        "kind": "view",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            },
-            {
-              "name": "account_id",
-              "type_schema": {
-                "type": "string"
-              }
-            }
-          ]
         }
       },
       {
+        "kind": "call",
+        "modifiers": [
+          "init"
+        ],
         "name": "new",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "owner_id",
@@ -795,38 +589,21 @@
                 ]
               }
             }
-          ]
-        },
-        "kind": "call",
-        "modifiers": [
-          "init"
-        ]
+          ],
+          "serialization_type": "json"
+        }
       },
       {
-        "name": "obligation",
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ObligationView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
         "kind": "view",
+        "name": "obligation",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
@@ -841,24 +618,37 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ObligationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       {
-        "name": "on_claim_resolved",
         "kind": "call",
         "modifiers": [
           "private"
         ],
+        "name": "on_claim_resolved",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
@@ -879,7 +669,8 @@
                 "$ref": "#/definitions/ClaimDestination"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
         },
         "result": {
           "serialization_type": "json",
@@ -889,13 +680,12 @@
         }
       },
       {
-        "name": "on_withdraw_resolved",
         "kind": "call",
         "modifiers": [
           "private"
         ],
+        "name": "on_withdraw_resolved",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "account_id",
@@ -909,7 +699,8 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
         },
         "result": {
           "serialization_type": "json",
@@ -919,16 +710,9 @@
         }
       },
       {
-        "name": "outstanding_debt",
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
-        },
         "kind": "view",
+        "name": "outstanding_debt",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "account_id",
@@ -936,20 +720,20 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
         }
       },
       {
+        "kind": "call",
         "name": "register_cumulative",
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
-        },
-        "kind": "call",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "voucher",
@@ -963,20 +747,20 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
         }
       },
       {
+        "kind": "call",
         "name": "register_voucher",
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
-        },
-        "kind": "call",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "voucher",
@@ -990,20 +774,27 @@
                 "type": "string"
               }
             }
-          ]
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
         }
       },
       {
-        "name": "request_exit",
         "kind": "call",
         "modifiers": [
           "payable"
-        ]
+        ],
+        "name": "request_exit"
       },
       {
+        "kind": "call",
         "name": "set_params",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "params",
@@ -1011,80 +802,80 @@
                 "$ref": "#/definitions/Params"
               }
             }
-          ]
-        },
-        "kind": "call"
+          ],
+          "serialization_type": "json"
+        }
       },
       {
+        "kind": "view",
         "name": "simulate_clearing",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "edges",
+              "type_schema": {
+                "items": {
+                  "$ref": "#/definitions/ClearingEdge"
+                },
+                "type": "array"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/SimulationResult"
           }
-        },
-        "kind": "view",
+        }
+      },
+      {
+        "kind": "call",
+        "name": "submit_clearing",
         "params": {
-          "serialization_type": "json",
           "args": [
             {
               "name": "epoch",
               "type_schema": {
-                "type": "integer",
                 "format": "uint64",
-                "minimum": 0.0
+                "minimum": 0.0,
+                "type": "integer"
               }
             },
             {
               "name": "edges",
               "type_schema": {
-                "type": "array",
                 "items": {
                   "$ref": "#/definitions/ClearingEdge"
-                }
+                },
+                "type": "array"
               }
             }
-          ]
-        }
-      },
-      {
-        "name": "submit_clearing",
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
             "type": "string"
           }
-        },
-        "kind": "call",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            },
-            {
-              "name": "edges",
-              "type_schema": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/definitions/ClearingEdge"
-                }
-              }
-            }
-          ]
         }
       },
       {
-        "name": "withdraw_stake",
         "kind": "call",
         "modifiers": [
           "payable"
         ],
+        "name": "withdraw_stake",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -1095,15 +886,13 @@
     ],
     "root_schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "String",
-      "type": "string",
       "definitions": {
         "Admission": {
-          "type": "string",
           "enum": [
             "open",
             "dao"
-          ]
+          ],
+          "type": "string"
         },
         "CircleConfig": {
           "properties": {
@@ -1114,17 +903,17 @@
               "type": "string"
             },
             "decimals": {
-              "type": "integer",
               "format": "uint8",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "intents_id": {
               "type": "string"
             },
             "member_count": {
-              "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "network": {
               "type": "string"
@@ -1139,7 +928,6 @@
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "circle_id",
             "contract_id",
@@ -1150,7 +938,8 @@
             "owner_id",
             "unit",
             "usdt_token_id"
-          ]
+          ],
+          "type": "object"
         },
         "ClaimDestination": {
           "enum": [
@@ -1171,12 +960,12 @@
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "cleared",
             "creditor",
             "debtor"
-          ]
+          ],
+          "type": "object"
         },
         "ClearingProposal": {
           "properties": {
@@ -1187,20 +976,20 @@
               "type": "boolean"
             },
             "edge_count": {
-              "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "edges": {
-              "type": "array",
               "items": {
                 "$ref": "#/definitions/ClearingEdge"
-              }
+              },
+              "type": "array"
             },
             "epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "solver": {
               "type": "string"
@@ -1209,7 +998,6 @@
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "cleared_total",
             "committed",
@@ -1218,7 +1006,8 @@
             "epoch",
             "solver",
             "submitted_at"
-          ]
+          ],
+          "type": "object"
         },
         "EpochPhaseView": {
           "enum": [
@@ -1249,14 +1038,14 @@
               "type": "string"
             },
             "edge_count": {
-              "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "finalized_at": {
               "type": [
@@ -1271,9 +1060,9 @@
               "$ref": "#/definitions/Params"
             },
             "participant_count": {
-              "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "payment_deadline": {
               "type": [
@@ -1303,7 +1092,6 @@
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "cutoff_at",
             "edge_count",
@@ -1316,26 +1104,27 @@
             "shortfall",
             "total_cleared",
             "total_obligation"
-          ]
+          ],
+          "type": "object"
         },
         "Fees": {
-          "type": "object",
+          "properties": {
+            "clearing_fee_bps": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "solver_fee_bps": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
           "required": [
             "clearing_fee_bps",
             "solver_fee_bps"
           ],
-          "properties": {
-            "clearing_fee_bps": {
-              "minimum": 0.0,
-              "type": "integer",
-              "format": "uint16"
-            },
-            "solver_fee_bps": {
-              "minimum": 0.0,
-              "type": "integer",
-              "format": "uint16"
-            }
-          }
+          "type": "object"
         },
         "MemberStatus": {
           "enum": [
@@ -1355,20 +1144,20 @@
               "type": "boolean"
             },
             "exit_requested_epoch": {
+              "format": "uint64",
+              "minimum": 0.0,
               "type": [
                 "integer",
                 "null"
-              ],
-              "format": "uint64",
-              "minimum": 0.0
+              ]
             },
             "joined_at": {
               "type": "string"
             },
             "last_active_epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "limit": {
               "type": "string"
@@ -1389,7 +1178,6 @@
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "account_id",
             "admitted",
@@ -1401,7 +1189,8 @@
             "stake",
             "status",
             "terms_hash"
-          ]
+          ],
+          "type": "object"
         },
         "ObligationView": {
           "properties": {
@@ -1418,20 +1207,19 @@
               "type": "string"
             },
             "epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "last_seq": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "obligation": {
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "cleared",
             "creditor",
@@ -1440,7 +1228,8 @@
             "epoch",
             "last_seq",
             "obligation"
-          ]
+          ],
+          "type": "object"
         },
         "Params": {
           "properties": {
@@ -1448,14 +1237,14 @@
               "$ref": "#/definitions/Admission"
             },
             "base_limit_ratio": {
-              "type": "integer",
               "format": "uint16",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "epoch_length": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "fees": {
               "$ref": "#/definitions/Fees"
@@ -1464,27 +1253,26 @@
               "type": "string"
             },
             "limit_decay": {
-              "type": "integer",
               "format": "uint16",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "limit_growth": {
-              "type": "integer",
               "format": "uint16",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "payment_window": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "proposal_window": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             }
           },
-          "type": "object",
           "required": [
             "admission",
             "base_limit_ratio",
@@ -1495,24 +1283,25 @@
             "limit_growth",
             "payment_window",
             "proposal_window"
-          ]
+          ],
+          "type": "object"
         },
         "PendingParams": {
           "properties": {
             "effective_epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "params": {
               "$ref": "#/definitions/Params"
             }
           },
-          "type": "object",
           "required": [
             "effective_epoch",
             "params"
-          ]
+          ],
+          "type": "object"
         },
         "PoolView": {
           "properties": {
@@ -1535,7 +1324,6 @@
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "accounted",
             "epoch_pools",
@@ -1543,14 +1331,15 @@
             "reserve",
             "solver_fees",
             "total_stake"
-          ]
+          ],
+          "type": "object"
         },
         "PositionRole": {
-          "type": "string",
           "enum": [
             "debtor",
             "creditor"
-          ]
+          ],
+          "type": "string"
         },
         "PositionStatus": {
           "enum": [
@@ -1571,9 +1360,9 @@
               "type": "string"
             },
             "epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "net": {
               "type": "string"
@@ -1591,12 +1380,11 @@
               "$ref": "#/definitions/PositionStatus"
             },
             "updated_at_block": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             }
           },
-          "type": "object",
           "required": [
             "account_id",
             "amount",
@@ -1607,7 +1395,8 @@
             "role",
             "status",
             "updated_at_block"
-          ]
+          ],
+          "type": "object"
         },
         "Promise": true,
         "PromiseOrValueBoolean": {
@@ -1625,9 +1414,9 @@
               "type": "string"
             },
             "edge_count": {
-              "type": "integer",
               "format": "uint32",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "reason": {
               "type": [
@@ -1639,13 +1428,13 @@
               "type": "boolean"
             }
           },
-          "type": "object",
           "required": [
             "better_than_current",
             "cleared_total",
             "edge_count",
             "valid"
-          ]
+          ],
+          "type": "object"
         },
         "Voucher": {
           "properties": {
@@ -1656,9 +1445,9 @@
               "type": "string"
             },
             "epoch": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "payee": {
               "type": "string"
@@ -1670,15 +1459,14 @@
               "type": "string"
             },
             "seq": {
-              "type": "integer",
               "format": "uint64",
-              "minimum": 0.0
+              "minimum": 0.0,
+              "type": "integer"
             },
             "unit": {
               "type": "string"
             }
           },
-          "type": "object",
           "required": [
             "circle",
             "cumulativeAmount",
@@ -1688,9 +1476,221 @@
             "resource",
             "seq",
             "unit"
-          ]
+          ],
+          "type": "object"
         }
-      }
+      },
+      "title": "String",
+      "type": "string"
     }
-  }
+  },
+  "event_standard": "x207",
+  "events": [
+    {
+      "fields": [
+        "account_id",
+        "pubkey_voucher",
+        "terms_hash",
+        "status",
+        "joined_at"
+      ],
+      "name": "member_joined"
+    },
+    {
+      "fields": [
+        "account_id",
+        "sender_id",
+        "amount",
+        "stake",
+        "limit",
+        "status"
+      ],
+      "name": "stake_added"
+    },
+    {
+      "fields": [
+        "payer",
+        "payee",
+        "epoch",
+        "seq",
+        "cumulative_amount",
+        "delta",
+        "obligation",
+        "outstanding_debt",
+        "mode"
+      ],
+      "name": "voucher_registered"
+    },
+    {
+      "fields": [
+        "epoch",
+        "closed_at",
+        "proposal_deadline",
+        "edge_count",
+        "participant_count",
+        "total_obligation",
+        "next_epoch",
+        "next_cutoff_at"
+      ],
+      "name": "epoch_cutoff"
+    },
+    {
+      "fields": [
+        "epoch",
+        "solver",
+        "cleared_total",
+        "edge_count",
+        "replaced_solver",
+        "replaced_cleared_total"
+      ],
+      "name": "clearing_submitted"
+    },
+    {
+      "fields": [
+        "epoch",
+        "solver",
+        "cleared_total",
+        "edges",
+        "clearing_fee",
+        "solver_fee",
+        "chunk",
+        "chunks"
+      ],
+      "list_item_fields": [
+        "debtor",
+        "creditor",
+        "cleared"
+      ],
+      "name": "clearing_applied"
+    },
+    {
+      "fields": [
+        "epoch",
+        "committed_at",
+        "payment_deadline",
+        "total_due",
+        "total_claimable",
+        "positions",
+        "chunk",
+        "chunks"
+      ],
+      "list_item_fields": [
+        "account_id",
+        "net",
+        "role",
+        "status",
+        "amount",
+        "outstanding_debt"
+      ],
+      "name": "epoch_committed"
+    },
+    {
+      "fields": [
+        "epoch",
+        "account_id",
+        "sender_id",
+        "amount",
+        "refunded",
+        "settled_history"
+      ],
+      "name": "residual_paid"
+    },
+    {
+      "fields": [
+        "epoch",
+        "account_id",
+        "due",
+        "from_stake",
+        "from_reserve",
+        "shortfall",
+        "stake",
+        "status",
+        "position_status",
+        "outstanding_debt"
+      ],
+      "name": "member_defaulted"
+    },
+    {
+      "fields": [
+        "epoch",
+        "changes",
+        "chunk",
+        "chunks"
+      ],
+      "list_item_fields": [
+        "account_id",
+        "old_limit",
+        "new_limit",
+        "status"
+      ],
+      "name": "limits_updated"
+    },
+    {
+      "fields": [
+        "epoch",
+        "finalized_at",
+        "defaulted_count",
+        "total_defaulted",
+        "pool",
+        "shortfall"
+      ],
+      "name": "epoch_finalized"
+    },
+    {
+      "fields": [
+        "epoch",
+        "account_id",
+        "amount",
+        "destination",
+        "status"
+      ],
+      "name": "residual_claimed"
+    },
+    {
+      "fields": [
+        "epoch",
+        "account_id",
+        "amount",
+        "destination",
+        "status"
+      ],
+      "name": "residual_claim_failed"
+    },
+    {
+      "fields": [
+        "old",
+        "new",
+        "changed",
+        "effective_epoch"
+      ],
+      "name": "params_updated"
+    },
+    {
+      "fields": [
+        "account_id",
+        "epoch"
+      ],
+      "name": "exit_requested"
+    },
+    {
+      "fields": [
+        "account_id",
+        "amount"
+      ],
+      "name": "stake_withdrawn"
+    },
+    {
+      "fields": [
+        "account_id",
+        "amount"
+      ],
+      "name": "stake_withdraw_failed"
+    }
+  ],
+  "interface_version": "0.0.1",
+  "metadata": {
+    "name": "x207-circle",
+    "version": "0.0.1"
+  },
+  "schema_version": "0.4.0"
 }

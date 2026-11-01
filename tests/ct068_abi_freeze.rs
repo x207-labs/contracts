@@ -92,6 +92,20 @@ fn strip_descriptions(value: &mut Value) {
     }
 }
 
+/// Orders object keys, so the file does not depend on the key order of the build (it changes with
+/// the `serde_json` features that other dependencies switch on).
+fn sort_keys(value: Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            Value::Object(entries.into_iter().map(|(k, v)| (k, sort_keys(v))).collect())
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sort_keys).collect()),
+        other => other,
+    }
+}
+
 /// The document committed as `abi.json`.
 fn build_document() -> Value {
     let built: Value = serde_json::from_str(&std::fs::read_to_string(BUILT_ABI).expect("run cargo near build first")).unwrap();
@@ -124,7 +138,7 @@ fn build_document() -> Value {
         "body": {"functions": functions, "root_schema": built["body"]["root_schema"]},
     });
     strip_descriptions(&mut document);
-    document
+    sort_keys(document)
 }
 
 fn schema_name(schema: &Value) -> String {
