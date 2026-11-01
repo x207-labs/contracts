@@ -10,4 +10,4 @@ permissions:
 
 jobs:
   ci:
-    uses: x207-protocol/.github/.github/workflows/ci-rust.yml@29ddda838eaaf9d39983079e37786541a63d18aa # OP-001
+    uses: x207-labs/.github/.github/workflows/ci-rust.yml@29ddda838eaaf9d39983079e37786541a63d18aa # OP-001
