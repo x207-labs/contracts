@@ -86,6 +86,10 @@ pub struct X207Circle {
     pub reserve: u128,
     /// D6: USDT in `ft_transfer` promises that have not resolved yet.
     pub in_flight: u128,
+    /// D6: running total of `Epoch.pool` over all epochs (CT-010).
+    pub epoch_pools: u128,
+    /// D6: running total of the `solver_fees` balances (CT-010, P1 fills it).
+    pub solver_fees_total: u128,
     pub member_count: u32,
     pub upgrade: Option<PendingUpgrade>,
     /// D1.
@@ -130,6 +134,8 @@ impl X207Circle {
             total_stake: 0,
             reserve: 0,
             in_flight: 0,
+            epoch_pools: 0,
+            solver_fees_total: 0,
             member_count: 0,
             upgrade: None,
             members: LookupMap::new(StorageKey::Members),

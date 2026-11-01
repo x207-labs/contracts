@@ -9,6 +9,7 @@ pub mod clearing;
 pub mod events;
 pub mod member;
 pub mod params;
+pub mod pool;
 pub mod risk;
 pub mod settlement;
 pub mod state;
