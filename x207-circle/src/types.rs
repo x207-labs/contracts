@@ -18,3 +18,12 @@ pub struct ClearingEdge {
     pub creditor: AccountId,
     pub cleared: U128,
 }
+
+/// Where `claim` pays out (spec 3.7): the member's NEAR account, or its balance in `intents.near`.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimDestination {
+    Near,
+    Intents,
+}

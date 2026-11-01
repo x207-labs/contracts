@@ -1,0 +1,1713 @@
+{
+  "interface_version": "0.0.1",
+  "schema_version": "0.4.0",
+  "metadata": {
+    "name": "x207-circle",
+    "version": "0.0.1"
+  },
+  "event_standard": "x207",
+  "events": [
+    {
+      "name": "member_joined",
+      "fields": [
+        "account_id",
+        "pubkey_voucher",
+        "terms_hash",
+        "status",
+        "joined_at"
+      ]
+    },
+    {
+      "name": "stake_added",
+      "fields": [
+        "account_id",
+        "sender_id",
+        "amount",
+        "stake",
+        "limit",
+        "status"
+      ]
+    },
+    {
+      "name": "voucher_registered",
+      "fields": [
+        "payer",
+        "payee",
+        "epoch",
+        "seq",
+        "cumulative_amount",
+        "delta",
+        "obligation",
+        "outstanding_debt",
+        "mode"
+      ]
+    },
+    {
+      "name": "epoch_cutoff",
+      "fields": [
+        "epoch",
+        "closed_at",
+        "proposal_deadline",
+        "edge_count",
+        "participant_count",
+        "total_obligation",
+        "next_epoch",
+        "next_cutoff_at"
+      ]
+    },
+    {
+      "name": "clearing_submitted",
+      "fields": [
+        "epoch",
+        "solver",
+        "cleared_total",
+        "edge_count",
+        "replaced_solver",
+        "replaced_cleared_total"
+      ]
+    },
+    {
+      "name": "clearing_applied",
+      "fields": [
+        "epoch",
+        "solver",
+        "cleared_total",
+        "edges",
+        "clearing_fee",
+        "solver_fee",
+        "chunk",
+        "chunks"
+      ],
+      "list_item_fields": [
+        "debtor",
+        "creditor",
+        "cleared"
+      ]
+    },
+    {
+      "name": "epoch_committed",
+      "fields": [
+        "epoch",
+        "committed_at",
+        "payment_deadline",
+        "total_due",
+        "total_claimable",
+        "positions",
+        "chunk",
+        "chunks"
+      ],
+      "list_item_fields": [
+        "account_id",
+        "net",
+        "role",
+        "status",
+        "amount",
+        "outstanding_debt"
+      ]
+    },
+    {
+      "name": "residual_paid",
+      "fields": [
+        "epoch",
+        "account_id",
+        "sender_id",
+        "amount",
+        "refunded",
+        "settled_history"
+      ]
+    },
+    {
+      "name": "member_defaulted",
+      "fields": [
+        "epoch",
+        "account_id",
+        "due",
+        "from_stake",
+        "from_reserve",
+        "shortfall",
+        "stake",
+        "status",
+        "position_status",
+        "outstanding_debt"
+      ]
+    },
+    {
+      "name": "limits_updated",
+      "fields": [
+        "epoch",
+        "changes",
+        "chunk",
+        "chunks"
+      ],
+      "list_item_fields": [
+        "account_id",
+        "old_limit",
+        "new_limit",
+        "status"
+      ]
+    },
+    {
+      "name": "epoch_finalized",
+      "fields": [
+        "epoch",
+        "finalized_at",
+        "defaulted_count",
+        "total_defaulted",
+        "pool",
+        "shortfall"
+      ]
+    },
+    {
+      "name": "residual_claimed",
+      "fields": [
+        "epoch",
+        "account_id",
+        "amount",
+        "destination",
+        "status"
+      ]
+    },
+    {
+      "name": "residual_claim_failed",
+      "fields": [
+        "epoch",
+        "account_id",
+        "amount",
+        "destination",
+        "status"
+      ]
+    },
+    {
+      "name": "params_updated",
+      "fields": [
+        "old",
+        "new",
+        "changed",
+        "effective_epoch"
+      ]
+    },
+    {
+      "name": "exit_requested",
+      "fields": [
+        "account_id",
+        "epoch"
+      ]
+    },
+    {
+      "name": "stake_withdrawn",
+      "fields": [
+        "account_id",
+        "amount"
+      ]
+    },
+    {
+      "name": "stake_withdraw_failed",
+      "fields": [
+        "account_id",
+        "amount"
+      ]
+    }
+  ],
+  "body": {
+    "functions": [
+      {
+        "name": "claim",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "destination",
+              "type_schema": {
+                "$ref": "#/definitions/ClaimDestination"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "name": "close_epoch",
+        "doc": " Permissionless. Locks epoch `epoch` (stored phase `clearing`, proposal window opens) and opens\n the next epoch with pending params applied (spec section 4 and 8, K-12).",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "commit_epoch",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "finalize_epoch",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "ft_on_transfer",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "sender_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "msg",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueString"
+          }
+        }
+      },
+      {
+        "name": "get_circle",
+        "kind": "view",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/CircleConfig"
+          }
+        }
+      },
+      {
+        "name": "get_clearing_proposal",
+        "doc": " D4 proposal of `epoch`; `edges` is empty after `commit_epoch`. `None` before the first submit.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ClearingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "get_epoch",
+        "doc": " `None` = `current_epoch` (the newest epoch created). The reported phase may be the derived\n `cutoff` or `commit` (K-28).",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/EpochView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "get_owner",
+        "kind": "view",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "get_params",
+        "doc": " Params active in the running epoch: the snapshot of `current_epoch` (spec section 5).",
+        "kind": "view",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Params"
+          }
+        }
+      },
+      {
+        "name": "get_pending_params",
+        "kind": "view",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/PendingParams"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "get_pool",
+        "kind": "view",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PoolView"
+          }
+        }
+      },
+      {
+        "name": "headroom",
+        "doc": " `max(0, limit - outstanding_debt)` for an `active` member; `\"0\"` for anyone else (spec section 5).",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "interface_version",
+        "kind": "view",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "join",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "circle_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "pubkey_voucher",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "terms_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/MemberView"
+          }
+        }
+      },
+      {
+        "name": "last_seq",
+        "doc": " D3 `last_seq` of `(payer, payee, epoch)`; `0` before the first registration.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "payer",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "payee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          }
+        }
+      },
+      {
+        "name": "limit",
+        "doc": " Stored limit of a member (kept equal to `compute_limit` by the stake and finalize paths);\n `\"0\"` for an account that is not a member.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "list_members",
+        "doc": " Members in join order, `limit` per page; `limit` 0 or an `from_index` past the end gives `[]` (K-23).",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "from_index",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/MemberView"
+            }
+          }
+        }
+      },
+      {
+        "name": "list_obligations",
+        "doc": " Pairs of `epoch` in first-registration order (the D2 snapshot index); `limit` 0, an unknown\n epoch, or a `from_index` past the end gives `[]`.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "from_index",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/ObligationView"
+            }
+          }
+        }
+      },
+      {
+        "name": "list_positions",
+        "doc": " D5 records of `epoch` in the order `commit_epoch` wrote them. `limit` 0, an unknown epoch,\n or a `from_index` past the end gives `[]`.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "from_index",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/definitions/PositionView"
+            }
+          }
+        }
+      },
+      {
+        "name": "member",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/MemberView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "net_position",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/PositionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "new",
+        "doc": " Runs once. Epoch `1` opens now with `cutoff_at = now + epoch_length`; `params` `None` means\n the ADR-25 defaults.",
+        "kind": "call",
+        "modifiers": [
+          "init"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "owner_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "circle_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "usdt_token_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "intents_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "params",
+              "type_schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/definitions/Params"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "obligation",
+        "doc": " D2 and D3 of one pair, or `None` before the first registration.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "debtor",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "creditor",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ObligationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "on_claim_resolved",
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "destination",
+              "type_schema": {
+                "$ref": "#/definitions/ClaimDestination"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "on_withdraw_resolved",
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "boolean"
+          }
+        }
+      },
+      {
+        "name": "outstanding_debt",
+        "doc": " D2 `outstanding_debt`; `0` for an unknown account.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "register_cumulative",
+        "doc": " Default registration (ADR-17): returns the pair obligation after registration.",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "voucher",
+              "type_schema": {
+                "$ref": "#/definitions/Voucher"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "register_voucher",
+        "doc": " Demo mode (ADR-26): one voucher per request, `seq` must be `last_seq + 1`. Same checks and\n state as `register_cumulative`; returns the pair obligation after registration.",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "voucher",
+              "type_schema": {
+                "$ref": "#/definitions/Voucher"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "request_exit",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ]
+      },
+      {
+        "name": "set_params",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "params",
+              "type_schema": {
+                "$ref": "#/definitions/Params"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "simulate_clearing",
+        "doc": " Runs the `submit_clearing` verifier without writing state. Rule violations come back in\n `reason`, never as a panic; `better_than_current` follows spec 4.3.",
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "edges",
+              "type_schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/ClearingEdge"
+                }
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/SimulationResult"
+          }
+        }
+      },
+      {
+        "name": "submit_clearing",
+        "doc": " Permissionless; the solver is the predecessor. Stores the proposal only when it beats the\n stored one (spec 4.3); D2 stays untouched until `commit_epoch` (ADR-21). Returns `cleared_total`.",
+        "kind": "call",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "edges",
+              "type_schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/ClearingEdge"
+                }
+              }
+            }
+          ]
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "name": "withdraw_stake",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueBoolean"
+          }
+        }
+      }
+    ],
+    "root_schema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "String",
+      "type": "string",
+      "definitions": {
+        "Admission": {
+          "type": "string",
+          "enum": [
+            "open",
+            "dao"
+          ]
+        },
+        "CircleConfig": {
+          "properties": {
+            "circle_id": {
+              "type": "string"
+            },
+            "contract_id": {
+              "type": "string"
+            },
+            "decimals": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0.0
+            },
+            "intents_id": {
+              "type": "string"
+            },
+            "member_count": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "network": {
+              "type": "string"
+            },
+            "owner_id": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "usdt_token_id": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "circle_id",
+            "contract_id",
+            "decimals",
+            "intents_id",
+            "member_count",
+            "network",
+            "owner_id",
+            "unit",
+            "usdt_token_id"
+          ]
+        },
+        "ClaimDestination": {
+          "enum": [
+            "near",
+            "intents"
+          ],
+          "type": "string"
+        },
+        "ClearingEdge": {
+          "properties": {
+            "cleared": {
+              "type": "string"
+            },
+            "creditor": {
+              "type": "string"
+            },
+            "debtor": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "cleared",
+            "creditor",
+            "debtor"
+          ]
+        },
+        "ClearingProposal": {
+          "properties": {
+            "cleared_total": {
+              "type": "string"
+            },
+            "committed": {
+              "type": "boolean"
+            },
+            "edge_count": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "edges": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ClearingEdge"
+              }
+            },
+            "epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "solver": {
+              "type": "string"
+            },
+            "submitted_at": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "cleared_total",
+            "committed",
+            "edge_count",
+            "edges",
+            "epoch",
+            "solver",
+            "submitted_at"
+          ]
+        },
+        "EpochPhaseView": {
+          "enum": [
+            "open",
+            "cutoff",
+            "clearing",
+            "commit",
+            "payment_window",
+            "finalized"
+          ],
+          "type": "string"
+        },
+        "EpochView": {
+          "properties": {
+            "closed_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "committed_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cutoff_at": {
+              "type": "string"
+            },
+            "edge_count": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "finalized_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "opened_at": {
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/Params"
+            },
+            "participant_count": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "payment_deadline": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phase": {
+              "$ref": "#/definitions/EpochPhaseView"
+            },
+            "pool": {
+              "type": "string"
+            },
+            "proposal_deadline": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "shortfall": {
+              "type": "string"
+            },
+            "total_cleared": {
+              "type": "string"
+            },
+            "total_obligation": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "cutoff_at",
+            "edge_count",
+            "epoch",
+            "opened_at",
+            "params",
+            "participant_count",
+            "phase",
+            "pool",
+            "shortfall",
+            "total_cleared",
+            "total_obligation"
+          ]
+        },
+        "Fees": {
+          "type": "object",
+          "required": [
+            "clearing_fee_bps",
+            "solver_fee_bps"
+          ],
+          "properties": {
+            "clearing_fee_bps": {
+              "minimum": 0.0,
+              "type": "integer",
+              "format": "uint16"
+            },
+            "solver_fee_bps": {
+              "minimum": 0.0,
+              "type": "integer",
+              "format": "uint16"
+            }
+          }
+        },
+        "MemberStatus": {
+          "enum": [
+            "pending",
+            "active",
+            "suspended",
+            "exited"
+          ],
+          "type": "string"
+        },
+        "MemberView": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "admitted": {
+              "type": "boolean"
+            },
+            "exit_requested_epoch": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "joined_at": {
+              "type": "string"
+            },
+            "last_active_epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "limit": {
+              "type": "string"
+            },
+            "pubkey_voucher": {
+              "type": "string"
+            },
+            "settled_history": {
+              "type": "string"
+            },
+            "stake": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/MemberStatus"
+            },
+            "terms_hash": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "account_id",
+            "admitted",
+            "joined_at",
+            "last_active_epoch",
+            "limit",
+            "pubkey_voucher",
+            "settled_history",
+            "stake",
+            "status",
+            "terms_hash"
+          ]
+        },
+        "ObligationView": {
+          "properties": {
+            "cleared": {
+              "type": "string"
+            },
+            "creditor": {
+              "type": "string"
+            },
+            "cumulative": {
+              "type": "string"
+            },
+            "debtor": {
+              "type": "string"
+            },
+            "epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "last_seq": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "obligation": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "cleared",
+            "creditor",
+            "cumulative",
+            "debtor",
+            "epoch",
+            "last_seq",
+            "obligation"
+          ]
+        },
+        "Params": {
+          "properties": {
+            "admission": {
+              "$ref": "#/definitions/Admission"
+            },
+            "base_limit_ratio": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "epoch_length": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "fees": {
+              "$ref": "#/definitions/Fees"
+            },
+            "limit_cap": {
+              "type": "string"
+            },
+            "limit_decay": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "limit_growth": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0.0
+            },
+            "payment_window": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "proposal_window": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "type": "object",
+          "required": [
+            "admission",
+            "base_limit_ratio",
+            "epoch_length",
+            "fees",
+            "limit_cap",
+            "limit_decay",
+            "limit_growth",
+            "payment_window",
+            "proposal_window"
+          ]
+        },
+        "PendingParams": {
+          "properties": {
+            "effective_epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "params": {
+              "$ref": "#/definitions/Params"
+            }
+          },
+          "type": "object",
+          "required": [
+            "effective_epoch",
+            "params"
+          ]
+        },
+        "PoolView": {
+          "properties": {
+            "accounted": {
+              "type": "string"
+            },
+            "epoch_pools": {
+              "type": "string"
+            },
+            "in_flight": {
+              "type": "string"
+            },
+            "reserve": {
+              "type": "string"
+            },
+            "solver_fees": {
+              "type": "string"
+            },
+            "total_stake": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "accounted",
+            "epoch_pools",
+            "in_flight",
+            "reserve",
+            "solver_fees",
+            "total_stake"
+          ]
+        },
+        "PositionRole": {
+          "type": "string",
+          "enum": [
+            "debtor",
+            "creditor"
+          ]
+        },
+        "PositionStatus": {
+          "enum": [
+            "due",
+            "paid",
+            "defaulted",
+            "claimable",
+            "claimed"
+          ],
+          "type": "string"
+        },
+        "PositionView": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "amount": {
+              "type": "string"
+            },
+            "epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "net": {
+              "type": "string"
+            },
+            "payment_deadline": {
+              "type": "string"
+            },
+            "recovered": {
+              "type": "string"
+            },
+            "role": {
+              "$ref": "#/definitions/PositionRole"
+            },
+            "status": {
+              "$ref": "#/definitions/PositionStatus"
+            },
+            "updated_at_block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "type": "object",
+          "required": [
+            "account_id",
+            "amount",
+            "epoch",
+            "net",
+            "payment_deadline",
+            "recovered",
+            "role",
+            "status",
+            "updated_at_block"
+          ]
+        },
+        "Promise": true,
+        "PromiseOrValueBoolean": {
+          "type": "boolean"
+        },
+        "PromiseOrValueString": {
+          "type": "string"
+        },
+        "SimulationResult": {
+          "properties": {
+            "better_than_current": {
+              "type": "boolean"
+            },
+            "cleared_total": {
+              "type": "string"
+            },
+            "edge_count": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "valid": {
+              "type": "boolean"
+            }
+          },
+          "type": "object",
+          "required": [
+            "better_than_current",
+            "cleared_total",
+            "edge_count",
+            "valid"
+          ]
+        },
+        "Voucher": {
+          "properties": {
+            "circle": {
+              "type": "string"
+            },
+            "cumulativeAmount": {
+              "type": "string"
+            },
+            "epoch": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "payee": {
+              "type": "string"
+            },
+            "payer": {
+              "type": "string"
+            },
+            "resource": {
+              "type": "string"
+            },
+            "seq": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "unit": {
+              "type": "string"
+            }
+          },
+          "type": "object",
+          "required": [
+            "circle",
+            "cumulativeAmount",
+            "epoch",
+            "payee",
+            "payer",
+            "resource",
+            "seq",
+            "unit"
+          ]
+        }
+      }
+    }
+  }
+}

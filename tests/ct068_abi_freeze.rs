@@ -1,0 +1,257 @@
+//! CT-068: the frozen interface. `abi.json` at the repo root is the file `sdk`, `backend`, and
+//! `solver` read. It is the cargo-near ABI (without doc strings and build metadata) plus the event
+//! list of `events.rs`.
+//!
+//! Any change visible from outside (method, argument, return type, event field) must bump the
+//! version: `version` in `Cargo.toml` and `INTERFACE_VERSION` in `lib.rs` (spec section 1, rule 1),
+//! then regenerate and announce to `sdk`, `backend`, `solver`:
+//!
+//!     cargo near build non-reproducible-wasm
+//!     UPDATE_ABI=1 cargo test --test ct068_abi_freeze committed_abi_matches_build
+
+use serde_json::{json, Map, Value};
+use x207_circle::events::EVENT_SCHEMAS;
+use x207_circle::INTERFACE_VERSION;
+
+const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
+const COMMITTED_ABI: &str = "abi.json";
+
+/// Methods that change state (spec sections 4 and 14, P0 only; P1 and P2 join with their items, K-20).
+const CHANGE_METHODS: [&str; 15] = [
+    "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
+    "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
+    "on_withdraw_resolved",
+];
+
+/// The 19 P0 views of spec section 12.
+const VIEWS: [&str; 19] = [
+    "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
+    "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
+    "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool",
+];
+
+const P1_P2_METHODS: [&str; 11] = [
+    "admit_member", "claim_solver_fee", "on_solver_fee_resolved", "prune_epoch", "propose_upgrade", "apply_upgrade",
+    "post_intent", "commit_bundle", "solver_fee_balance", "get_upgrade", "get_intent",
+];
+
+/// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
+/// does not tell apart. `[..]` lists the modifiers.
+const SIGNATURES: [&str; 34] = [
+    "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
+    "close_epoch(epoch:integer:uint64)-> []",
+    "commit_epoch(epoch:integer:uint64)-> []",
+    "finalize_epoch(epoch:integer:uint64)-> []",
+    "ft_on_transfer(sender_id:string,amount:string,msg:string)->PromiseOrValueString []",
+    "get_circle()->CircleConfig []",
+    "get_clearing_proposal(epoch:integer:uint64)->ClearingProposal|null []",
+    "get_epoch(epoch:integer:uint64|null)->EpochView|null []",
+    "get_owner()->string []",
+    "get_params()->Params []",
+    "get_pending_params()->PendingParams|null []",
+    "get_pool()->PoolView []",
+    "headroom(account_id:string)->string []",
+    "interface_version()->string []",
+    "join(circle_id:string,pubkey_voucher:string,terms_hash:string)->MemberView [payable]",
+    "last_seq(payer:string,payee:string,epoch:integer:uint64)->integer:uint64 []",
+    "limit(account_id:string)->string []",
+    "list_members(from_index:integer:uint32,limit:integer:uint32)->array<MemberView> []",
+    "list_obligations(epoch:integer:uint64,from_index:integer:uint32,limit:integer:uint32)->array<ObligationView> []",
+    "list_positions(epoch:integer:uint64,from_index:integer:uint32,limit:integer:uint32)->array<PositionView> []",
+    "member(account_id:string)->MemberView|null []",
+    "net_position(epoch:integer:uint64,account_id:string)->PositionView|null []",
+    "new(owner_id:string,circle_id:string,usdt_token_id:string,intents_id:string,params:Params|null)-> [init]",
+    "obligation(epoch:integer:uint64,debtor:string,creditor:string)->ObligationView|null []",
+    "on_claim_resolved(epoch:integer:uint64,account_id:string,amount:string,destination:ClaimDestination)->string [private]",
+    "on_withdraw_resolved(account_id:string,amount:string)->boolean [private]",
+    "outstanding_debt(account_id:string)->string []",
+    "register_cumulative(voucher:Voucher,signature:string)->string []",
+    "register_voucher(voucher:Voucher,signature:string)->string []",
+    "request_exit()-> [payable]",
+    "set_params(params:Params)-> []",
+    "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
+    "submit_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->string []",
+    "withdraw_stake()->PromiseOrValueBoolean [payable]",
+];
+
+const EVENTS: [&str; 17] = [
+    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied",
+    "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed",
+    "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed",
+];
+
+fn strip_descriptions(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("description");
+            map.values_mut().for_each(strip_descriptions);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_descriptions),
+        _ => {}
+    }
+}
+
+/// The document committed as `abi.json`.
+fn build_document() -> Value {
+    let built: Value = serde_json::from_str(&std::fs::read_to_string(BUILT_ABI).expect("run cargo near build first")).unwrap();
+    let mut functions: Vec<Value> = built["body"]["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["name"] != "contract_source_metadata")
+        .cloned()
+        .collect();
+    functions.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    let events: Vec<Value> = EVENT_SCHEMAS
+        .iter()
+        .map(|e| {
+            let mut event = Map::new();
+            event.insert("name".into(), json!(e.name));
+            event.insert("fields".into(), json!(e.fields));
+            if !e.items.is_empty() {
+                event.insert("list_item_fields".into(), json!(e.items));
+            }
+            Value::Object(event)
+        })
+        .collect();
+    let mut document = json!({
+        "interface_version": INTERFACE_VERSION,
+        "schema_version": built["schema_version"],
+        "metadata": {"name": built["metadata"]["name"], "version": built["metadata"]["version"]},
+        "event_standard": "x207",
+        "events": events,
+        "body": {"functions": functions, "root_schema": built["body"]["root_schema"]},
+    });
+    strip_descriptions(&mut document);
+    document
+}
+
+fn schema_name(schema: &Value) -> String {
+    if let Some(reference) = schema.get("$ref") {
+        return reference.as_str().unwrap().rsplit('/').next().unwrap().to_string();
+    }
+    if let Some(parts) = schema.get("anyOf").or_else(|| schema.get("oneOf")) {
+        let mut names: Vec<String> = parts.as_array().unwrap().iter().map(schema_name).collect();
+        names.sort();
+        return names.join("|");
+    }
+    let format = schema.get("format").and_then(Value::as_str).map(|f| format!(":{f}")).unwrap_or_default();
+    match &schema["type"] {
+        Value::Array(types) => {
+            let base: Vec<&str> = types.iter().filter_map(Value::as_str).filter(|t| *t != "null").collect();
+            format!("{}{format}|null", base.join("|"))
+        }
+        Value::String(t) if t == "array" => format!("array<{}>", schema_name(&schema["items"])),
+        Value::String(t) => format!("{t}{format}"),
+        _ => "?".to_string(),
+    }
+}
+
+fn signature(function: &Value) -> String {
+    let args: Vec<String> = function["params"]["args"]
+        .as_array()
+        .map(|args| args.iter().map(|a| format!("{}:{}", a["name"].as_str().unwrap(), schema_name(&a["type_schema"]))).collect())
+        .unwrap_or_default();
+    let result = function.get("result").map(|r| schema_name(&r["type_schema"])).unwrap_or_default();
+    let modifiers: Vec<&str> = function["modifiers"].as_array().map(|m| m.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    format!("{}({})->{result} [{}]", function["name"].as_str().unwrap(), args.join(","), modifiers.join(","))
+}
+
+fn functions(document: &Value) -> Vec<Value> {
+    document["body"]["functions"].as_array().unwrap().clone()
+}
+
+fn names(document: &Value, kind: &str) -> Vec<String> {
+    functions(document).iter().filter(|f| f["kind"] == kind).map(|f| f["name"].as_str().unwrap().to_string()).collect()
+}
+
+fn sorted(items: &[&str]) -> Vec<String> {
+    let mut v: Vec<String> = items.iter().map(|s| s.to_string()).collect();
+    v.sort();
+    v
+}
+
+// TC-CT-068-01
+#[test]
+fn all_p0_change_methods_exist_and_p1_p2_do_not() {
+    let document = build_document();
+    let calls = names(&document, "call");
+    assert_eq!(calls, sorted(&CHANGE_METHODS), "change methods differ from spec sections 4 and 14");
+    for name in P1_P2_METHODS {
+        assert!(!names(&document, "call").contains(&name.to_string()) && !names(&document, "view").contains(&name.to_string()), "{name} is P1/P2 and must not be in 0.0.1");
+    }
+}
+
+// TC-CT-068-02
+#[test]
+fn all_19_p0_views_exist() {
+    let document = build_document();
+    assert_eq!(names(&document, "view"), sorted(&VIEWS));
+    for name in ["solver_fee_balance", "get_upgrade", "get_intent", "get_bundle"] {
+        assert!(!names(&document, "view").contains(&name.to_string()), "{name}");
+    }
+}
+
+// TC-CT-068-03, TC-CT-068-04
+#[test]
+fn signatures_modifiers_and_returns_match_the_spec() {
+    let document = build_document();
+    let actual: Vec<String> = functions(&document).iter().map(signature).collect();
+    assert_eq!(actual, SIGNATURES.map(String::from).to_vec());
+
+    // The voucher keeps camelCase on the wire, as in the x402 payload.
+    let voucher = &document["body"]["root_schema"]["definitions"]["Voucher"];
+    let properties: Vec<&str> = voucher["properties"].as_object().unwrap().keys().map(String::as_str).collect();
+    assert!(properties.contains(&"cumulativeAmount") && !properties.contains(&"cumulative_amount"));
+    assert_eq!(voucher["properties"]["cumulativeAmount"]["type"], "string");
+}
+
+// TC-CT-068-05
+#[tokio::test]
+async fn version_is_consistent_everywhere() -> anyhow::Result<()> {
+    let document = build_document();
+    assert_eq!(document["metadata"]["version"], INTERFACE_VERSION);
+    assert_eq!(document["interface_version"], INTERFACE_VERSION);
+    assert_eq!(env!("CARGO_PKG_VERSION"), INTERFACE_VERSION);
+
+    let worker = near_workspaces::sandbox().await?;
+    let contract = worker.dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?).await?;
+    contract
+        .call("new")
+        .args_json(json!({"owner_id": "dao.test.near", "circle_id": "agents-main", "usdt_token_id": "usdt.test.near", "intents_id": "intents.test.near", "params": null}))
+        .transact()
+        .await?
+        .into_result()?;
+    let view: String = contract.view("interface_version").await?.json()?;
+    assert_eq!(view, INTERFACE_VERSION);
+    Ok(())
+}
+
+// TC-CT-068-06
+#[test]
+fn committed_abi_matches_build() {
+    let document = build_document();
+    let text = format!("{}\n", serde_json::to_string_pretty(&document).unwrap());
+    if std::env::var("UPDATE_ABI").is_ok() {
+        std::fs::write(COMMITTED_ABI, &text).unwrap();
+        return;
+    }
+    let committed = std::fs::read_to_string(COMMITTED_ABI).expect("abi.json is committed at the repo root");
+    assert!(
+        committed == text,
+        "the interface changed without a new abi.json. Bump the version (Cargo.toml and INTERFACE_VERSION), regenerate with \
+         `UPDATE_ABI=1 cargo test --test ct068_abi_freeze committed_abi_matches_build`, and announce it to sdk, backend, solver"
+    );
+}
+
+// TC-CT-068-07
+#[test]
+fn committed_event_list_is_frozen() {
+    let committed: Value = serde_json::from_str(&std::fs::read_to_string(COMMITTED_ABI).unwrap()).unwrap();
+    let events: Vec<&str> = committed["events"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert_eq!(events, EVENTS);
+    for event in committed["events"].as_array().unwrap() {
+        assert!(!event["fields"].as_array().unwrap().is_empty());
+    }
+    assert_eq!(committed["event_standard"], "x207");
+}
