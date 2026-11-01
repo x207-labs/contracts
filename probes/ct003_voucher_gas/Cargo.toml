@@ -1,0 +1,15 @@
+# CT-003 gas probe over the canonical voucher bytes. Not product code and never deployed.
+[package]
+name = "ct003-voucher-gas"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.29.1"
+
+[dev-dependencies]
+near-sdk = { version = "=5.29.1", features = ["unit-testing"] }

@@ -4,6 +4,7 @@
 //! `#[near] impl X207Circle` block, so lanes working in parallel do not need to edit this file.
 
 pub mod bundle;
+pub mod canonical;
 pub mod clearing;
 pub mod events;
 pub mod member;

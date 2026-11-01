@@ -3,6 +3,7 @@
 # tests in `tests/*.rs` are auto-discovered without per-file manifest edits.
 [workspace]
 resolver = "2"
+members = ["probes/ct003_voucher_gas"]
 
 [package]
 name = "x207-circle"
@@ -23,6 +24,7 @@ near-sdk = { version = "=5.29.1", features = ["unit-testing"] }
 near-workspaces = "=0.23.0"
 tokio = { version = "=1.54.1", features = ["full"] }
 ed25519-dalek = "=2.2.0"
+sha2 = "=0.10.9"
 serde_json = "=1.0.154"
 anyhow = "=1.0.104"
 
