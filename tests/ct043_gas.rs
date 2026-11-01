@@ -116,7 +116,10 @@ async fn gas_edges_30() -> anyhow::Result<()> {
 #[tokio::test]
 async fn gas_finalize_with_max_members() -> anyhow::Result<()> {
     const MAX_MEMBERS: usize = 64;
-    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    // 64 joins, stakes and 63 vouchers are about 400 transactions, which must fit in epoch 1 even on a busy machine
+    let mut params = Funded::params_short();
+    params["epoch_length"] = json!(3000);
+    let mut f = Funded::deploy(Some(params)).await?;
     members(&mut f, MAX_MEMBERS).await?;
     for i in 1..MAX_MEMBERS {
         let r = f.circle.register(&name(i), &name(0), 1, CREDIT).await?;

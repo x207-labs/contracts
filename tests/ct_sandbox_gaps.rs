@@ -141,7 +141,10 @@ async fn proposal_size_limit() -> anyhow::Result<()> {
     const MEMBERS: usize = 25;
     const OFFSETS: usize = 12; // 25 * 12 = 300 edges
     let name = |i: usize| format!("m{i:02}");
-    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    // 25 joins and stakes plus 300 vouchers must fit in epoch 1 even on a busy machine
+    let mut params = Funded::params_short();
+    params["epoch_length"] = json!(3000);
+    let mut f = Funded::deploy(Some(params)).await?;
     let names: Vec<String> = (0..MEMBERS).map(name).collect();
     staked_members(&mut f, &names.iter().map(String::as_str).collect::<Vec<_>>()).await?;
     let mut edges = Vec::new();
