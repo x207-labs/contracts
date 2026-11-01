@@ -3,7 +3,7 @@
 use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId};
 
-use crate::member::Member;
+use crate::member::{Member, MemberStatus};
 use crate::params::Params;
 use crate::state::{X207Circle, X207CircleExt};
 
@@ -36,6 +36,15 @@ impl X207Circle {
     pub fn limit(&self, account_id: AccountId) -> U128 {
         U128(self.members.get(&account_id).map_or(0, |m| m.limit))
     }
+
+    /// `max(0, limit - outstanding_debt)` for an `active` member; `"0"` for anyone else (spec section 5).
+    pub fn headroom(&self, account_id: AccountId) -> U128 {
+        let limit = match self.members.get(&account_id) {
+            Some(m) if m.status == MemberStatus::Active => m.limit,
+            _ => return U128(0),
+        };
+        U128(limit.saturating_sub(self.outstanding_debt.get(&account_id).copied().unwrap_or(0)))
+    }
 }
 
 #[cfg(test)]
@@ -44,7 +53,6 @@ mod tests {
     use near_sdk::{testing_env, PublicKey};
 
     use super::*;
-    use crate::member::MemberStatus;
     use crate::params::{Admission, Fees};
 
     const CREDIT: u128 = 1_000_000;
@@ -192,5 +200,60 @@ mod tests {
         c.members.insert(acc("translator.near"), member(100 * CREDIT, 80 * CREDIT));
         assert_eq!(c.limit(acc("translator.near")), U128(80_000_000));
         assert_eq!(c.limit(acc("outsider.near")), U128(0));
+    }
+
+    fn circle_with(members: &[(&str, MemberStatus, u128)], debts: &[(&str, u128)]) -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
+        let mut c = X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".to_string(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            1_000,
+        );
+        for (id, status, limit) in members {
+            let mut m = member(100 * CREDIT, *limit);
+            m.account_id = acc(id);
+            m.status = *status;
+            c.members.insert(acc(id), m);
+        }
+        for (id, debt) in debts {
+            c.outstanding_debt.insert(acc(id), *debt);
+        }
+        c
+    }
+
+    // TC-CT-021-01 (value check: limit 80 minus debt 25 = 55)
+    #[test]
+    fn tc_ct_021_01_headroom_is_limit_minus_debt() {
+        let c = circle_with(&[("translator.near", MemberStatus::Active, 80 * CREDIT)], &[("translator.near", 25 * CREDIT)]);
+        assert_eq!(c.headroom(acc("translator.near")), U128(55 * CREDIT));
+        assert_eq!(c.headroom(acc("translator.near")).0 + c.outstanding_debt(acc("translator.near")).0, c.limit(acc("translator.near")).0);
+    }
+
+    // TC-CT-021-03
+    #[test]
+    fn tc_ct_021_03_not_active_gives_zero() {
+        let c = circle_with(
+            &[("pending.near", MemberStatus::Pending, 80 * CREDIT), ("suspended.near", MemberStatus::Suspended, 80 * CREDIT)],
+            &[],
+        );
+        for id in ["outsider.near", "pending.near", "suspended.near"] {
+            assert_eq!(c.headroom(acc(id)), U128(0), "{id}");
+        }
+    }
+
+    // TC-CT-021-04
+    #[test]
+    fn tc_ct_021_04_never_negative() {
+        let c = circle_with(&[("translator.near", MemberStatus::Active, 20 * CREDIT)], &[("translator.near", 55 * CREDIT)]);
+        assert_eq!(c.headroom(acc("translator.near")), U128(0));
+    }
+
+    #[test]
+    fn headroom_without_debt_equals_limit() {
+        let c = circle_with(&[("translator.near", MemberStatus::Active, 80 * CREDIT)], &[]);
+        assert_eq!(c.headroom(acc("translator.near")), U128(80 * CREDIT));
     }
 }
