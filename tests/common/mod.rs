@@ -384,7 +384,12 @@ pub mod flow {
     }
 
     /// Same on a circle deployed by the caller (for example `deploy_with_intents`).
-    pub async fn s1_committed_on(mut f: Funded) -> anyhow::Result<Funded> {
+    pub async fn s1_committed_on(f: Funded) -> anyhow::Result<Funded> {
+        s1_committed_exit(f, &[]).await
+    }
+
+    /// `s1_committed_on` where each of `exiters` calls `request_exit` in epoch 1, before the epoch closes.
+    pub async fn s1_committed_exit(mut f: Funded, exiters: &[&str]) -> anyhow::Result<Funded> {
         for name in ["scraper", "gpu", "translator"] {
             let account = f.account(name).await?;
             let join = f.join(name, Funded::join_deposit()).await?;
@@ -396,12 +401,17 @@ pub mod flow {
             let result = f.circle.register(payer, payee, 1, amount * CREDIT).await?;
             assert!(result.is_success(), "register {payer}->{payee}: {:?}", failure_text(&result));
         }
+        for name in exiters {
+            let exit = request_exit(&f, name).await?;
+            assert!(exit.is_success(), "request_exit {name}: {:?}", failure_text(&exit));
+        }
         let c = &f.circle;
+        // The solver account is created first: the proposal window is only 60 s of block time.
+        let solver = c.worker.dev_create_account().await?;
         c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
         let close = c.call_keeper("close_epoch", json!({"epoch": 1})).await?;
         assert!(close.is_success(), "{:?}", failure_text(&close));
         let edges = json!([edge("scraper", "gpu", 25 * CREDIT), edge("gpu", "translator", 25 * CREDIT), edge("translator", "scraper", 25 * CREDIT)]);
-        let solver = c.worker.dev_create_account().await?;
         let submit = c.call_as(&solver, "submit_clearing", json!({"epoch": 1, "edges": edges})).await?;
         assert!(submit.is_success(), "{:?}", failure_text(&submit));
         c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
@@ -414,5 +424,45 @@ pub mod flow {
     pub async fn finalize(c: &Circle) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
         c.advance_to(c.epoch_ts(1, "payment_deadline").await?).await?;
         c.call_keeper("finalize_epoch", json!({"epoch": 1})).await
+    }
+
+    pub async fn request_exit(f: &Funded, name: &str) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        Ok(f.accounts[name]
+            .call(f.circle.contract.id(), "request_exit")
+            .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
+            .gas(near_workspaces::types::Gas::from_tgas(100))
+            .transact()
+            .await?)
+    }
+
+    pub async fn withdraw_stake(f: &Funded, name: &str) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        Ok(f.accounts[name]
+            .call(f.circle.contract.id(), "withdraw_stake")
+            .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
+            .gas(near_workspaces::types::Gas::from_tgas(100))
+            .transact()
+            .await?)
+    }
+
+    /// Epoch 1 of a circle with no vouchers: closed, committed, and finalized after its windows.
+    pub async fn idle_epoch_finalized(f: &Funded) -> anyhow::Result<()> {
+        let c = &f.circle;
+        c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
+        assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
+        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
+        assert!(c.call_keeper("commit_epoch", json!({"epoch": 1})).await?.is_success());
+        let fin = finalize(c).await?;
+        assert!(fin.is_success(), "{:?}", failure_text(&fin));
+        Ok(())
+    }
+
+    /// Joins and stakes 100 for each name.
+    pub async fn staked_members(f: &mut Funded, names: &[&str]) -> anyhow::Result<()> {
+        for name in names {
+            let account = f.account(name).await?;
+            assert!(f.join(name, Funded::join_deposit()).await?.is_success());
+            assert!(f.stake(&account, 100 * CREDIT).await?.is_success());
+        }
+        Ok(())
     }
 }
