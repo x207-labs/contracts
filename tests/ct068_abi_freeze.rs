@@ -84,6 +84,7 @@ fn strip_descriptions(value: &mut Value) {
     match value {
         Value::Object(map) => {
             map.remove("description");
+            map.remove("doc");
             map.values_mut().for_each(strip_descriptions);
         }
         Value::Array(items) => items.iter_mut().for_each(strip_descriptions),

@@ -244,8 +244,6 @@
       },
       {
         "name": "close_epoch",
-        "doc": " Permissionless. Locks epoch `epoch` (stored phase `clearing`, proposal window opens) and opens\n the next epoch with pending params applied (spec section 4 and 8, K-12).",
-        "kind": "call",
         "params": {
           "serialization_type": "json",
           "args": [
@@ -258,11 +256,11 @@
               }
             }
           ]
-        }
+        },
+        "kind": "call"
       },
       {
         "name": "commit_epoch",
-        "kind": "call",
         "params": {
           "serialization_type": "json",
           "args": [
@@ -275,7 +273,8 @@
               }
             }
           ]
-        }
+        },
+        "kind": "call"
       },
       {
         "name": "finalize_epoch",
@@ -339,7 +338,19 @@
       },
       {
         "name": "get_clearing_proposal",
-        "doc": " D4 proposal of `epoch`; `edges` is empty after `commit_epoch`. `None` before the first submit.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ClearingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -353,24 +364,23 @@
               }
             }
           ]
-        },
+        }
+      },
+      {
+        "name": "get_epoch",
         "result": {
           "serialization_type": "json",
           "type_schema": {
             "anyOf": [
               {
-                "$ref": "#/definitions/ClearingProposal"
+                "$ref": "#/definitions/EpochView"
               },
               {
                 "type": "null"
               }
             ]
           }
-        }
-      },
-      {
-        "name": "get_epoch",
-        "doc": " `None` = `current_epoch` (the newest epoch created). The reported phase may be the derived\n `cutoff` or `commit` (K-28).",
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -387,19 +397,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/EpochView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
         }
       },
       {
@@ -414,14 +411,13 @@
       },
       {
         "name": "get_params",
-        "doc": " Params active in the running epoch: the snapshot of `current_epoch` (spec section 5).",
-        "kind": "view",
         "result": {
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/Params"
           }
-        }
+        },
+        "kind": "view"
       },
       {
         "name": "get_pending_params",
@@ -452,7 +448,12 @@
       },
       {
         "name": "headroom",
-        "doc": " `max(0, limit - outstanding_debt)` for an `active` member; `\"0\"` for anyone else (spec section 5).",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -464,12 +465,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
         }
       },
       {
@@ -520,7 +515,14 @@
       },
       {
         "name": "last_seq",
-        "doc": " D3 `last_seq` of `(payer, payee, epoch)`; `0` before the first registration.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -546,19 +548,16 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0.0
-          }
         }
       },
       {
         "name": "limit",
-        "doc": " Stored limit of a member (kept equal to `compute_limit` by the stake and finalize paths);\n `\"0\"` for an account that is not a member.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -570,39 +569,10 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
         }
       },
       {
         "name": "list_members",
-        "doc": " Members in join order, `limit` per page; `limit` 0 or an `from_index` past the end gives `[]` (K-23).",
-        "kind": "view",
-        "params": {
-          "serialization_type": "json",
-          "args": [
-            {
-              "name": "from_index",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0.0
-              }
-            },
-            {
-              "name": "limit",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0.0
-              }
-            }
-          ]
-        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -611,23 +581,11 @@
               "$ref": "#/definitions/MemberView"
             }
           }
-        }
-      },
-      {
-        "name": "list_obligations",
-        "doc": " Pairs of `epoch` in first-registration order (the D2 snapshot index); `limit` 0, an unknown\n epoch, or a `from_index` past the end gives `[]`.",
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
           "args": [
-            {
-              "name": "epoch",
-              "type_schema": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0.0
-              }
-            },
             {
               "name": "from_index",
               "type_schema": {
@@ -645,7 +603,10 @@
               }
             }
           ]
-        },
+        }
+      },
+      {
+        "name": "list_obligations",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -654,11 +615,7 @@
               "$ref": "#/definitions/ObligationView"
             }
           }
-        }
-      },
-      {
-        "name": "list_positions",
-        "doc": " D5 records of `epoch` in the order `commit_epoch` wrote them. `limit` 0, an unknown epoch,\n or a `from_index` past the end gives `[]`.",
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -688,7 +645,10 @@
               }
             }
           ]
-        },
+        }
+      },
+      {
+        "name": "list_positions",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -697,6 +657,36 @@
               "$ref": "#/definitions/PositionView"
             }
           }
+        },
+        "kind": "view",
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "from_index",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0.0
+              }
+            }
+          ]
         }
       },
       {
@@ -765,11 +755,6 @@
       },
       {
         "name": "new",
-        "doc": " Runs once. Epoch `1` opens now with `cutoff_at = now + epoch_length`; `params` `None` means\n the ADR-25 defaults.",
-        "kind": "call",
-        "modifiers": [
-          "init"
-        ],
         "params": {
           "serialization_type": "json",
           "args": [
@@ -811,11 +796,27 @@
               }
             }
           ]
-        }
+        },
+        "kind": "call",
+        "modifiers": [
+          "init"
+        ]
       },
       {
         "name": "obligation",
-        "doc": " D2 and D3 of one pair, or `None` before the first registration.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ObligationView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -841,19 +842,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ObligationView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
         }
       },
       {
@@ -932,7 +920,12 @@
       },
       {
         "name": "outstanding_debt",
-        "doc": " D2 `outstanding_debt`; `0` for an unknown account.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -944,17 +937,16 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
         }
       },
       {
         "name": "register_cumulative",
-        "doc": " Default registration (ADR-17): returns the pair obligation after registration.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        },
         "kind": "call",
         "params": {
           "serialization_type": "json",
@@ -972,17 +964,16 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
         }
       },
       {
         "name": "register_voucher",
-        "doc": " Demo mode (ADR-26): one voucher per request, `seq` must be `last_seq + 1`. Same checks and\n state as `register_cumulative`; returns the pair obligation after registration.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        },
         "kind": "call",
         "params": {
           "serialization_type": "json",
@@ -1000,12 +991,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
         }
       },
       {
@@ -1032,7 +1017,12 @@
       },
       {
         "name": "simulate_clearing",
-        "doc": " Runs the `submit_clearing` verifier without writing state. Rule violations come back in\n `reason`, never as a panic; `better_than_current` follows spec 4.3.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/SimulationResult"
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -1055,17 +1045,16 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "$ref": "#/definitions/SimulationResult"
-          }
         }
       },
       {
         "name": "submit_clearing",
-        "doc": " Permissionless; the solver is the predecessor. Stores the proposal only when it beats the\n stored one (spec 4.3); D2 stays untouched until `commit_epoch` (ADR-21). Returns `cleared_total`.",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        },
         "kind": "call",
         "params": {
           "serialization_type": "json",
@@ -1088,12 +1077,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "type": "string"
-          }
         }
       },
       {
