@@ -28,8 +28,18 @@ command, runs it, and confirms any mainnet run.
    node dao/print-params.mjs --contract x207-circle.testnet
    ```
 
+5. Vote and read the proposal (CT-047). Only council members can vote; the DAO rejects others:
+
+   ```bash
+   node dao/vote-proposal.mjs --dao x207.sputnik-dao.testnet --id 0 --signer a.testnet
+   node dao/proposal-status.mjs --dao x207.sputnik-dao.testnet --id 0
+   ```
+
+   `proposal-status.mjs --from-json <file|->` prints the `status` of the JSON that `get_proposal` returned
+   (`InProgress`, then `Approved` once enough council members voted).
+
 Tests of the builders: `node --test dao/`.
 
-Not verified yet: the policy shape follows `sputnikdao2` and has not run against the factory wasm.
+Not verified yet: the `act_proposal` arguments (`id`, `action`) follow `sputnikdao2` and may need the `proposal` field of newer DAO versions; the policy shape follows `sputnikdao2` and has not run against the factory wasm.
 The sandbox run with the Sputnik wasm belongs to the integration test item; the testnet or mainnet
 run needs owner approval.

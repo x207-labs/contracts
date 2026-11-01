@@ -113,3 +113,40 @@ test('CLI: broken params JSON exits non-zero and prints no command', () => {
   const view = execFileSync('node', ['dao/print-params.mjs', '--contract', 'c.near']).toString();
   assert.match(view, /get_params/);
 });
+
+// --- CT-047 ---------------------------------------------------------------------------------
+import {
+  actProposalCommand, buildActProposalArgs, getProposalCommand, proposalStatus,
+} from './lib.mjs';
+
+test('vote args: default VoteApprove, other actions checked, id validated', () => {
+  assert.deepEqual(buildActProposalArgs({ id: '7' }), { id: 7, action: 'VoteApprove' });
+  assert.deepEqual(buildActProposalArgs({ id: 0, action: 'VoteReject' }), { id: 0, action: 'VoteReject' });
+  assert.throws(() => buildActProposalArgs({ id: 1, action: 'Delete' }), /action must be one of/);
+  assert.throws(() => buildActProposalArgs({ id: -1 }), /invalid proposal id/);
+  assert.throws(() => buildActProposalArgs({ id: 'x' }), /invalid proposal id/);
+});
+
+test('vote and status commands', () => {
+  const vote = actProposalCommand({ dao: 'x207.sputnik-dao.near', signer: 'alice.near', network: 'testnet', actArgs: buildActProposalArgs({ id: 3 }) });
+  assert.match(vote, /as-transaction x207\.sputnik-dao\.near act_proposal json-args '\{"id":3,"action":"VoteApprove"\}'/);
+  const view = getProposalCommand({ dao: 'x207.sputnik-dao.near', id: 3, network: 'testnet' });
+  assert.equal(view, `near contract call-function as-read-only x207.sputnik-dao.near get_proposal json-args '{"id":3}' network-config testnet now`);
+});
+
+test('status reader: InProgress then Approved, garbage rejected', () => {
+  assert.equal(proposalStatus({ id: 0, status: 'InProgress' }), 'InProgress');
+  assert.equal(proposalStatus({ id: 0, status: 'Approved' }), 'Approved');
+  assert.throws(() => proposalStatus({}), /missing status/);
+  assert.throws(() => proposalStatus(null), /missing status/);
+});
+
+test('CLI: vote prints a command, status reads a file and stdin', () => {
+  const vote = execFileSync('node', ['dao/vote-proposal.mjs', '--dao', 'd.near', '--id', '2', '--signer', 's.near']).toString();
+  assert.match(vote, /act_proposal/);
+  const bad = spawnSync('node', ['dao/vote-proposal.mjs', '--dao', 'd.near', '--id', '2', '--signer', 's.near', '--action', 'Nope']);
+  assert.equal(bad.status, 1);
+  const status = execFileSync('node', ['dao/proposal-status.mjs', '--from-json', '-'], { input: '{"status":"Approved"}' }).toString();
+  assert.equal(status.trim(), 'Approved');
+  assert.match(execFileSync('node', ['dao/proposal-status.mjs', '--dao', 'd.near', '--id', '2']).toString(), /get_proposal/);
+});

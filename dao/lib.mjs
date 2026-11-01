@@ -169,3 +169,46 @@ export function getParamsCommand({ contract, network }) {
     'json-args', "'{}'", 'network-config', network, 'now',
   ].join(' ');
 }
+
+// --- CT-047: voting and reading a proposal -------------------------------------------------------
+
+export const VOTE_ACTIONS = ['VoteApprove', 'VoteReject', 'VoteRemove', 'Finalize'];
+
+function assertProposalId(id) {
+  const n = Number(id);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`invalid proposal id: ${JSON.stringify(id)}`);
+  return n;
+}
+
+/** Arguments of Sputnik `act_proposal`. Only council members may vote; the DAO enforces it. */
+export function buildActProposalArgs({ id, action = 'VoteApprove' }) {
+  if (!VOTE_ACTIONS.includes(action)) throw new Error(`action must be one of ${VOTE_ACTIONS.join(', ')}, got ${action}`);
+  return { id: assertProposalId(id), action };
+}
+
+export function actProposalCommand({ dao, signer, network, actArgs }) {
+  assertAccountId(dao);
+  assertAccountId(signer);
+  return [
+    'near contract call-function as-transaction', dao, 'act_proposal',
+    'json-args', sh(JSON.stringify(actArgs)),
+    'prepaid-gas', sh('200 Tgas'), 'attached-deposit', sh('0 NEAR'),
+    'sign-as', signer, 'network-config', network, 'sign-with-keychain', 'send',
+  ].join(' ');
+}
+
+export function getProposalCommand({ dao, id, network }) {
+  assertAccountId(dao);
+  return [
+    'near contract call-function as-read-only', dao, 'get_proposal',
+    'json-args', sh(JSON.stringify({ id: assertProposalId(id) })), 'network-config', network, 'now',
+  ].join(' ');
+}
+
+/** Status of a `get_proposal` result (`InProgress`, `Approved`, `Rejected`, `Removed`, `Expired`, `Moved`, `Failed`). */
+export function proposalStatus(proposal) {
+  if (proposal === null || typeof proposal !== 'object' || typeof proposal.status !== 'string') {
+    throw new Error('not a proposal: missing status');
+  }
+  return proposal.status;
+}
