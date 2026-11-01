@@ -9,7 +9,7 @@ use near_workspaces::{Contract, Worker};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-const WASM: &str = "target/near/ct003_voucher_gas/ct003_voucher_gas.wasm";
+mod common;
 
 fn voucher(cumulative: &str) -> Value {
     json!({
@@ -64,7 +64,7 @@ fn encode_key(key: &SigningKey) -> String {
 
 async fn deploy() -> anyhow::Result<(Worker<near_workspaces::network::Sandbox>, Contract)> {
     let worker = near_workspaces::sandbox().await?;
-    let wasm = std::fs::read(WASM)?;
+    let wasm = std::fs::read(common::probe_wasm("ct003_voucher_gas"))?;
     let contract = worker.dev_deploy(&wasm).await?;
     Ok((worker, contract))
 }

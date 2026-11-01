@@ -7,7 +7,7 @@ use near_workspaces::types::Gas;
 use near_workspaces::Contract;
 use serde_json::{json, Value};
 
-const WASM: &str = "target/near/ct004_clearing_gas/ct004_clearing_gas.wasm";
+mod common;
 use x207_circle::types::MAX_EDGES_PER_TX;
 
 const MAX_MEMBERS: usize = 64;
@@ -35,7 +35,7 @@ fn graph(members: usize, n: usize) -> Vec<Value> {
 
 async fn fresh() -> anyhow::Result<Contract> {
     let worker = near_workspaces::sandbox().await?;
-    let wasm = std::fs::read(WASM)?;
+    let wasm = std::fs::read(common::probe_wasm("ct004_clearing_gas"))?;
     let contract = worker.dev_deploy(&wasm).await?;
     contract.call("new").transact().await?.into_result()?;
     Ok(contract)
