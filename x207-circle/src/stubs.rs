@@ -12,7 +12,6 @@ use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId, PromiseOrValue};
 
 use crate::params::Params;
-use crate::settlement::PositionView;
 use crate::state::{PendingParams, X207Circle, X207CircleExt};
 use crate::types::{ClaimDestination, EpochId};
 
@@ -56,11 +55,6 @@ impl X207Circle {
 
     pub fn get_pending_params(&self) -> Option<PendingParams> {
         not_implemented("get_pending_params")
-    }
-
-    // F4 position view.
-    pub fn net_position(&self, epoch: EpochId, account_id: AccountId) -> Option<PositionView> {
-        not_implemented("net_position")
     }
 
     // ADR-29 exit.

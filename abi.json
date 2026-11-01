@@ -719,6 +719,19 @@
       },
       {
         "name": "net_position",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/PositionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "kind": "view",
         "params": {
           "serialization_type": "json",
@@ -738,19 +751,6 @@
               }
             }
           ]
-        },
-        "result": {
-          "serialization_type": "json",
-          "type_schema": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/PositionView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
         }
       },
       {

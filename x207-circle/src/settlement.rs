@@ -129,6 +129,13 @@ impl X207Circle {
         self.proposals.get(&epoch).cloned()
     }
 
+    /// D5 record of `account_id` in `epoch`, which carries the residual bill (`amount`, and for a
+    /// debtor `payment_deadline` = commit + `payment_window`). `None` for a net-zero participant, a
+    /// non-participant, an unknown epoch, or an epoch not committed yet (K-23).
+    pub fn net_position(&self, epoch: EpochId, account_id: AccountId) -> Option<PositionView> {
+        self.positions.get(&(epoch, account_id.clone())).map(|p| p.to_view(epoch, account_id))
+    }
+
     /// D5 records of `epoch` in the order `commit_epoch` wrote them. `limit` 0, an unknown epoch,
     /// or a `from_index` past the end gives `[]`.
     pub fn list_positions(&self, epoch: EpochId, from_index: u32, limit: u32) -> Vec<PositionView> {
@@ -291,5 +298,46 @@ mod tests {
             serde_json::to_value(p.to_view(42, acc("scraper.near"))).unwrap(),
             json!({"epoch":42,"account_id":"scraper.near","net":"-35000000","role":"debtor","status":"due","amount":"35000000","recovered":"0","payment_deadline":"1793840400000000000","updated_at_block":182733001})
         );
+    }
+
+    // TC-CT-031-01, TC-CT-031-02
+    #[test]
+    fn tc_ct_031_01_02_debtor_and_creditor_views() {
+        let mut c = circle();
+        let mut debtor = position(PositionRole::Debtor, PositionStatus::Due, -35_000_000);
+        debtor.payment_deadline = 1_000 + 1800 * 1_000_000_000;
+        c.put_position(1, acc("scraper.near"), debtor);
+        c.put_position(1, acc("gpu.near"), position(PositionRole::Creditor, PositionStatus::Claimable, 35_000_000));
+        let d = serde_json::to_value(c.net_position(1, acc("scraper.near"))).unwrap();
+        assert_eq!(
+            (&d["net"], &d["role"], &d["status"], &d["amount"], &d["recovered"], &d["payment_deadline"]),
+            (&json!("-35000000"), &json!("debtor"), &json!("due"), &json!("35000000"), &json!("0"), &json!("1800000001000"))
+        );
+        let g = serde_json::to_value(c.net_position(1, acc("gpu.near"))).unwrap();
+        assert_eq!(
+            (&g["net"], &g["role"], &g["status"], &g["amount"]),
+            (&json!("35000000"), &json!("creditor"), &json!("claimable"), &json!("35000000"))
+        );
+    }
+
+    // TC-CT-031-03, TC-CT-031-04, TC-CT-031-05: no record means null
+    #[test]
+    fn tc_ct_031_03_to_05_missing_record_is_null() {
+        let mut c = circle();
+        c.put_position(1, acc("scraper.near"), position(PositionRole::Debtor, PositionStatus::Due, -35_000_000));
+        for (epoch, who) in [(1, "translator.near"), (1, "outsider.near"), (2, "scraper.near"), (99, "scraper.near")] {
+            assert_eq!(serde_json::to_value(c.net_position(epoch, acc(who))).unwrap(), json!(null), "{epoch} {who}");
+        }
+    }
+
+    // TC-CT-031-07
+    #[test]
+    fn tc_ct_031_07_defaulted_shows_recovered() {
+        let mut c = circle();
+        let mut p = position(PositionRole::Debtor, PositionStatus::Defaulted, -35_000_000);
+        p.recovered = 35_000_000;
+        c.put_position(1, acc("scraper.near"), p);
+        let v = serde_json::to_value(c.net_position(1, acc("scraper.near"))).unwrap();
+        assert_eq!((&v["status"], &v["recovered"]), (&json!("defaulted"), &json!("35000000")));
     }
 }
