@@ -5,33 +5,5 @@
 //! (anywhere in the crate, with the same name, argument names, and types). A stub only panics
 //! `ERR_NOT_IMPLEMENTED`; it never changes state. Argument names are part of the ABI, so they keep
 //! their spec names even when unused.
-
-#![allow(unused_variables)]
-
-use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId, PromiseOrValue};
-
-use crate::state::{X207Circle, X207CircleExt};
-
-fn not_implemented(method: &str) -> ! {
-    env::panic_str(&format!("ERR_NOT_IMPLEMENTED: {method}"))
-}
-
-#[near]
-impl X207Circle {
-    // ADR-29 exit.
-    #[payable]
-    pub fn request_exit(&mut self) {
-        not_implemented("request_exit")
-    }
-
-    #[payable]
-    pub fn withdraw_stake(&mut self) -> PromiseOrValue<bool> {
-        not_implemented("withdraw_stake")
-    }
-
-    #[private]
-    pub fn on_withdraw_resolved(&mut self, account_id: AccountId, amount: U128) -> bool {
-        not_implemented("on_withdraw_resolved")
-    }
-}
+//!
+//! Every P0 method is implemented now, so no stub is left.
