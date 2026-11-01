@@ -14,6 +14,7 @@ pub mod risk;
 pub mod settlement;
 pub mod state;
 pub mod types;
+pub mod verifier;
 pub mod voucher;
 
 pub use state::X207Circle;
