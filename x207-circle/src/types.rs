@@ -27,3 +27,13 @@ pub enum ClaimDestination {
     Near,
     Intents,
 }
+
+/// `msg` of `ft_transfer_call` to this contract (spec 4.1): a JSON object tagged by `action`.
+/// `member_id` lets an owner or a settlement worker pay on behalf of an agent; the default is the sender.
+#[near(serializers = [json])]
+#[serde(tag = "action", rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransferMsg {
+    Stake { member_id: Option<AccountId> },
+    Settle { epoch: EpochId, member_id: Option<AccountId> },
+}

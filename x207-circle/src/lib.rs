@@ -14,6 +14,7 @@ pub mod params;
 pub mod pool;
 pub mod risk;
 pub mod settlement;
+pub mod stake;
 pub mod state;
 pub mod stubs;
 pub mod types;
