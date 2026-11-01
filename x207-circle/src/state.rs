@@ -10,7 +10,7 @@ use near_sdk::{near, AccountId, BorshStorageKey, PanicOnDefault};
 
 use crate::clearing::{ClearingProposal, Epoch};
 use crate::member::Member;
-use crate::params::{Params, PendingParams};
+use crate::params::Params;
 use crate::settlement::Position;
 use crate::types::EpochId;
 use crate::voucher::{PairState, ParticipantTotals};
@@ -53,6 +53,14 @@ pub enum StorageKey {
     Bundles = b'b',
     /// D8 `(EpochId, AccountId) -> reserved headroom` (P2).
     BundleReserves = b'r',
+}
+
+/// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingParams {
+    pub params: Params,
+    pub effective_epoch: EpochId,
 }
 
 /// Pending contract upgrade (spec `get_upgrade`, CT-055).
