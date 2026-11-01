@@ -4,6 +4,7 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::Vector;
 use near_sdk::{env, near, require, AccountId};
 
+use crate::events::{EpochCutoff, X207Event};
 use crate::params::Params;
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::{ClearingEdge, EpochId};
@@ -215,6 +216,42 @@ impl X207Circle {
     pub fn get_epoch(&self, epoch: Option<EpochId>) -> Option<EpochView> {
         let id = epoch.unwrap_or(self.current_epoch);
         self.epochs.get(&id).map(|e| e.to_view(env::block_timestamp()))
+    }
+
+    /// Permissionless. Locks epoch `epoch` (stored phase `clearing`, proposal window opens) and opens
+    /// the next epoch with pending params applied (spec section 4 and 8, K-12).
+    pub fn close_epoch(&mut self, epoch: EpochId) {
+        let now = env::block_timestamp();
+        let closing = self.epoch_mut_or_panic(epoch);
+        closing.start_clearing(now);
+        let (closed_at, proposal_deadline) = (closing.closed_at.unwrap(), closing.proposal_deadline.unwrap());
+        let (edge_count, participant_count, total_obligation) =
+            (closing.edge_count, closing.participant_count, closing.total_obligation);
+        let (prev_cutoff_at, closing_params) = (closing.cutoff_at, closing.params.clone());
+
+        let next = epoch + 1;
+        let params = match self.pending_params.take() {
+            Some(pending) if pending.effective_epoch <= next => pending.params,
+            keep => {
+                self.pending_params = keep;
+                closing_params
+            }
+        };
+        let next_cutoff_at = next_cutoff_at(prev_cutoff_at, now, params.epoch_length);
+        self.epochs.insert(next, Epoch::open(next, now, next_cutoff_at, params));
+        self.current_epoch = next;
+
+        EpochCutoff {
+            epoch,
+            closed_at: U64(closed_at),
+            proposal_deadline: U64(proposal_deadline),
+            edge_count,
+            participant_count,
+            total_obligation: U128(total_obligation),
+            next_epoch: next,
+            next_cutoff_at: U64(next_cutoff_at),
+        }
+        .emit();
     }
 }
 
@@ -458,5 +495,132 @@ mod tests {
         at(4200 * SEC);
         assert_eq!(c.get_epoch(None).unwrap().epoch, 2);
         assert_eq!(c.get_epoch(Some(1)).unwrap().phase, EpochPhaseView::PaymentWindow);
+    }
+
+    fn logs() -> Vec<String> {
+        near_sdk::test_utils::get_logs()
+    }
+
+    fn event(name: &str) -> serde_json::Value {
+        let line = logs().into_iter().find(|l| l.contains(&format!("\"event\":\"{name}\""))).expect("event logged");
+        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone()
+    }
+
+    #[test]
+    fn tc_ct_024_01_close_moves_to_clearing_and_opens_next() {
+        let mut c = circle(0);
+        {
+            let e = epoch1(&mut c);
+            e.edge_count = 3;
+            e.participant_count = 3;
+            e.total_obligation = 110_000_000;
+        }
+        let t_cut = 3600 * SEC;
+        at(t_cut + 5 * SEC);
+        c.close_epoch(1);
+        let e1 = c.epochs.get(&1).unwrap();
+        assert_eq!((e1.phase, e1.closed_at), (EpochPhase::Clearing, Some(t_cut + 5 * SEC)));
+        assert_eq!(e1.proposal_deadline, Some(t_cut + 5 * SEC + 600 * SEC));
+        let e2 = c.epochs.get(&2).unwrap();
+        assert_eq!((e2.phase, e2.opened_at, e2.cutoff_at), (EpochPhase::Open, t_cut + 5 * SEC, t_cut + 3600 * SEC));
+        assert_eq!(c.current_epoch, 2);
+        let ev = event("epoch_cutoff");
+        assert_eq!(
+            ev,
+            json!({
+                "epoch": 1,
+                "closed_at": (t_cut + 5 * SEC).to_string(),
+                "proposal_deadline": (t_cut + 605 * SEC).to_string(),
+                "edge_count": 3,
+                "participant_count": 3,
+                "total_obligation": "110000000",
+                "next_epoch": 2,
+                "next_cutoff_at": (t_cut + 3600 * SEC).to_string(),
+            })
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_BEFORE_CUTOFF")]
+    fn tc_ct_024_02_before_cutoff_rejected() {
+        let mut c = circle(0);
+        at(3600 * SEC - 10 * SEC);
+        c.close_epoch(1);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_BEFORE_CUTOFF")]
+    fn tc_ct_024_03_one_ns_before_boundary_rejected() {
+        let mut c = circle(0);
+        at(3600 * SEC - 1);
+        c.close_epoch(1);
+    }
+
+    #[test]
+    fn tc_ct_024_03_exactly_at_boundary_ok() {
+        let mut c = circle(0);
+        at(3600 * SEC);
+        c.close_epoch(1);
+        assert_eq!(c.epochs.get(&1).unwrap().phase, EpochPhase::Clearing);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_UNKNOWN_EPOCH")]
+    fn tc_ct_024_04_unknown_epoch_rejected() {
+        let mut c = circle(0);
+        at(3600 * SEC);
+        c.close_epoch(99);
+    }
+
+    #[test]
+    #[should_panic(expected = "ERR_WRONG_PHASE")]
+    fn tc_ct_024_05_second_close_rejected() {
+        let mut c = circle(0);
+        at(3600 * SEC);
+        c.close_epoch(1);
+        c.close_epoch(1);
+    }
+
+    #[test]
+    fn tc_ct_024_09_empty_epoch_closes() {
+        let mut c = circle(0);
+        at(3600 * SEC);
+        c.close_epoch(1);
+        let ev = event("epoch_cutoff");
+        assert_eq!((&ev["edge_count"], &ev["participant_count"], &ev["total_obligation"]), (&json!(0), &json!(0), &json!("0")));
+    }
+
+    #[test]
+    fn tc_ct_024_10_pending_params_applied_to_next_epoch() {
+        let mut c = circle(0);
+        let mut new = params();
+        new.epoch_length = 7200;
+        c.pending_params = Some(crate::state::PendingParams { params: new.clone(), effective_epoch: 2 });
+        at(3600 * SEC);
+        c.close_epoch(1);
+        assert_eq!(c.get_epoch(Some(1)).unwrap().params, params());
+        assert_eq!(c.get_epoch(Some(2)).unwrap().params, new);
+        assert!(c.pending_params.is_none());
+        assert_eq!(c.epochs.get(&2).unwrap().cutoff_at, 3600 * SEC + 7200 * SEC);
+    }
+
+    #[test]
+    fn close_late_restarts_cadence_from_now() {
+        let mut c = circle(0);
+        let now = 3600 * SEC + 3600 * SEC + SEC;
+        at(now);
+        c.close_epoch(1);
+        assert_eq!(c.epochs.get(&2).unwrap().cutoff_at, now + 3600 * SEC);
+    }
+
+    #[test]
+    fn tc_ct_024_11_permissionless() {
+        let mut c = circle(0);
+        testing_env!(VMContextBuilder::new()
+            .block_timestamp(3600 * SEC)
+            .predecessor_account_id("outsider.near".parse().unwrap())
+            .build());
+        c.close_epoch(1);
+        assert_eq!(c.current_epoch, 2);
     }
 }
