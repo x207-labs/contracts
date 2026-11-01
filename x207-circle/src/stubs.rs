@@ -18,20 +18,6 @@ fn not_implemented(method: &str) -> ! {
     env::panic_str(&format!("ERR_NOT_IMPLEMENTED: {method}"))
 }
 
-impl X207Circle {
-    /// `settle` action of `ft_on_transfer` (CT-032, Jalur 03): replace this stub with the real
-    /// method in the same commit. Called by `stake.rs` after the shared checks.
-    pub fn settle_transfer(
-        &mut self,
-        sender_id: AccountId,
-        amount: U128,
-        epoch: EpochId,
-        member_id: Option<AccountId>,
-    ) -> PromiseOrValue<U128> {
-        not_implemented("ft_on_transfer settle")
-    }
-}
-
 #[near]
 impl X207Circle {
     // F3 clearing and F6 default.

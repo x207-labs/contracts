@@ -1,9 +1,10 @@
 //! F4 settlement: D5 positions, D6 accounting, `ft_on_transfer`, `finalize_epoch`, `claim`.
 
 use near_sdk::json_types::{I128, U128, U64};
-use near_sdk::{near, AccountId};
+use near_sdk::{env, near, AccountId, PromiseOrValue};
 
-use crate::clearing::ClearingProposal;
+use crate::clearing::{ClearingProposal, EpochPhase};
+use crate::events::{ResidualPaid, X207Event};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::EpochId;
 
@@ -119,6 +120,67 @@ impl X207Circle {
         if is_new {
             self.epoch_mut_or_panic(epoch).position_accounts.push(account_id);
         }
+    }
+}
+
+impl X207Circle {
+    /// `settle` action of `ft_on_transfer` (spec 4.1). Order of checks (spec 4.7): `ERR_UNKNOWN_EPOCH`,
+    /// `ERR_WRONG_PHASE`, `ERR_PAYMENT_WINDOW_CLOSED`, `ERR_NO_POSITION`, `ERR_NOT_DUE`,
+    /// `ERR_UNDERPAYMENT`. Returns the refund `amount - due`. One call changes D5, D2, D6 and D1.
+    pub fn settle_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        epoch: EpochId,
+        member_id: Option<AccountId>,
+    ) -> PromiseOrValue<U128> {
+        let account = member_id.unwrap_or_else(|| sender_id.clone());
+        let e = self.epoch_or_panic(epoch);
+        e.require_phase(EpochPhase::PaymentWindow);
+        let deadline = e.payment_deadline.expect("payment_window epoch has payment_deadline");
+        if env::block_timestamp() >= deadline {
+            env::panic_str(&format!("ERR_PAYMENT_WINDOW_CLOSED: payment_deadline {deadline}"));
+        }
+        let key = (epoch, account.clone());
+        let Some(position) = self.positions.get(&key) else {
+            env::panic_str(&format!("ERR_NO_POSITION: {account} in epoch {epoch}"))
+        };
+        let due = position.amount;
+        if position.status != PositionStatus::Due {
+            env::panic_str(&format!("ERR_NOT_DUE: {account} is {:?}", position.status));
+        }
+        if amount.0 < due {
+            env::panic_str(&format!("ERR_UNDERPAYMENT: sent {} due {due}", amount.0));
+        }
+
+        let block = env::block_height();
+        self.positions
+            .get_mut(&key)
+            .expect("position checked above")
+            .transition(PositionStatus::Paid, block)
+            .unwrap_or_else(|reason| env::panic_str(&reason));
+        let debt = self.outstanding_debt.get(&account).copied().unwrap_or(0);
+        let debt = debt
+            .checked_sub(due)
+            .unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: outstanding_debt below the residual due"));
+        self.outstanding_debt.insert(account.clone(), debt);
+        self.d6_deposit_epoch_pool(epoch, due);
+        // Only settlement in cash raises `settled_history`; the limit follows at `finalize_epoch` (K-14).
+        let member = self.members.get_mut(&account).unwrap_or_else(|| env::panic_str(&format!("ERR_NOT_MEMBER: {account}")));
+        member.settled_history += due;
+        let settled_history = member.settled_history;
+
+        let refunded = amount.0 - due;
+        ResidualPaid {
+            epoch,
+            account_id: account,
+            sender_id,
+            amount: U128(due),
+            refunded: U128(refunded),
+            settled_history: U128(settled_history),
+        }
+        .emit();
+        PromiseOrValue::Value(U128(refunded))
     }
 }
 
@@ -339,5 +401,248 @@ mod tests {
         c.put_position(1, acc("scraper.near"), p);
         let v = serde_json::to_value(c.net_position(1, acc("scraper.near"))).unwrap();
         assert_eq!((&v["status"], &v["recovered"]), (&json!("defaulted"), &json!("35000000")));
+    }
+}
+
+#[cfg(test)]
+mod settle_tests {
+    use near_sdk::serde_json::{self, json};
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::{testing_env, PublicKey};
+
+    use super::*;
+    use crate::member::{Member, MemberStatus};
+    use crate::params::Params;
+
+    const CREDIT: u128 = 1_000_000;
+    const SEC: u64 = 1_000_000_000;
+    const T_COMMIT: u64 = 4_200 * SEC;
+    const T_PAY: u64 = T_COMMIT + 1_800 * SEC;
+
+    fn acc(s: &str) -> AccountId {
+        format!("{s}.near").parse().unwrap()
+    }
+
+    fn call_as(token: &str, now: u64) {
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(token)).block_timestamp(now).block_height(77).build());
+    }
+
+    fn member(c: &mut X207Circle, name: &str) {
+        c.members.insert(
+            acc(name),
+            Member {
+                account_id: acc(name),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+                terms_hash: "a".repeat(64),
+                stake: 100 * CREDIT,
+                limit: 80 * CREDIT,
+                status: MemberStatus::Active,
+                admitted: false,
+                joined_at: 0,
+                settled_history: 0,
+                last_active_epoch: 1,
+                exit_requested_epoch: None,
+                withdraw_pending: false,
+                reactivate_epoch: None,
+            },
+        );
+    }
+
+    /// S1 after `commit_epoch`: scraper owes 35 (`due`), gpu is owed 35, translator is net zero.
+    fn s1() -> X207Circle {
+        call_as("deployer", 0);
+        let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), Params::default(), 0);
+        for n in ["scraper", "gpu", "translator"] {
+            member(&mut c, n);
+        }
+        c.epochs.get_mut(&1).unwrap().start_clearing(3_600 * SEC);
+        c.epochs.get_mut(&1).unwrap().start_payment_window(T_COMMIT);
+        let position = |net: i128, role, status| Position {
+            net,
+            role,
+            status,
+            amount: net.unsigned_abs(),
+            recovered: 0,
+            payment_deadline: T_PAY,
+            updated_at_block: 5,
+        };
+        c.put_position(1, acc("scraper"), position(-35 * CREDIT as i128, PositionRole::Debtor, PositionStatus::Due));
+        c.put_position(1, acc("gpu"), position(35 * CREDIT as i128, PositionRole::Creditor, PositionStatus::Claimable));
+        c.outstanding_debt.insert(acc("scraper"), 35 * CREDIT);
+        c.total_stake = 300 * CREDIT;
+        c
+    }
+
+    fn settle(c: &mut X207Circle, sender: &str, amount: u128, msg: serde_json::Value, now: u64) -> U128 {
+        call_as("usdt", now);
+        match c.ft_on_transfer(acc(sender), U128(amount), msg.to_string()) {
+            PromiseOrValue::Value(v) => v,
+            PromiseOrValue::Promise(_) => panic!("settle returns a value"),
+        }
+    }
+
+    fn msg(epoch: u64) -> serde_json::Value {
+        json!({"action": "settle", "epoch": epoch})
+    }
+
+    fn panics(f: impl FnOnce()) -> String {
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).expect_err("expected a panic");
+        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    #[test]
+    fn tc_ct_032_01_exact_payment() {
+        let mut c = s1();
+        assert_eq!(settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_COMMIT + SEC), U128(0));
+        let p = c.positions.get(&(1, acc("scraper"))).unwrap();
+        assert_eq!((p.status, p.updated_at_block), (PositionStatus::Paid, 77));
+        assert_eq!(c.outstanding_debt(acc("scraper")), U128(0));
+        assert_eq!(c.epochs.get(&1).unwrap().pool, 35 * CREDIT);
+        assert_eq!(c.members.get(&acc("scraper")).unwrap().settled_history, 35 * CREDIT);
+        let pool = c.pool_view();
+        assert_eq!((pool.epoch_pools, pool.accounted), (U128(35 * CREDIT), U128(335 * CREDIT)));
+        let log = get_logs().into_iter().find(|l| l.contains("residual_paid")).unwrap();
+        let ev: serde_json::Value = serde_json::from_str(log.trim_start_matches("EVENT_JSON:")).unwrap();
+        assert_eq!(
+            ev["data"][0],
+            json!({"epoch":1,"account_id":"scraper.near","sender_id":"scraper.near","amount":"35000000","refunded":"0","settled_history":"35000000"})
+        );
+    }
+
+    #[test]
+    fn tc_ct_032_02_overpayment_is_refunded() {
+        let mut c = s1();
+        assert_eq!(settle(&mut c, "scraper", 40 * CREDIT, msg(1), T_COMMIT + SEC), U128(5 * CREDIT));
+        assert_eq!(c.epochs.get(&1).unwrap().pool, 35 * CREDIT);
+        let log = get_logs().into_iter().find(|l| l.contains("residual_paid")).unwrap();
+        assert!(log.contains("\"refunded\":\"5000000\"") && log.contains("\"amount\":\"35000000\""));
+    }
+
+    #[test]
+    fn tc_ct_032_03_one_unit_short_is_rejected() {
+        let mut c = s1();
+        let text = panics(|| {
+            settle(&mut c, "scraper", 35 * CREDIT - 1, msg(1), T_COMMIT + SEC);
+        });
+        assert!(text.contains("ERR_UNDERPAYMENT"), "{text}");
+        assert_eq!(c.positions.get(&(1, acc("scraper"))).unwrap().status, PositionStatus::Due);
+        assert_eq!(c.pool_view().epoch_pools, U128(0));
+    }
+
+    #[test]
+    fn tc_ct_032_04_paid_by_someone_else() {
+        let mut c = s1();
+        let m = json!({"action": "settle", "epoch": 1, "member_id": "scraper.near"});
+        assert_eq!(settle(&mut c, "outsider", 35 * CREDIT, m, T_COMMIT + SEC), U128(0));
+        assert_eq!(c.positions.get(&(1, acc("scraper"))).unwrap().status, PositionStatus::Paid);
+        let log = get_logs().into_iter().find(|l| l.contains("residual_paid")).unwrap();
+        assert!(log.contains("\"sender_id\":\"outsider.near\"") && log.contains("\"account_id\":\"scraper.near\""));
+    }
+
+    #[test]
+    fn tc_ct_032_05_wrong_token() {
+        let mut c = s1();
+        call_as("usdt_palsu", T_COMMIT + SEC);
+        let text = panics(|| {
+            let _ = c.ft_on_transfer(acc("scraper"), U128(35 * CREDIT), msg(1).to_string());
+        });
+        assert!(text.contains("ERR_WRONG_TOKEN"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_06_unknown_epoch() {
+        let mut c = s1();
+        let text = panics(|| {
+            settle(&mut c, "scraper", 35 * CREDIT, msg(99), T_COMMIT + SEC);
+        });
+        assert!(text.contains("ERR_UNKNOWN_EPOCH"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_07_epoch_not_in_payment_window() {
+        let mut c = s1();
+        c.epochs.insert(2, crate::clearing::Epoch::open(2, 0, 9_000 * SEC, Params::default()));
+        let open = panics(|| {
+            settle(&mut c, "scraper", 35 * CREDIT, msg(2), T_COMMIT + SEC);
+        });
+        assert!(open.contains("ERR_WRONG_PHASE"), "{open}");
+        let mut clearing = s1();
+        clearing.epochs.insert(1, {
+            let mut e = crate::clearing::Epoch::open(1, 0, 3_600 * SEC, Params::default());
+            e.start_clearing(3_600 * SEC);
+            e
+        });
+        let text = panics(|| {
+            settle(&mut clearing, "scraper", 35 * CREDIT, msg(1), 3_700 * SEC);
+        });
+        assert!(text.contains("ERR_WRONG_PHASE"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_08_deadline_boundary() {
+        let mut c = s1();
+        assert_eq!(settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_PAY - 1), U128(0));
+        let mut late = s1();
+        let text = panics(|| {
+            settle(&mut late, "scraper", 35 * CREDIT, msg(1), T_PAY);
+        });
+        assert!(text.contains("ERR_PAYMENT_WINDOW_CLOSED"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_09_after_finalization() {
+        let mut c = s1();
+        c.epochs.get_mut(&1).unwrap().finalize(T_PAY);
+        let text = panics(|| {
+            settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_PAY + SEC);
+        });
+        assert!(text.contains("ERR_WRONG_PHASE"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_10_creditor_cannot_settle() {
+        let mut c = s1();
+        let text = panics(|| {
+            settle(&mut c, "gpu", 35 * CREDIT, msg(1), T_COMMIT + SEC);
+        });
+        assert!(text.contains("ERR_NOT_DUE"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_11_no_position() {
+        let mut c = s1();
+        for sender in ["translator", "outsider"] {
+            let text = panics(|| {
+                settle(&mut c, sender, 35 * CREDIT, msg(1), T_COMMIT + SEC);
+            });
+            assert!(text.contains("ERR_NO_POSITION"), "{sender}: {text}");
+        }
+    }
+
+    #[test]
+    fn tc_ct_032_12_double_payment() {
+        let mut c = s1();
+        settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_COMMIT + SEC);
+        let text = panics(|| {
+            settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_COMMIT + 2 * SEC);
+        });
+        assert!(text.contains("ERR_NOT_DUE"), "{text}");
+        assert_eq!(c.epochs.get(&1).unwrap().pool, 35 * CREDIT);
+    }
+
+    #[test]
+    fn tc_ct_032_13_epoch_missing_in_msg() {
+        let mut c = s1();
+        let text = panics(|| {
+            settle(&mut c, "scraper", 35 * CREDIT, json!({"action": "settle"}), T_COMMIT + SEC);
+        });
+        assert!(text.contains("ERR_BAD_MSG"), "{text}");
+    }
+
+    #[test]
+    fn tc_ct_032_14_limit_stays_until_finalize() {
+        let mut c = s1();
+        settle(&mut c, "scraper", 35 * CREDIT, msg(1), T_COMMIT + SEC);
+        assert_eq!(c.limit(acc("scraper")), U128(80 * CREDIT));
     }
 }
