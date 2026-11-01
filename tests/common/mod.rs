@@ -57,6 +57,13 @@ pub mod circle {
         pub contract: Contract,
         pub keys: BTreeMap<String, SigningKey>,
         pub seqs: BTreeMap<(String, String, u64), u64>,
+        /// Most blocks one `fast_forward` may skip. A sandbox keeps outcomes of old blocks only for a few
+        /// epochs of height, so a follower that reads the chain through RPC needs short jumps.
+        pub max_jump: u64,
+        /// Account that sends the permissionless calls (`close_epoch`, `commit_epoch`, vouchers). A call the
+        /// contract signs for itself runs its receipt in the block that includes it, which a block-by-block
+        /// RPC reader would see differently from real traffic.
+        pub keeper: near_workspaces::Account,
     }
 
     pub fn account_of(name: &str) -> String {
@@ -108,7 +115,8 @@ pub mod circle {
                 .transact()
                 .await?
                 .into_result()?;
-            Ok(Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new() })
+            let keeper = worker.dev_create_account().await?;
+            Ok(Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new(), max_jump: 4000, keeper })
         }
 
         /// Writes an `active` member straight into contract storage (D1, prefix `m`) with a
@@ -143,6 +151,11 @@ pub mod circle {
             let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);
             *seq += 1;
             let seq = *seq;
+            self.register_at(payer, payee, epoch, seq, cumulative).await
+        }
+
+        /// `register_cumulative` with an explicit `seq` (cumulative mode allows gaps).
+        pub async fn register_at(&self, payer: &str, payee: &str, epoch: u64, seq: u64, cumulative: u128) -> anyhow::Result<ExecutionFinalResult> {
             let resource = "https://example.test/api";
             let (circle, payer_id, payee_id) = (self.contract.id().to_string(), account_of(payer), account_of(payee));
             let hash = signing_hash(&circle, &payer_id, &payee_id, epoch, seq, &cumulative.to_string(), resource);
@@ -152,8 +165,8 @@ pub mod circle {
                 "cumulativeAmount": cumulative.to_string(), "unit": "credit", "resource": resource
             });
             Ok(self
-                .contract
-                .call("register_cumulative")
+                .keeper
+                .call(self.contract.id(), "register_cumulative")
                 .args_json(json!({"voucher": voucher, "signature": signature}))
                 .gas(Gas::from_tgas(100))
                 .transact()
@@ -182,7 +195,7 @@ pub mod circle {
         pub async fn advance_to(&self, target_ns: u64) -> anyhow::Result<()> {
             while self.now_ns().await? < target_ns {
                 let missing_s = (target_ns - self.now_ns().await?).div_ceil(SEC);
-                self.worker.fast_forward(missing_s.clamp(20, 4000)).await?;
+                self.worker.fast_forward(missing_s.clamp(20, self.max_jump.max(20))).await?;
             }
             Ok(())
         }
@@ -197,7 +210,7 @@ pub mod circle {
         }
 
         pub async fn call_keeper(&self, method: &str, args: Value) -> anyhow::Result<ExecutionFinalResult> {
-            Ok(self.contract.call(method).args_json(args).gas(Gas::from_tgas(200)).transact().await?)
+            Ok(self.keeper.call(self.contract.id(), method).args_json(args).gas(Gas::from_tgas(200)).transact().await?)
         }
     }
 
@@ -245,6 +258,10 @@ pub mod funded {
         pub accounts: BTreeMap<String, Account>,
     }
 
+    async fn circle_worker_keeper(worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>) -> anyhow::Result<Account> {
+        Ok(worker.dev_create_account().await?)
+    }
+
     async fn token(circle_worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>) -> anyhow::Result<Contract> {
         let wasm = std::fs::read(super::probe_wasm("mock_ft"))?;
         let ft = circle_worker.dev_deploy(&wasm).await?;
@@ -286,7 +303,8 @@ pub mod funded {
                 .transact()
                 .await?
                 .into_result()?;
-            let circle = Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new() };
+            let keeper = circle_worker_keeper(&worker).await?;
+            let circle = Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new(), max_jump: 4000, keeper };
             Ok(Funded { circle, usdt, palsu, intents, accounts: BTreeMap::new() })
         }
 
