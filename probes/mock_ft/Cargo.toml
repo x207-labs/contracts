@@ -1,0 +1,12 @@
+# NEP-141 mock for sandbox tests (USDT stand-in). Never deployed outside near-sandbox.
+[package]
+name = "mock-ft"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.29.1"

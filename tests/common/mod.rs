@@ -92,12 +92,17 @@ pub mod circle {
     impl Circle {
         /// Deploys the built contract and runs `new` with `params`.
         pub async fn deploy(params: Value) -> anyhow::Result<Circle> {
+            Self::deploy_with(params, account_of("usdt")).await
+        }
+
+        /// Same, with `usdt` as the token account the contract accepts.
+        pub async fn deploy_with(params: Value, usdt: String) -> anyhow::Result<Circle> {
             let worker = near_workspaces::sandbox().await?;
             let contract = worker.dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?).await?;
             contract
                 .call("new")
                 .args_json(json!({
-                    "owner_id": account_of("dao"), "circle_id": "agents-main", "usdt_token_id": account_of("usdt"),
+                    "owner_id": account_of("dao"), "circle_id": "agents-main", "usdt_token_id": usdt,
                     "intents_id": account_of("intents"), "params": params
                 }))
                 .transact()
@@ -155,6 +160,12 @@ pub mod circle {
                 .await?)
         }
 
+        /// The voucher public key of `name`, created on first use.
+        pub fn key_for(&mut self, name: &str) -> String {
+            let key = self.keys.entry(name.to_string()).or_insert_with(|| voucher_key(name));
+            pubkey_of(key)
+        }
+
         pub async fn view(&self, method: &str, args: Value) -> anyhow::Result<Value> {
             Ok(self.contract.view(method).args_json(args).await?.json()?)
         }
@@ -204,5 +215,132 @@ pub mod circle {
             .map(|body| serde_json::from_str::<Value>(body).expect("event json"))
             .map(|v| (v["event"].as_str().unwrap().to_string(), v["data"][0].clone()))
             .collect()
+    }
+
+    /// Text of every failed receipt (not only the final status), for refund tests where the
+    /// token call succeeds and the receiver's `ft_on_transfer` fails.
+    pub fn receipt_failures(result: &ExecutionFinalResult) -> String {
+        format!("{:?}", result.failures())
+    }
+}
+
+/// The circle with a real NEP-141 mock as USDT, a second mock as a wrong token, and member accounts.
+#[allow(dead_code)]
+pub mod funded {
+    use std::collections::BTreeMap;
+
+    use near_workspaces::result::ExecutionFinalResult;
+    use near_workspaces::types::{Gas, NearToken};
+    use near_workspaces::{Account, Contract};
+    use serde_json::{json, Value};
+
+    use super::circle::{account_of, short_params, Circle, CREDIT};
+
+    pub struct Funded {
+        pub circle: Circle,
+        pub usdt: Contract,
+        pub palsu: Contract,
+        pub accounts: BTreeMap<String, Account>,
+    }
+
+    async fn token(circle_worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>) -> anyhow::Result<Contract> {
+        let wasm = std::fs::read(super::probe_wasm("mock_ft"))?;
+        let ft = circle_worker.dev_deploy(&wasm).await?;
+        ft.call("new").transact().await?.into_result()?;
+        Ok(ft)
+    }
+
+    impl Funded {
+        /// `F0`: contract with default or short params, USDT mock, wrong-token mock. No members yet.
+        pub async fn deploy(params: Option<Value>) -> anyhow::Result<Funded> {
+            let worker = near_workspaces::sandbox().await?;
+            let usdt = token(&worker).await?;
+            let palsu = token(&worker).await?;
+            let wasm = std::fs::read("target/near/x207_circle.wasm")?;
+            let contract = worker.dev_deploy(&wasm).await?;
+            contract
+                .call("new")
+                .args_json(json!({
+                    "owner_id": account_of("dao"), "circle_id": "agents-main", "usdt_token_id": usdt.id(),
+                    "intents_id": account_of("intents"), "params": params
+                }))
+                .transact()
+                .await?
+                .into_result()?;
+            let circle = Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new() };
+            Ok(Funded { circle, usdt, palsu, accounts: BTreeMap::new() })
+        }
+
+        pub fn params_short() -> Value {
+            short_params()
+        }
+
+        /// Creates `name.test.near` with 1.000 USDT and 1.000 of the wrong token.
+        pub async fn account(&mut self, name: &str) -> anyhow::Result<Account> {
+            if let Some(a) = self.accounts.get(name) {
+                return Ok(a.clone());
+            }
+            let root = self.circle.worker.root_account()?;
+            let account = root.create_subaccount(name).initial_balance(NearToken::from_near(20)).transact().await?.into_result()?;
+            for ft in [&self.usdt, &self.palsu] {
+                ft.call("mint").args_json(json!({"account_id": account.id(), "amount": (1000 * CREDIT).to_string()})).transact().await?.into_result()?;
+            }
+            self.accounts.insert(name.to_string(), account.clone());
+            Ok(account)
+        }
+
+        /// `join` with `deposit` and the voucher key of `name`.
+        pub async fn join(&mut self, name: &str, deposit: NearToken) -> anyhow::Result<ExecutionFinalResult> {
+            let account = self.account(name).await?;
+            let pubkey = self.circle.key_for(name);
+            Ok(account
+                .call(self.circle.contract.id(), "join")
+                .args_json(json!({"circle_id": "agents-main", "pubkey_voucher": pubkey, "terms_hash": "a".repeat(64)}))
+                .deposit(deposit)
+                .gas(Gas::from_tgas(100))
+                .transact()
+                .await?)
+        }
+
+        pub fn join_deposit() -> NearToken {
+            NearToken::from_millinear(10)
+        }
+
+        /// `token.ft_transfer_call(contract, amount, msg)` from `who`; the result value is the used amount.
+        pub async fn transfer_call(&self, token: &Contract, who: &Account, amount: u128, msg: &str) -> anyhow::Result<ExecutionFinalResult> {
+            Ok(who
+                .call(token.id(), "ft_transfer_call")
+                .args_json(json!({"receiver_id": self.circle.contract.id(), "amount": amount.to_string(), "memo": null, "msg": msg}))
+                .deposit(NearToken::from_yoctonear(1))
+                .gas(Gas::from_tgas(150))
+                .transact()
+                .await?)
+        }
+
+        pub async fn stake(&self, who: &Account, amount: u128) -> anyhow::Result<ExecutionFinalResult> {
+            self.transfer_call(&self.usdt, who, amount, r#"{"action":"stake"}"#).await
+        }
+
+        pub async fn balance(&self, token: &Contract, account: &near_workspaces::AccountId) -> anyhow::Result<u128> {
+            let value: String = token.view("ft_balance_of").args_json(json!({"account_id": account})).await?.json()?;
+            Ok(value.parse()?)
+        }
+
+        pub async fn member(&self, name: &str) -> anyhow::Result<Value> {
+            self.circle.view("member", json!({"account_id": account_of(name)})).await
+        }
+
+        /// I-04 (`assert_d6`): the five components sum to the USDT balance of the contract, and
+        /// `total_stake` is the sum of the member stakes.
+        pub async fn assert_d6(&self) -> anyhow::Result<()> {
+            let pool = self.circle.view("get_pool", json!({})).await?;
+            let balance = self.balance(&self.usdt, self.circle.contract.id()).await?;
+            let accounted: u128 = pool["accounted"].as_str().unwrap().parse()?;
+            assert_eq!(accounted, balance, "accounted {accounted} != USDT balance {balance}");
+            let members = self.circle.view("list_members", json!({"from_index": 0, "limit": 100})).await?;
+            let stake: u128 = members.as_array().unwrap().iter().map(|m| m["stake"].as_str().unwrap().parse::<u128>().unwrap()).sum();
+            assert_eq!(pool["total_stake"].as_str().unwrap().parse::<u128>()?, stake, "total_stake != sum of stakes");
+            Ok(())
+        }
     }
 }

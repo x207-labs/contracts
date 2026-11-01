@@ -3,7 +3,7 @@
 # tests in `tests/*.rs` are auto-discovered without per-file manifest edits.
 [workspace]
 resolver = "2"
-members = ["probes/ct003_voucher_gas", "probes/ct004_clearing_gas"]
+members = ["probes/ct003_voucher_gas", "probes/ct004_clearing_gas", "probes/mock_ft"]
 
 [package]
 name = "x207-circle"
