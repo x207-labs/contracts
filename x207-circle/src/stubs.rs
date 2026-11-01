@@ -11,8 +11,7 @@
 use near_sdk::json_types::U128;
 use near_sdk::{env, near, AccountId, PromiseOrValue};
 
-use crate::params::Params;
-use crate::state::{PendingParams, X207Circle, X207CircleExt};
+use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClaimDestination, EpochId};
 
 fn not_implemented(method: &str) -> ! {
@@ -46,15 +45,6 @@ impl X207Circle {
         destination: ClaimDestination,
     ) -> U128 {
         not_implemented("on_claim_resolved")
-    }
-
-    // F7 governance.
-    pub fn set_params(&mut self, params: Params) {
-        not_implemented("set_params")
-    }
-
-    pub fn get_pending_params(&self) -> Option<PendingParams> {
-        not_implemented("get_pending_params")
     }
 
     // ADR-29 exit.

@@ -3,7 +3,8 @@
 use near_sdk::json_types::U128;
 use near_sdk::{env, near};
 
-use crate::state::{X207Circle, X207CircleExt};
+use crate::events::{ParamsUpdated, X207Event};
+use crate::state::{PendingParams, X207Circle, X207CircleExt};
 
 // Ranges (spec 3.4, ADR-20). `payment_window` minimum is 15 minutes (ADR-21).
 pub const EPOCH_LENGTH_MIN: u64 = 300;
@@ -97,8 +98,44 @@ pub fn validate_params(p: &Params) {
     require_range(p.fees.solver_fee_bps, 0, SOLVER_FEE_BPS_MAX, "fees.solver_fee_bps");
 }
 
+impl Params {
+    /// Names of the fields that differ from `other`, in struct order; nested fields use a dot (K-17).
+    pub fn changed_fields(&self, other: &Params) -> Vec<String> {
+        let checks = [
+            ("epoch_length", self.epoch_length != other.epoch_length),
+            ("payment_window", self.payment_window != other.payment_window),
+            ("proposal_window", self.proposal_window != other.proposal_window),
+            ("base_limit_ratio", self.base_limit_ratio != other.base_limit_ratio),
+            ("limit_growth", self.limit_growth != other.limit_growth),
+            ("limit_cap", self.limit_cap != other.limit_cap),
+            ("limit_decay", self.limit_decay != other.limit_decay),
+            ("fees.clearing_fee_bps", self.fees.clearing_fee_bps != other.fees.clearing_fee_bps),
+            ("fees.solver_fee_bps", self.fees.solver_fee_bps != other.fees.solver_fee_bps),
+            ("admission", self.admission != other.admission),
+        ];
+        checks.into_iter().filter(|(_, differs)| *differs).map(|(name, _)| name.to_string()).collect()
+    }
+}
+
 #[near]
 impl X207Circle {
+    /// Owner only (the Sputnik DAO). Validates, then stores `params` as pending for the next epoch; the
+    /// running epoch keeps its snapshot, and `close_epoch` applies the pending value. A second call in
+    /// the same epoch overwrites the first. `old` in the event is the active params, never the pending ones.
+    pub fn set_params(&mut self, params: Params) {
+        self.assert_owner();
+        validate_params(&params);
+        let old = self.epoch_or_panic(self.current_epoch).params.clone();
+        let effective_epoch = self.current_epoch + 1;
+        let changed = old.changed_fields(&params);
+        self.pending_params = Some(PendingParams { params: params.clone(), effective_epoch });
+        ParamsUpdated { old, new: params, changed, effective_epoch }.emit();
+    }
+
+    pub fn get_pending_params(&self) -> Option<PendingParams> {
+        self.pending_params.clone()
+    }
+
     /// Params active in the running epoch: the snapshot of `current_epoch` (spec section 5).
     pub fn get_params(&self) -> Params {
         self.epoch_or_panic(self.current_epoch).params.clone()
@@ -266,5 +303,140 @@ mod tests {
     fn get_params_reports_active_epoch_snapshot() {
         let custom = with(|p| p.epoch_length = 7_200);
         assert_eq!(circle(custom.clone()).get_params(), custom);
+    }
+
+    fn as_caller(who: &str, now: u64) {
+        testing_env!(VMContextBuilder::new()
+            .block_timestamp(now)
+            .predecessor_account_id(who.parse().unwrap())
+            .build());
+    }
+
+    fn params_events() -> Vec<serde_json::Value> {
+        near_sdk::test_utils::get_logs()
+            .iter()
+            .filter(|l| l.contains("params_updated"))
+            .map(|l| serde_json::from_str::<serde_json::Value>(l.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone())
+            .collect()
+    }
+
+    fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
+        let err = std::panic::catch_unwind(f).expect_err("expected a panic");
+        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    // TC-CT-040-01
+    #[test]
+    fn tc_ct_040_01_owner_change_is_pending_for_next_epoch() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        let new = with(|p| p.payment_window = 2_700);
+        c.set_params(new.clone());
+        assert_eq!(c.get_params(), Params::default());
+        let pending = c.get_pending_params().unwrap();
+        assert_eq!((pending.params, pending.effective_epoch), (new.clone(), 2));
+        let e = params_events();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0]["changed"], serde_json::json!(["payment_window"]));
+        assert_eq!(e[0]["effective_epoch"], serde_json::json!(2));
+        assert_eq!(e[0]["old"]["payment_window"], serde_json::json!(1800));
+        assert_eq!(e[0]["new"]["payment_window"], serde_json::json!(2700));
+    }
+
+    // TC-CT-040-02 (unit approximation of the sandbox case): close_epoch applies the pending params
+    #[test]
+    fn tc_ct_040_02_applied_by_close_epoch() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        let new = with(|p| p.payment_window = 2_700);
+        c.set_params(new.clone());
+        as_caller("keeper.near", 1_000 + 3600 * 1_000_000_000);
+        c.close_epoch(1);
+        assert_eq!(c.get_params(), new);
+        assert!(c.get_pending_params().is_none());
+        assert_eq!(c.get_epoch(Some(1)).unwrap().params, Params::default());
+    }
+
+    // TC-CT-040-03
+    #[test]
+    fn tc_ct_040_03_not_owner() {
+        let mut c = circle(Params::default());
+        as_caller("translator.near", 2_000);
+        let msg = panic_text(std::panic::AssertUnwindSafe(|| c.set_params(with(|p| p.payment_window = 2_700))));
+        assert!(msg.contains("ERR_NOT_OWNER"), "{msg}");
+        assert!(c.get_pending_params().is_none());
+    }
+
+    // TC-CT-040-04
+    #[test]
+    fn tc_ct_040_04_out_of_range() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        let msg = panic_text(std::panic::AssertUnwindSafe(|| c.set_params(with(|p| p.payment_window = 899))));
+        assert!(msg.contains("ERR_PARAM_OUT_OF_RANGE: payment_window"), "{msg}");
+        assert!(c.get_pending_params().is_none());
+    }
+
+    // TC-CT-040-05
+    #[test]
+    fn tc_ct_040_05_second_call_overwrites() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        c.set_params(with(|p| p.payment_window = 2_700));
+        let second = with(|p| p.proposal_window = 300);
+        c.set_params(second.clone());
+        assert_eq!(c.get_pending_params().unwrap().params, second);
+        let e = params_events();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[1]["old"]["payment_window"], serde_json::json!(1800));
+        assert_eq!(e[1]["changed"], serde_json::json!(["proposal_window"]));
+    }
+
+    // TC-CT-040-07
+    #[test]
+    fn tc_ct_040_07_several_fields_changed() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        c.set_params(with(|p| {
+            p.epoch_length = 7_200;
+            p.limit_cap = U128(2_000_000_000);
+        }));
+        assert_eq!(params_events()[0]["changed"], serde_json::json!(["epoch_length", "limit_cap"]));
+    }
+
+    #[test]
+    fn nested_and_enum_fields_are_named() {
+        let a = Params::default();
+        let b = with(|p| {
+            p.fees.solver_fee_bps = 10;
+            p.admission = Admission::Dao;
+        });
+        assert_eq!(a.changed_fields(&b), ["fees.solver_fee_bps", "admission"]);
+    }
+
+    // TC-CT-040-08
+    #[test]
+    fn tc_ct_040_08_identical_params_accepted() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        c.set_params(Params::default());
+        assert_eq!(params_events()[0]["changed"], serde_json::json!([]));
+        assert!(c.get_pending_params().is_some());
+    }
+
+    // TC-CT-040-09
+    #[test]
+    fn tc_ct_040_09_does_not_touch_d6() {
+        let mut c = circle(Params::default());
+        as_caller("dao.near", 2_000);
+        let before = c.get_pool();
+        c.set_params(with(|p| p.base_limit_ratio = 5_000));
+        assert_eq!(c.get_pool(), before);
+    }
+
+    // TC-CT-040-null: nothing pending right after init
+    #[test]
+    fn no_pending_params_after_init() {
+        assert!(circle(Params::default()).get_pending_params().is_none());
     }
 }

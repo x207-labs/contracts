@@ -1002,7 +1002,6 @@
       },
       {
         "name": "set_params",
-        "kind": "call",
         "params": {
           "serialization_type": "json",
           "args": [
@@ -1013,7 +1012,8 @@
               }
             }
           ]
-        }
+        },
+        "kind": "call"
       },
       {
         "name": "simulate_clearing",
