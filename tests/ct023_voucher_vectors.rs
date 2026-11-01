@@ -1,5 +1,7 @@
 //! CT-023: voucher test vectors from `sdk/spec/test-vectors/voucher/`, shared with the TypeScript CI.
 //! Set `X207_TEST_VECTORS` to read another folder. A missing folder fails the test (TC-CT-023-04).
+//! Without the variable the sibling `sdk` repo is used when it exists (umbrella checkout); a lone
+//! `contracts` checkout (CI) reads the copy in `tests/vectors/`, refreshed from the sdk by hand.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,9 +19,11 @@ use x207_circle::X207Circle;
 const CREDIT: u128 = 1_000_000;
 
 fn vectors_dir() -> PathBuf {
-    let dir = std::env::var("X207_TEST_VECTORS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| Path::new(env!("CARGO_MANIFEST_DIR")).join("../sdk/spec/test-vectors"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = std::env::var("X207_TEST_VECTORS").map(PathBuf::from).unwrap_or_else(|_| {
+        let sdk = root.join("../sdk/spec/test-vectors");
+        if sdk.join("voucher").is_dir() { sdk } else { root.join("tests/vectors") }
+    });
     voucher_folder(dir)
 }
 
@@ -210,4 +214,16 @@ fn leading_zero_amount_does_not_verify() {
     let canonical = payload_for(&voucher, "7");
     let good = format!("ed25519:{}", near_sdk::bs58::encode(signing_key.sign(&Sha256::digest(&canonical)).to_bytes()).into_string());
     assert!(verifies(&voucher, &good, &key));
+}
+
+/// The copy in `tests/vectors/` must not drift from the sdk (only checked where the sdk exists).
+#[test]
+fn vendored_vectors_match_the_sdk() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let sdk = root.join("../sdk/spec/test-vectors/voucher");
+    if !sdk.is_dir() {
+        return;
+    }
+    let (a, b) = (load(&sdk), load(&root.join("tests/vectors/voucher")));
+    assert_eq!(a, b, "tests/vectors/voucher differs from sdk/spec/test-vectors/voucher: copy it again");
 }

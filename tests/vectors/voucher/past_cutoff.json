@@ -1,0 +1,30 @@
+{
+  "name": "past_cutoff",
+  "description": "epoch belum di-close_epoch: get_epoch tanpa argumen masih epoch 42 fase cutoff (K-28).",
+  "input": {
+    "voucher": {
+      "circle": "x207-circle.near",
+      "payer": "translator.x207-circle.near",
+      "payee": "summarizer.x207-circle.near",
+      "epoch": 42,
+      "seq": 137,
+      "cumulativeAmount": "2740000",
+      "unit": "credit",
+      "resource": "https://summarizer.example/api/summarize",
+      "signature": "ed25519:4XUKL8orbakw3LPbZ1YFPj739ciqDQkSHBwvw9ovoevxsGneEw6ZGj4GLuCdLrmYtZPmg8okUuJVnaFn2TLyF4gv"
+    },
+    "publicKey": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+    "context": {
+      "cutoffAtMs": 1793500000000,
+      "nowMs": 1793500001000,
+      "epochClosed": false,
+      "flushLeadSeconds": 120
+    }
+  },
+  "expected": {
+    "valid": true,
+    "accepted": false,
+    "contractError": "ERR_PAST_CUTOFF",
+    "facilitatorReason": "epoch_closing"
+  }
+}

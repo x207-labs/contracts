@@ -1,0 +1,24 @@
+{
+  "name": "valid",
+  "input": {
+    "voucher": {
+      "circle": "x207-circle.near",
+      "payer": "translator.x207-circle.near",
+      "payee": "summarizer.x207-circle.near",
+      "epoch": 42,
+      "seq": 137,
+      "cumulativeAmount": "2740000",
+      "unit": "credit",
+      "resource": "https://summarizer.example/api/summarize",
+      "signature": "ed25519:4XUKL8orbakw3LPbZ1YFPj739ciqDQkSHBwvw9ovoevxsGneEw6ZGj4GLuCdLrmYtZPmg8okUuJVnaFn2TLyF4gv"
+    },
+    "publicKey": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
+  },
+  "expected": {
+    "valid": true,
+    "message": "{\"circle\":\"x207-circle.near\",\"payer\":\"translator.x207-circle.near\",\"payee\":\"summarizer.x207-circle.near\",\"epoch\":42,\"seq\":137,\"cumulativeAmount\":\"2740000\",\"unit\":\"credit\",\"resource\":\"https://summarizer.example/api/summarize\"}",
+    "nonce": "6d2a103b888569851ec3776293678e9ec28ccc9e5beba0445990384e827eacb8",
+    "payload": "9d010080e10000007b22636972636c65223a22783230372d636972636c652e6e656172222c227061796572223a227472616e736c61746f722e783230372d636972636c652e6e656172222c227061796565223a2273756d6d6172697a65722e783230372d636972636c652e6e656172222c2265706f6368223a34322c22736571223a3133372c2263756d756c6174697665416d6f756e74223a2232373430303030222c22756e6974223a22637265646974222c227265736f75726365223a2268747470733a2f2f73756d6d6172697a65722e6578616d706c652f6170692f73756d6d6172697a65227d6d2a103b888569851ec3776293678e9ec28ccc9e5beba0445990384e827eacb810000000783230372d636972636c652e6e65617200",
+    "signingHash": "aac54aa487b0e62b453ce6b758cc1203ce5f379dbd82509b8812ea42a486ffcf"
+  }
+}

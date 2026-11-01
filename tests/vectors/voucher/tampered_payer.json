@@ -1,0 +1,22 @@
+{
+  "name": "tampered_payer",
+  "input": {
+    "voucher": {
+      "circle": "x207-circle.near",
+      "payer": "scraper.x207-circle.near",
+      "payee": "summarizer.x207-circle.near",
+      "epoch": 42,
+      "seq": 137,
+      "cumulativeAmount": "2740000",
+      "unit": "credit",
+      "resource": "https://summarizer.example/api/summarize",
+      "signature": "ed25519:4XUKL8orbakw3LPbZ1YFPj739ciqDQkSHBwvw9ovoevxsGneEw6ZGj4GLuCdLrmYtZPmg8okUuJVnaFn2TLyF4gv"
+    },
+    "publicKey": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
+  },
+  "expected": {
+    "valid": false,
+    "contractError": "ERR_BAD_SIGNATURE",
+    "facilitatorReason": "invalid_signature"
+  }
+}
