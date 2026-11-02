@@ -100,6 +100,18 @@ impl X207Circle {
         self.solver_fees_total = add(self.solver_fees_total, to_solver);
     }
 
+    /// `claim_solver_fee`: the balance goes in flight until the callback. The caller updates `solver_fees`.
+    pub fn d6_solver_fee_to_in_flight(&mut self, amount: u128) {
+        self.solver_fees_total = sub(self.solver_fees_total, amount);
+        self.in_flight = add(self.in_flight, amount);
+    }
+
+    /// Failed `claim_solver_fee` transfer: the amount returns to the solver balance. The caller updates `solver_fees`.
+    pub fn d6_in_flight_to_solver_fee(&mut self, amount: u128) {
+        self.in_flight = sub(self.in_flight, amount);
+        self.solver_fees_total = add(self.solver_fees_total, amount);
+    }
+
     /// `claim`: pool of `epoch` goes in flight until the callback.
     pub fn d6_pool_to_in_flight(&mut self, epoch: EpochId, amount: u128) {
         self.pool_down(epoch, amount);

@@ -8,9 +8,11 @@
 //! about 60 edges at 64-character accounts does not fit the chunked events; see the CT-004 note.
 
 use near_sdk::json_types::{I128, U128, U64};
-use near_sdk::{env, near, AccountId};
+use near_sdk::json_types::U128 as WireU128;
+use near_sdk::serde_json::json;
+use near_sdk::{assert_one_yocto, env, near, AccountId, NearToken, Promise};
 
-use crate::events::{emit_chunked, emit_clearing_applied, EpochCommitted, PositionEntry};
+use crate::events::{emit_chunked, emit_clearing_applied, EpochCommitted, PositionEntry, SolverFeeClaimFailed, SolverFeeClaimed, X207Event};
 use crate::settlement::{Position, PositionRole, PositionStatus};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClearingEdge, EpochId};
@@ -97,6 +99,52 @@ impl X207Circle {
 
 #[near]
 impl X207Circle {
+    /// Balance of the fee the solver earned at `commit_epoch` (CT-052); `"0"` for anyone else.
+    pub fn solver_fee_balance(&self, account_id: AccountId) -> WireU128 {
+        WireU128(self.solver_fees.get(&account_id).copied().unwrap_or(0))
+    }
+
+    /// The solver takes its fee balance as USDT (CT-052, spec 4.7). `assert_one_yocto`, `ERR_GAS_TOO_LOW`,
+    /// `ERR_NOTHING_TO_CLAIM`. The balance goes in flight; `on_solver_fee_resolved` settles the outcome.
+    #[payable]
+    pub fn claim_solver_fee(&mut self) -> Promise {
+        assert_one_yocto();
+        if env::prepaid_gas() < crate::settlement::CLAIM_MIN_GAS {
+            env::panic_str(&format!("ERR_GAS_TOO_LOW: need {} TGas", crate::settlement::CLAIM_MIN_GAS.as_tgas()));
+        }
+        let account = env::predecessor_account_id();
+        let amount = self.solver_fees.get(&account).copied().unwrap_or(0);
+        if amount == 0 {
+            env::panic_str(&format!("ERR_NOTHING_TO_CLAIM: {account}"));
+        }
+        self.solver_fees.insert(account.clone(), 0);
+        self.d6_solver_fee_to_in_flight(amount);
+        Promise::new(self.usdt_token_id.clone())
+            .function_call(
+                "ft_transfer".to_string(),
+                json!({"receiver_id": account, "amount": WireU128(amount), "memo": null}).to_string().into_bytes(),
+                NearToken::from_yoctonear(1),
+                crate::settlement::FT_TRANSFER_GAS,
+            )
+            .then(Self::ext(env::current_account_id()).with_static_gas(crate::settlement::CLAIM_CALLBACK_GAS).on_solver_fee_resolved(account, WireU128(amount)))
+    }
+
+    /// Callback of the solver fee transfer. Never panics. Returns the amount that arrived.
+    #[private]
+    pub fn on_solver_fee_resolved(&mut self, account_id: AccountId, amount: WireU128) -> WireU128 {
+        let sent = amount.0;
+        if env::promise_result_checked(0, 64).is_ok() {
+            self.d6_in_flight_out(sent);
+            SolverFeeClaimed { account_id, amount }.emit();
+            return amount;
+        }
+        self.d6_in_flight_to_solver_fee(sent);
+        let balance = self.solver_fees.get(&account_id).copied().unwrap_or(0);
+        self.solver_fees.insert(account_id.clone(), balance + sent);
+        SolverFeeClaimFailed { account_id, amount }.emit();
+        WireU128(0)
+    }
+
     /// Permissionless after the proposal window. Net positions do not change by clearing: every
     /// member is a debtor `due`, a creditor `claimable`, or has no D5 record (net zero).
     pub fn commit_epoch(&mut self, epoch: EpochId) {
@@ -621,5 +669,40 @@ mod tests {
         assert!(pro_rata_fee(&edges, 30, 0).is_empty());
         let skew = vec![edge("a.near", "b.near", 90), edge("b.near", "a.near", 10)];
         assert_eq!(pro_rata_fee(&skew, 100, 7), vec![(acc("a.near"), 7)], "floor shares 6 and 0, the leftover unit goes to the first account");
+    }
+
+    fn as_solver(who: &str) {
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc(who))
+            .block_timestamp(T_PROP)
+            .attached_deposit(near_sdk::NearToken::from_yoctonear(1))
+            .prepaid_gas(near_sdk::Gas::from_tgas(300))
+            .build());
+    }
+
+    // TC-CT-052-01
+    #[test]
+    fn ct_052_claim_without_a_balance() {
+        let mut c = s1_with_fees(0, 50, 100 * CREDIT);
+        c.commit_epoch(1);
+        as_solver("solver2.near");
+        let text = panic_text(std::panic::AssertUnwindSafe(|| drop(c.claim_solver_fee())));
+        assert!(text.contains("ERR_NOTHING_TO_CLAIM"), "{text}");
+    }
+
+    // CT-052: the winning solver sees its balance and `claim_solver_fee` moves it in flight (D6 stays balanced)
+    #[test]
+    fn ct_052_solver_claim_moves_the_balance_in_flight() {
+        let mut c = s1_with_fees(0, 100, 100 * CREDIT);
+        let before = c.accounted();
+        c.commit_epoch(1);
+        assert_eq!(c.solver_fee_balance(acc("solver1.near")).0, 750_000, "75 cleared at 100 bps");
+        as_solver("solver1.near");
+        drop(c.claim_solver_fee());
+        assert_eq!(c.solver_fee_balance(acc("solver1.near")).0, 0);
+        assert_eq!((c.solver_fees_total, c.in_flight), (0, 750_000));
+        assert_eq!(c.accounted(), before);
+        let again = panic_text(std::panic::AssertUnwindSafe(|| drop(c.claim_solver_fee())));
+        assert!(again.contains("ERR_NOTHING_TO_CLAIM"), "{again}");
     }
 }

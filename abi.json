@@ -3,6 +3,21 @@
     "functions": [
       {
         "kind": "call",
+        "name": "admit_member",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "modifiers": [
           "payable"
         ],
@@ -26,6 +41,19 @@
           ],
           "serialization_type": "json"
         },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "name": "claim_solver_fee",
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -684,6 +712,36 @@
         "modifiers": [
           "private"
         ],
+        "name": "on_solver_fee_resolved",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
         "name": "on_withdraw_resolved",
         "params": {
           "args": [
@@ -835,6 +893,27 @@
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/SimulationResult"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "solver_fee_balance",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
           }
         }
       },
@@ -1685,12 +1764,42 @@
         "amount"
       ],
       "name": "stake_withdraw_failed"
+    },
+    {
+      "fields": [
+        "account_id",
+        "status"
+      ],
+      "name": "member_admitted"
+    },
+    {
+      "fields": [
+        "account_id",
+        "stake",
+        "limit",
+        "effective_epoch"
+      ],
+      "name": "member_reactivated"
+    },
+    {
+      "fields": [
+        "account_id",
+        "amount"
+      ],
+      "name": "solver_fee_claimed"
+    },
+    {
+      "fields": [
+        "account_id",
+        "amount"
+      ],
+      "name": "solver_fee_claim_failed"
     }
   ],
-  "interface_version": "0.0.1",
+  "interface_version": "0.0.2",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.1"
+    "version": "0.0.2"
   },
   "schema_version": "0.4.0"
 }

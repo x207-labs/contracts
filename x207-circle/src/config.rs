@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(c.epochs.get(&1).unwrap().phase, EpochPhase::Open);
         assert_eq!(c.get_params(), Params::default());
         assert_eq!(c.get_pool().accounted.0, 0);
-        assert_eq!(c.interface_version(), "0.0.1");
+        assert_eq!(c.interface_version(), crate::INTERFACE_VERSION);
     }
 
     #[test]

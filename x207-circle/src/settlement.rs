@@ -218,6 +218,7 @@ impl X207Circle {
         member.stake -= from_stake;
         member.limit = 0;
         member.status = MemberStatus::Suspended;
+        member.reactivate_epoch = None;
         let stake_left = member.stake;
         assert_limit_invariant(member);
 
@@ -249,10 +250,12 @@ impl X207Circle {
     /// snapshot of `epoch` (K-12). Returns the members whose limit changed (K-11).
     fn recompute_limits(&mut self, epoch: EpochId) -> Vec<LimitChange> {
         let params = self.epoch_or_panic(epoch).params.clone();
+        let current_epoch = self.current_epoch;
         let accounts: Vec<AccountId> = self.member_index.iter().cloned().collect();
         let mut changes = Vec::new();
         for account in accounts {
             let member = self.members.get_mut(&account).expect("indexed member");
+            member.settle_reactivation(current_epoch, &params);
             if member.status != MemberStatus::Active {
                 continue;
             }

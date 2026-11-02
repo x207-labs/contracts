@@ -9,7 +9,7 @@ use near_sdk::serde_json::json;
 use near_sdk::{assert_one_yocto, env, near, serde_json, AccountId, Gas, NearToken, Promise, PromiseOrValue};
 
 use crate::clearing::EpochPhase;
-use crate::events::{ExitRequested, StakeAdded, StakeWithdrawFailed, StakeWithdrawn, X207Event};
+use crate::events::{ExitRequested, MemberAdmitted, MemberReactivated, StakeAdded, StakeWithdrawFailed, StakeWithdrawn, X207Event};
 use crate::member::MemberStatus;
 use crate::params::Admission;
 use crate::risk::{assert_limit_invariant, compute_limit};
@@ -44,16 +44,32 @@ impl X207Circle {
             env::panic_str(&format!("ERR_NOT_ADMITTED: {account}"));
         }
 
+        let current_epoch = self.current_epoch;
         let member = self.members.get_mut(&account).expect("member checked above");
+        member.settle_reactivation(current_epoch, &params);
         member.stake = member.stake.checked_add(amount).unwrap_or_else(|| env::panic_str("ERR_STAKE_OVERFLOW"));
         if member.status == MemberStatus::Pending {
             member.status = MemberStatus::Active;
         }
-        // A `suspended` member keeps limit 0 and its status until reactivation (spec 4.1, ADR-30).
+        let mut reactivated = None;
         if member.status == MemberStatus::Active {
             member.limit = compute_limit(member.stake, member.settled_history, &params);
+        } else if member.status == MemberStatus::Suspended {
+            // ADR-30 (CT-079): a stake top-up reactivates from the next epoch. The join condition is a positive stake,
+            // which this transfer gives (`ERR_ZERO_AMOUNT` is checked before). `settled_history` before the default
+            // does not count; the status stays `suspended` and the limit unusable until `reactivate_epoch` opens.
+            let effective = current_epoch + 1;
+            member.reactivate_epoch = Some(effective);
+            member.settled_history = 0;
+            reactivated = Some(effective);
         }
         assert_limit_invariant(member);
+        let reactivation = reactivated.map(|effective_epoch| MemberReactivated {
+            account_id: account.clone(),
+            stake: U128(member.stake),
+            limit: U128(compute_limit(member.stake, 0, &params)),
+            effective_epoch,
+        });
         let event = StakeAdded {
             account_id: account,
             sender_id,
@@ -64,6 +80,9 @@ impl X207Circle {
         };
         self.d6_deposit_stake(amount);
         event.emit();
+        if let Some(reactivation) = reactivation {
+            reactivation.emit();
+        }
     }
 }
 
@@ -96,6 +115,25 @@ pub const WITHDRAW_CALLBACK_GAS: Gas = Gas::from_tgas(15);
 
 #[near]
 impl X207Circle {
+    /// CT-018 (P1): the owner admits a `pending` member when `admission` is `dao`. The status stays `pending` until
+    /// the stake comes in. Order of checks: `ERR_NOT_OWNER`, `ERR_NOT_MEMBER`, `ERR_ADMISSION_NOT_DAO`,
+    /// `ERR_ALREADY_ADMITTED`.
+    pub fn admit_member(&mut self, account_id: AccountId) {
+        self.assert_owner();
+        if !self.members.contains_key(&account_id) {
+            env::panic_str(&format!("ERR_NOT_MEMBER: {account_id}"));
+        }
+        if self.epoch_or_panic(self.current_epoch).params.admission != Admission::Dao {
+            env::panic_str("ERR_ADMISSION_NOT_DAO: admission is open");
+        }
+        let member = self.members.get_mut(&account_id).expect("member checked above");
+        if member.admitted {
+            env::panic_str(&format!("ERR_ALREADY_ADMITTED: {account_id}"));
+        }
+        member.admitted = true;
+        MemberAdmitted { account_id, status: status_wire(member.status).to_string() }.emit();
+    }
+
     /// ADR-29: the member asks to leave at the end of the current epoch. Vouchers for later epochs
     /// and more stake are refused with `ERR_EXITING` from now on; the status stays until `exited`.
     #[payable]
@@ -363,6 +401,89 @@ mod tests {
         c.members.get_mut(&acc("translator.near")).unwrap().admitted = true;
         stake(&mut c, "translator.near", 100 * CREDIT);
         assert_eq!(view(&c, "translator.near").status, MemberStatus::Active);
+    }
+
+    fn call_admit(c: &mut X207Circle, caller: &str, account: &str) -> String {
+        as_caller(caller);
+        panic_text(std::panic::AssertUnwindSafe(|| c.admit_member(acc(account))))
+    }
+
+    // TC-CT-018-01
+    #[test]
+    fn admit_needs_admission_dao() {
+        let mut c = pending();
+        assert!(call_admit(&mut c, "dao.near", "translator.near").contains("ERR_ADMISSION_NOT_DAO"));
+    }
+
+    // TC-CT-018-02 and the positive path: admit, event, then the stake activates
+    #[test]
+    fn admit_then_stake_activates_and_a_second_admit_fails() {
+        let mut c = circle_with(Params { admission: Admission::Dao, ..Params::default() });
+        add(&mut c, "translator.near", MemberStatus::Pending, 0, 0);
+        as_caller("dao.near");
+        let _ = near_sdk::test_utils::get_logs();
+        c.admit_member(acc("translator.near"));
+        let log = near_sdk::test_utils::get_logs().join("\n");
+        assert!(log.contains(r#""event":"member_admitted""#) && log.contains(r#""status":"pending""#), "{log}");
+        assert!(c.members.get(&acc("translator.near")).unwrap().admitted);
+        assert_eq!(view(&c, "translator.near").status, MemberStatus::Pending, "status stays pending until the stake");
+        assert!(call_admit(&mut c, "dao.near", "translator.near").contains("ERR_ALREADY_ADMITTED"));
+        stake(&mut c, "translator.near", 100 * CREDIT);
+        assert_eq!(view(&c, "translator.near").status, MemberStatus::Active);
+    }
+
+    // TC-CT-018-03
+    #[test]
+    fn admit_is_for_the_owner_and_for_members() {
+        let mut c = circle_with(Params { admission: Admission::Dao, ..Params::default() });
+        add(&mut c, "translator.near", MemberStatus::Pending, 0, 0);
+        assert!(call_admit(&mut c, "outsider.near", "translator.near").contains("ERR_NOT_OWNER"));
+        assert!(call_admit(&mut c, "dao.near", "outsider.near").contains("ERR_NOT_MEMBER"));
+        assert!(!c.members.get(&acc("translator.near")).unwrap().admitted);
+    }
+
+    fn logs() -> String {
+        near_sdk::test_utils::get_logs().join("\n")
+    }
+
+    // CT-079: a top-up by a suspended member sets reactivate_epoch, resets settled_history, emits member_reactivated,
+    // keeps status suspended and limit 0 until the epoch opens, then the member reads as active with the base limit
+    #[test]
+    fn ct_079_reactivation_by_stake() {
+        let mut c = circle();
+        add(&mut c, "scraper.near", MemberStatus::Suspended, 65 * CREDIT, 0);
+        c.members.get_mut(&acc("scraper.near")).unwrap().settled_history = 35 * CREDIT;
+        let _ = logs();
+        stake(&mut c, "scraper.near", 35 * CREDIT);
+        let log = logs();
+        assert!(log.contains(r#""event":"member_reactivated""#), "{log}");
+        assert!(log.contains(r#""effective_epoch":2"#) && log.contains(r#""limit":"80000000""#) && log.contains(r#""stake":"100000000""#), "{log}");
+        let m = c.members.get(&acc("scraper.near")).unwrap();
+        assert_eq!((m.status, m.reactivate_epoch, m.settled_history, m.limit, m.stake), (MemberStatus::Suspended, Some(2), 0, 0, 100 * CREDIT));
+        assert_eq!(c.headroom(acc("scraper.near")).0, 0, "not usable before the epoch opens");
+
+        // epoch 2 opens: the view reads active with limit 80, nothing is written yet
+        c.current_epoch = 2;
+        c.epochs.insert(2, crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()));
+        let v = view(&c, "scraper.near");
+        assert_eq!((v.status, v.limit.0, v.settled_history.0), (MemberStatus::Active, 80 * CREDIT, 0));
+        assert_eq!(c.headroom(acc("scraper.near")).0, 80 * CREDIT);
+        assert_eq!(c.members.get(&acc("scraper.near")).unwrap().status, MemberStatus::Suspended);
+
+        // the next stake writes it
+        stake(&mut c, "scraper.near", CREDIT);
+        let m = c.members.get(&acc("scraper.near")).unwrap();
+        assert_eq!((m.status, m.reactivate_epoch, m.limit), (MemberStatus::Active, None, 80_800_000));
+    }
+
+    // CT-079: an active member's top-up emits no member_reactivated
+    #[test]
+    fn ct_079_active_member_is_not_reactivated() {
+        let mut c = circle();
+        add(&mut c, "coder.near", MemberStatus::Active, 100 * CREDIT, 80 * CREDIT);
+        let _ = logs();
+        stake(&mut c, "coder.near", CREDIT);
+        assert!(!logs().contains("member_reactivated"));
     }
 
     // TC-CT-017-12

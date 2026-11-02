@@ -1,5 +1,5 @@
 //! NEP-297 events (spec sections 6 and 14). Log format:
-//! `EVENT_JSON:{"standard":"x207","version":"0.0.1","event":"<name>","data":[{..}]}`.
+//! `EVENT_JSON:{"standard":"x207","version":"0.0.2","event":"<name>","data":[{..}]}`.
 //!
 //! Status, role, mode, and destination fields are plain strings: they are wire values taken from
 //! enums owned by other modules (`"none"` and `null` in `PositionEntry` have no enum counterpart).
@@ -29,9 +29,9 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
     EventSchema { name, fields, items: &[] }
 }
 
-/// The 17 P0 events of interface `0.0.1` (K-20). `member_admitted`, `member_reactivated`, and the
-/// P1/P2 events join when their items are built, with a patch version bump.
-pub const EVENT_SCHEMAS: [EventSchema; 17] = [
+/// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
+/// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`). The other P1/P2 events join when their items are built.
+pub const EVENT_SCHEMAS: [EventSchema; 21] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -102,6 +102,10 @@ pub const EVENT_SCHEMAS: [EventSchema; 17] = [
     schema("exit_requested", &["account_id", "epoch"]),
     schema("stake_withdrawn", &["account_id", "amount"]),
     schema("stake_withdraw_failed", &["account_id", "amount"]),
+    schema("member_admitted", &["account_id", "status"]),
+    schema("member_reactivated", &["account_id", "stake", "limit", "effective_epoch"]),
+    schema("solver_fee_claimed", &["account_id", "amount"]),
+    schema("solver_fee_claim_failed", &["account_id", "amount"]),
 ];
 
 pub trait X207Event: Serialize {
@@ -301,6 +305,10 @@ impl<P: Serialize> X207Event for ParamsUpdated<P> {
 event!("exit_requested", ExitRequested { account_id: AccountId, epoch: EpochId });
 event!("stake_withdrawn", StakeWithdrawn { account_id: AccountId, amount: U128 });
 event!("stake_withdraw_failed", StakeWithdrawFailed { account_id: AccountId, amount: U128 });
+event!("member_admitted", MemberAdmitted { account_id: AccountId, status: String });
+event!("solver_fee_claimed", SolverFeeClaimed { account_id: AccountId, amount: U128 });
+event!("solver_fee_claim_failed", SolverFeeClaimFailed { account_id: AccountId, amount: U128 });
+event!("member_reactivated", MemberReactivated { account_id: AccountId, stake: U128, limit: U128, effective_epoch: EpochId });
 
 /// Logs of one event per chunk of at most `MAX_EVENT_ITEMS` items, in order. An empty list still
 /// gives one event with `chunk` 0 and `chunks` 1 (K-19). `build` repeats the scalar fields in every chunk.
@@ -402,7 +410,11 @@ mod tests {
             ("params_updated", ParamsUpdated { old: json!({"epoch_length": 3600}), new: json!({"epoch_length": 7200}), changed: vec!["epoch_length".to_string()], effective_epoch: 43 }.to_log()),
             (ExitRequested::NAME, ExitRequested { account_id: a.clone(), epoch: 42 }.to_log()),
             (StakeWithdrawn::NAME, StakeWithdrawn { account_id: a.clone(), amount: U128(0) }.to_log()),
-            (StakeWithdrawFailed::NAME, StakeWithdrawFailed { account_id: a, amount: U128(1) }.to_log()),
+            (StakeWithdrawFailed::NAME, StakeWithdrawFailed { account_id: a.clone(), amount: U128(1) }.to_log()),
+            (MemberAdmitted::NAME, MemberAdmitted { account_id: a.clone(), status: "pending".into() }.to_log()),
+            (MemberReactivated::NAME, MemberReactivated { account_id: a.clone(), stake: U128(115), limit: U128(92), effective_epoch: 43 }.to_log()),
+            (SolverFeeClaimed::NAME, SolverFeeClaimed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
+            (SolverFeeClaimFailed::NAME, SolverFeeClaimFailed { account_id: a, amount: U128(375_000) }.to_log()),
         ]
     }
 
@@ -435,7 +447,7 @@ mod tests {
         for (name, log) in &samples {
             let parsed = parse(log);
             assert_eq!(parsed["standard"], "x207");
-            assert_eq!(parsed["version"], "0.0.1");
+            assert_eq!(parsed["version"], crate::INTERFACE_VERSION);
             assert_eq!(parsed["event"], *name);
             let data = parsed["data"].as_array().expect("data array");
             assert_eq!(data.len(), 1);
@@ -634,7 +646,7 @@ mod tests {
     #[test]
     fn frozen_event_list() {
         let names: Vec<&str> = EVENT_SCHEMAS.iter().map(|s| s.name).collect();
-        for p1 in ["member_admitted", "member_reactivated", "solver_fee_claimed", "upgrade_proposed", "intent_posted", "bundle_committed"] {
+        for p1 in ["upgrade_proposed", "intent_posted", "bundle_committed"] {
             assert!(!names.contains(&p1), "{p1}");
         }
         assert_eq!(
@@ -643,7 +655,8 @@ mod tests {
                 "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted",
                 "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated",
                 "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested",
-                "stake_withdrawn", "stake_withdraw_failed",
+                "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
+                "solver_fee_claim_failed",
             ]
         );
     }

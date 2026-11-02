@@ -351,6 +351,6 @@ mod tests {
         assert_eq!(c.current_epoch, 1);
         assert!(c.pending_params.is_none() && c.upgrade.is_none());
         assert_eq!((c.total_stake, c.reserve, c.in_flight, c.member_count), (0, 0, 0, 0));
-        assert_eq!(c.interface_version(), "0.0.1");
+        assert_eq!(c.interface_version(), crate::INTERFACE_VERSION);
     }
 }

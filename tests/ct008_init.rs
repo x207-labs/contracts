@@ -51,7 +51,7 @@ async fn init_succeeds_and_views_report_it() -> anyhow::Result<()> {
         assert_eq!(pool[field], "0", "{field}");
     }
     let version: String = contract.view("interface_version").await?.json()?;
-    assert_eq!(version, "0.0.1");
+    assert_eq!(version, x207_circle::INTERFACE_VERSION);
     Ok(())
 }
 

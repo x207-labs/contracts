@@ -52,12 +52,12 @@ impl X207Circle {
     /// Stored limit of a member (kept equal to `compute_limit` by the stake and finalize paths);
     /// `"0"` for an account that is not a member.
     pub fn limit(&self, account_id: AccountId) -> U128 {
-        U128(self.members.get(&account_id).map_or(0, |m| m.limit))
+        U128(self.members.get(&account_id).map_or(0, |m| self.member_now(m).limit))
     }
 
     /// `max(0, limit - outstanding_debt)` for an `active` member; `"0"` for anyone else (spec section 5).
     pub fn headroom(&self, account_id: AccountId) -> U128 {
-        let limit = match self.members.get(&account_id) {
+        let limit = match self.members.get(&account_id).map(|m| self.member_now(m)) {
             Some(m) if m.status == MemberStatus::Active => m.limit,
             _ => return U128(0),
         };

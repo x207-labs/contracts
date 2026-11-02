@@ -46,6 +46,25 @@ pub struct Member {
 }
 
 impl Member {
+    /// ADR-30 (CT-079): a `suspended` member whose `reactivate_epoch` has been opened (`current_epoch >= it`) reads
+    /// as `active` without being written. `close_epoch` does not walk the members (K-36).
+    pub fn effective_status(&self, current_epoch: EpochId) -> MemberStatus {
+        match (self.status, self.reactivate_epoch) {
+            (MemberStatus::Suspended, Some(at)) if current_epoch >= at => MemberStatus::Active,
+            (status, _) => status,
+        }
+    }
+
+    /// Writes the effective status the first time the member is touched by a state change, with the limit from the
+    /// stake and the reset history (the limit stays 0 while the member is still `suspended`).
+    pub fn settle_reactivation(&mut self, current_epoch: EpochId, params: &crate::params::Params) {
+        if self.effective_status(current_epoch) == MemberStatus::Active && self.status != MemberStatus::Active {
+            self.status = MemberStatus::Active;
+            self.reactivate_epoch = None;
+            self.limit = crate::risk::compute_limit(self.stake, self.settled_history, params);
+        }
+    }
+
     pub fn to_view(&self) -> MemberView {
         MemberView {
             account_id: self.account_id.clone(),
@@ -78,6 +97,17 @@ pub struct MemberView {
     pub settled_history: U128,
     pub last_active_epoch: EpochId,
     pub exit_requested_epoch: Option<EpochId>,
+}
+
+impl X207Circle {
+    /// The member as a read sees it: a reactivation whose epoch has opened is applied (not written).
+    pub fn member_now(&self, member: &Member) -> Member {
+        let mut member = member.clone();
+        if let Some(epoch) = self.epochs.get(&self.current_epoch) {
+            member.settle_reactivation(self.current_epoch, &epoch.params);
+        }
+        member
+    }
 }
 
 #[near]
@@ -147,7 +177,7 @@ impl X207Circle {
     }
 
     pub fn member(&self, account_id: AccountId) -> Option<MemberView> {
-        self.members.get(&account_id).map(Member::to_view)
+        self.members.get(&account_id).map(|m| self.member_now(m).to_view())
     }
 
     /// Members in join order, `limit` per page; `limit` 0 or an `from_index` past the end gives `[]` (K-23).
@@ -156,7 +186,7 @@ impl X207Circle {
             .iter()
             .skip(from_index as usize)
             .take(limit as usize)
-            .filter_map(|id| self.members.get(id).map(Member::to_view))
+            .filter_map(|id| self.members.get(id).map(|m| self.member_now(m).to_view()))
             .collect()
     }
 }

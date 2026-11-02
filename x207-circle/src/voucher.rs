@@ -111,8 +111,10 @@ impl RegisterMode {
 }
 
 impl X207Circle {
-    fn active_member(&self, account_id: &AccountId, err: &str) -> &crate::member::Member {
-        match self.members.get(account_id) {
+    /// The member as a registration sees it: a reactivation whose epoch has opened is applied (ADR-30), so the
+    /// limit is the reactivated one. Nothing is written here.
+    fn active_member(&self, account_id: &AccountId, err: &str) -> crate::member::Member {
+        match self.members.get(account_id).map(|m| self.member_now(m)) {
             Some(m) if m.status == MemberStatus::Active => m,
             _ => env::panic_str(&format!("{err}: {account_id}")),
         }
@@ -138,7 +140,7 @@ impl X207Circle {
         // 6-8
         let payer = self.active_member(&voucher.payer, "ERR_PAYER_NOT_ACTIVE");
         let payee = self.active_member(&voucher.payee, "ERR_PAYEE_NOT_ACTIVE");
-        for m in [payer, payee] {
+        for m in [&payer, &payee] {
             if let Some(exit) = m.exit_requested_epoch {
                 require!(exit >= epoch_id, format!("ERR_EXITING: {} exit_requested_epoch {exit}", m.account_id));
             }
@@ -194,8 +196,12 @@ impl X207Circle {
             e.edges.push((voucher.payer.clone(), voucher.payee.clone()));
             e.edge_count += 1;
         }
+        let current = self.current_epoch;
+        let params = self.epoch_or_panic(current).params.clone();
         for id in [&voucher.payer, &voucher.payee] {
-            self.members.get_mut(id).unwrap().last_active_epoch = epoch_id;
+            let member = self.members.get_mut(id).unwrap();
+            member.settle_reactivation(current, &params);
+            member.last_active_epoch = epoch_id;
         }
         VoucherRegistered {
             payer: voucher.payer,
