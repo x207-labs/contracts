@@ -28,7 +28,11 @@ struct Dao {
 
 /// Circle with `owner_id` = `dao.test.near`, which is a Sputnik DAO of three council members.
 async fn setup() -> anyhow::Result<Dao> {
-    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    setup_with(Funded::params_short()).await
+}
+
+async fn setup_with(params: Value) -> anyhow::Result<Dao> {
+    let mut f = Funded::deploy(Some(params)).await?;
     let root = f.circle.worker.root_account()?;
     let dao = root.create_subaccount("dao").initial_balance(NearToken::from_near(30)).transact().await?.into_result()?;
     assert_eq!(dao.id().as_str(), account_of("dao"));
@@ -195,5 +199,30 @@ async fn late_vote_does_not_execute() -> anyhow::Result<()> {
     assert_ne!(d.status(id).await?, "Approved");
     assert_eq!(d.pending().await?, Value::Null);
     assert_eq!(d.f.circle.view("get_params", json!({})).await?["epoch_length"], 300);
+    Ok(())
+}
+
+// CT-056: a council proposal admits a new account to a circle with `admission` dao; its stake then activates it
+#[tokio::test]
+async fn proposal_admits_a_new_member() -> anyhow::Result<()> {
+    let mut params = Funded::params_short();
+    params["admission"] = json!("dao");
+    let mut d = setup_with(params).await?;
+    let newbie = d.f.account("newbie").await?;
+    assert!(d.f.join("newbie", Funded::join_deposit()).await?.is_success());
+
+    let args = node(&["admit", d.f.circle.contract.id().as_str(), newbie.id().as_str()]);
+    let r = d.council[0].call(d.dao_id(), "add_proposal").args_json(args).deposit(NearToken::from_millinear(100)).gas(Gas::from_tgas(100)).transact().await?;
+    assert!(r.is_success(), "{:?}", failure_text(&r));
+    let id = r.json::<u64>()?;
+    assert!(d.act(&d.council[0], id, "VoteApprove").await?.is_success());
+    let last = d.act(&d.council[1], id, "VoteApprove").await?;
+    assert!(last.is_success(), "{:?}", failure_text(&last));
+    assert_eq!(d.status(id).await?, "Approved");
+    assert!(events(&last).iter().any(|(n, data)| n == "member_admitted" && data["account_id"] == newbie.id().as_str()));
+    assert_eq!(d.f.member("newbie").await?["admitted"], true);
+
+    assert!(d.f.stake(&newbie, 100 * CREDIT).await?.is_success());
+    assert_eq!(d.f.member("newbie").await?["status"], "active");
     Ok(())
 }

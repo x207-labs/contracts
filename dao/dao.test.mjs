@@ -150,3 +150,23 @@ test('CLI: vote prints a command, status reads a file and stdin', () => {
   assert.equal(status.trim(), 'Approved');
   assert.match(execFileSync('node', ['dao/proposal-status.mjs', '--dao', 'd.near', '--id', '2']).toString(), /get_proposal/);
 });
+
+// CT-056
+import { buildAdmitProposalArgs } from './lib.mjs';
+
+test('admit proposal: FunctionCall admit_member with account_id in base64 args', () => {
+  const args = buildAdmitProposalArgs({ contract: 'x207-circle.near', account: 'newagent.near' });
+  const call = args.proposal.kind.FunctionCall;
+  assert.equal(call.receiver_id, 'x207-circle.near');
+  assert.equal(call.actions[0].method_name, 'admit_member');
+  assert.deepEqual(JSON.parse(Buffer.from(call.actions[0].args, 'base64').toString('utf8')), { account_id: 'newagent.near' });
+  assert.throws(() => buildAdmitProposalArgs({ contract: 'x207-circle.near', account: 'Not An Account' }), /invalid NEAR account id/);
+});
+
+test('propose-admit-member prints the add_proposal command and refuses a missing account', () => {
+  const out = execFileSync('node', ['dao/propose-admit-member.mjs', '--dao', 'x207.sputnik-dao.testnet', '--contract', 'x207-circle.testnet', '--signer', 'a.testnet', '--account', 'newagent.testnet'], { encoding: 'utf8' });
+  assert.match(out, /add_proposal/);
+  assert.match(out, /admit_member|YWNjb3VudF9pZ/);
+  const bad = spawnSync('node', ['dao/propose-admit-member.mjs', '--dao', 'x207.sputnik-dao.testnet', '--contract', 'c.testnet', '--signer', 'a.testnet']);
+  assert.notEqual(bad.status, 0);
+});

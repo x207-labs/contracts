@@ -38,6 +38,12 @@ command, runs it, and confirms any mainnet run.
    `proposal-status.mjs --from-json <file|->` prints the `status` of the JSON that `get_proposal` returned
    (`InProgress`, then `Approved` once enough council members voted).
 
+6. Admit a new account when `admission` is `dao` (CT-056). The council votes with `vote-proposal.mjs`:
+
+   ```bash
+   node dao/propose-admit-member.mjs --dao x207.sputnik-dao.testnet --contract x207-circle.testnet --signer a.testnet --account newagent.testnet
+   ```
+
 Tests of the builders: `node --test dao/`.
 
 Not verified yet: the `act_proposal` arguments (`id`, `action`) follow `sputnikdao2` and may need the `proposal` field of newer DAO versions; the policy shape follows `sputnikdao2` and has not run against the factory wasm.

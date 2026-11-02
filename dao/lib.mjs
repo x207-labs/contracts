@@ -150,6 +150,27 @@ export function decodeProposalParams(addProposalArgs) {
   return JSON.parse(Buffer.from(action.args, 'base64').toString('utf8')).params;
 }
 
+/** Gas the DAO attaches to the `admit_member` call. */
+export const ADMIT_MEMBER_GAS = '30000000000000';
+
+/** Arguments of Sputnik `add_proposal`: one FunctionCall action to `admit_member({ account_id })` (CT-056). */
+export function buildAdmitProposalArgs({ contract, account, description }) {
+  assertAccountId(contract);
+  assertAccountId(account);
+  const args = Buffer.from(JSON.stringify({ account_id: account })).toString('base64');
+  return {
+    proposal: {
+      description: description ?? `Admit ${account} to the x207 circle`,
+      kind: {
+        FunctionCall: {
+          receiver_id: contract,
+          actions: [{ method_name: 'admit_member', args, deposit: '0', gas: ADMIT_MEMBER_GAS }],
+        },
+      },
+    },
+  };
+}
+
 export function addProposalCommand({ dao, signer, network, addProposalArgs }) {
   assertAccountId(dao);
   assertAccountId(signer);
