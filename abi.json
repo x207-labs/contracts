@@ -18,6 +18,16 @@
       },
       {
         "kind": "call",
+        "name": "apply_upgrade",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "modifiers": [
           "payable"
         ],
@@ -262,6 +272,23 @@
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/PoolView"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_upgrade",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/UpgradeView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -537,6 +564,14 @@
         }
       },
       {
+        "kind": "call",
+        "modifiers": [
+          "init",
+          "private"
+        ],
+        "name": "migrate"
+      },
+      {
         "kind": "view",
         "name": "net_position",
         "params": {
@@ -786,6 +821,21 @@
           "type_schema": {
             "type": "string"
           }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "propose_upgrade",
+        "params": {
+          "args": [
+            {
+              "name": "code_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
         }
       },
       {
@@ -1515,6 +1565,21 @@
           ],
           "type": "object"
         },
+        "UpgradeView": {
+          "properties": {
+            "code_hash": {
+              "type": "string"
+            },
+            "eta": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "code_hash",
+            "eta"
+          ],
+          "type": "object"
+        },
         "Voucher": {
           "properties": {
             "circle": {
@@ -1794,12 +1859,26 @@
         "amount"
       ],
       "name": "solver_fee_claim_failed"
+    },
+    {
+      "fields": [
+        "code_hash",
+        "eta"
+      ],
+      "name": "upgrade_proposed"
+    },
+    {
+      "fields": [
+        "code_hash",
+        "applied_at"
+      ],
+      "name": "upgrade_applied"
     }
   ],
-  "interface_version": "0.0.2",
+  "interface_version": "0.0.3",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.2"
+    "version": "0.0.3"
   },
   "schema_version": "0.4.0"
 }
