@@ -123,6 +123,12 @@ impl X207Circle {
     /// The 12 checks of spec 4.2 in order, then the state change. Nothing is written before the
     /// last check passes (I-06). Shared by `register_cumulative` and `register_voucher`.
     pub fn register(&mut self, voucher: Voucher, signature: String, mode: RegisterMode) -> U128 {
+        self.register_with(voucher, signature, mode, None)
+    }
+
+    /// `register` for a leg of bundle `bundle` (CT-064): the credit check is the reserved amount of the leg, not the
+    /// free headroom, and the registered obligation is booked on the leg.
+    pub fn register_with(&mut self, voucher: Voucher, signature: String, mode: RegisterMode, bundle: Option<u64>) -> U128 {
         let now = env::block_timestamp();
         // 1-3
         require!(voucher.circle == env::current_account_id(), format!("ERR_WRONG_CIRCLE: {}", voucher.circle));
@@ -163,8 +169,20 @@ impl X207Circle {
         // 11
         let delta = cumulative - pair.cumulative;
         let debt = self.outstanding_debt.get(&voucher.payer).copied().unwrap_or(0);
-        let headroom = limit.saturating_sub(debt);
-        require!(delta <= headroom, format!("ERR_INSUFFICIENT_CREDIT: delta {delta} headroom {headroom}"));
+        let mut leg_index = None;
+        if let Some(bundle_id) = bundle {
+            let record = crate::bundle::load_bundle(bundle_id);
+            require!(record.epoch == epoch_id, format!("ERR_EPOCH_MISMATCH: bundle epoch {}, voucher epoch {epoch_id}", record.epoch));
+            let Some((index, remaining)) = crate::bundle::leg_remaining(&record, &voucher.payer, &voucher.payee) else {
+                env::panic_str(&format!("ERR_BUNDLE_LEG: {} -> {} is not a leg of bundle {bundle_id}", voucher.payer, voucher.payee))
+            };
+            require!(delta <= remaining, format!("ERR_BUNDLE_LEG_EXCEEDED: delta {delta} remaining on the leg {remaining}"));
+            leg_index = Some(index);
+        } else {
+            // headroom held for bundle legs of this epoch is not free
+            let headroom = limit.saturating_sub(debt).saturating_sub(crate::bundle::reserved(epoch_id, &voucher.payer));
+            require!(delta <= headroom, format!("ERR_INSUFFICIENT_CREDIT: delta {delta} headroom {headroom}"));
+        }
         // 12
         let verified = parse_signature(&signature)
             .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
@@ -172,6 +190,9 @@ impl X207Circle {
         require!(verified, "ERR_BAD_SIGNATURE: ed25519 verification failed");
 
         // State change.
+        if let (Some(bundle_id), Some(index)) = (bundle, leg_index) {
+            crate::bundle::consume_leg(bundle_id, index, &voucher.payer, delta);
+        }
         let new_debt = debt + delta;
         let obligation = cumulative - pair.cleared;
         self.pairs.insert(key, crate::voucher::PairState { cumulative, last_seq: voucher.seq, cleared: pair.cleared });
@@ -224,6 +245,12 @@ impl X207Circle {
     /// Default registration (ADR-17): returns the pair obligation after registration.
     pub fn register_cumulative(&mut self, voucher: Voucher, signature: String) -> U128 {
         self.register(voucher, signature, RegisterMode::Cumulative)
+    }
+
+    /// F5 (CT-064): registers a voucher that settles a leg of bundle `bundle_id`. The voucher bytes are the usual ones
+    /// (cumulative mode); the leg fixes the most the pair may owe in the bundle epoch. Returns the pair obligation.
+    pub fn register_in_bundle(&mut self, bundle_id: u64, voucher: Voucher, signature: String) -> U128 {
+        self.register_with(voucher, signature, RegisterMode::Cumulative, Some(bundle_id))
     }
 
     /// Demo mode (ADR-26): one voucher per request, `seq` must be `last_seq + 1`. Same checks and

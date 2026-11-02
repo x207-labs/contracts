@@ -7,7 +7,7 @@ members = ["probes/ct003_voucher_gas", "probes/ct004_clearing_gas", "probes/mock
 
 [package]
 name = "x207-circle"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 license = "Apache-2.0"
 description = "x207 mutual-credit circle contract"

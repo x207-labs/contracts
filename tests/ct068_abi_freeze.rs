@@ -17,37 +17,42 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 21] = [
+const CHANGE_METHODS: [&str; 24] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
     // 0.0.2: CT-018 and CT-052; 0.0.3: CT-055 (`migrate` is called on the new code by `apply_upgrade`)
     "admit_member", "claim_solver_fee", "on_solver_fee_resolved", "propose_upgrade", "apply_upgrade", "migrate",
+    // 0.0.4: CT-062, CT-063, CT-064 (F5 barter bundle)
+    "post_intent", "commit_bundle", "register_in_bundle",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 21] = [
+const VIEWS: [&str; 23] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
-    "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade",
+    "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
 ];
 
-const P1_P2_METHODS: [&str; 4] = ["prune_epoch", "post_intent", "commit_bundle", "get_intent"];
+const P1_P2_METHODS: [&str; 1] = ["prune_epoch"];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 42] = [
+const SIGNATURES: [&str; 47] = [
     "admit_member(account_id:string)-> []",
     "apply_upgrade()->Promise []",
     "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
     "claim_solver_fee()->Promise [payable]",
     "close_epoch(epoch:integer:uint64)-> []",
+    "commit_bundle(bundle:BundleInput,signatures:array<BundleSignature>)->integer:uint64 []",
     "commit_epoch(epoch:integer:uint64)-> []",
     "finalize_epoch(epoch:integer:uint64)-> []",
     "ft_on_transfer(sender_id:string,amount:string,msg:string)->PromiseOrValueString []",
+    "get_bundle(bundle_id:integer:uint64)->BundleView|null []",
     "get_circle()->CircleConfig []",
     "get_clearing_proposal(epoch:integer:uint64)->ClearingProposal|null []",
     "get_epoch(epoch:integer:uint64|null)->EpochView|null []",
+    "get_intent(intent_hash:string)->IntentView|null []",
     "get_owner()->string []",
     "get_params()->Params []",
     "get_pending_params()->PendingParams|null []",
@@ -70,8 +75,10 @@ const SIGNATURES: [&str; 42] = [
     "on_solver_fee_resolved(account_id:string,amount:string)->string [private]",
     "on_withdraw_resolved(account_id:string,amount:string)->boolean [private]",
     "outstanding_debt(account_id:string)->string []",
+    "post_intent(intent_hash:string)-> []",
     "propose_upgrade(code_hash:string)-> []",
     "register_cumulative(voucher:Voucher,signature:string)->string []",
+    "register_in_bundle(bundle_id:integer:uint64,voucher:Voucher,signature:string)->string []",
     "register_voucher(voucher:Voucher,signature:string)->string []",
     "request_exit()-> [payable]",
     "set_params(params:Params)-> []",
@@ -81,12 +88,12 @@ const SIGNATURES: [&str; 42] = [
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
 ];
 
-const EVENTS: [&str; 23] = [
+const EVENTS: [&str; 25] = [
     "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied",
     "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed",
     "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed",
     "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed",
-    "upgrade_applied",
+    "upgrade_applied", "intent_posted", "bundle_committed",
 ];
 
 fn strip_descriptions(value: &mut Value) {
@@ -211,7 +218,7 @@ fn all_p0_change_methods_exist_and_p1_p2_do_not() {
 fn all_19_p0_views_exist() {
     let document = build_document();
     assert_eq!(names(&document, "view"), sorted(&VIEWS));
-    for name in ["get_intent", "get_bundle"] {
+    for name in ["get_upgrade_history"] {
         assert!(!names(&document, "view").contains(&name.to_string()), "{name}");
     }
 }

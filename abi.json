@@ -90,6 +90,38 @@
       },
       {
         "kind": "call",
+        "name": "commit_bundle",
+        "params": {
+          "args": [
+            {
+              "name": "bundle",
+              "type_schema": {
+                "$ref": "#/definitions/BundleInput"
+              }
+            },
+            {
+              "name": "signatures",
+              "type_schema": {
+                "items": {
+                  "$ref": "#/definitions/BundleSignature"
+                },
+                "type": "array"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "name": "commit_epoch",
         "params": {
           "args": [
@@ -152,6 +184,36 @@
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/PromiseOrValueString"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_bundle",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/BundleView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -220,6 +282,34 @@
             "anyOf": [
               {
                 "$ref": "#/definitions/EpochView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_intent",
+        "params": {
+          "args": [
+            {
+              "name": "intent_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/IntentView"
               },
               {
                 "type": "null"
@@ -825,6 +915,21 @@
       },
       {
         "kind": "call",
+        "name": "post_intent",
+        "params": {
+          "args": [
+            {
+              "name": "intent_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "propose_upgrade",
         "params": {
           "args": [
@@ -843,6 +948,41 @@
         "name": "register_cumulative",
         "params": {
           "args": [
+            {
+              "name": "voucher",
+              "type_schema": {
+                "$ref": "#/definitions/Voucher"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "register_in_bundle",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
             {
               "name": "voucher",
               "type_schema": {
@@ -1022,6 +1162,123 @@
             "dao"
           ],
           "type": "string"
+        },
+        "BundleInput": {
+          "properties": {
+            "epoch": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "legs": {
+              "items": {
+                "$ref": "#/definitions/BundleLeg"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "epoch",
+            "legs"
+          ],
+          "type": "object"
+        },
+        "BundleLeg": {
+          "properties": {
+            "max_amount": {
+              "type": "string"
+            },
+            "payee": {
+              "type": "string"
+            },
+            "payer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "max_amount",
+            "payee",
+            "payer"
+          ],
+          "type": "object"
+        },
+        "BundleLegView": {
+          "properties": {
+            "max_amount": {
+              "type": "string"
+            },
+            "payee": {
+              "type": "string"
+            },
+            "payer": {
+              "type": "string"
+            },
+            "registered": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "max_amount",
+            "payee",
+            "payer",
+            "registered"
+          ],
+          "type": "object"
+        },
+        "BundleSignature": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "signature": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id",
+            "signature"
+          ],
+          "type": "object"
+        },
+        "BundleStatus": {
+          "enum": [
+            "active"
+          ],
+          "type": "string"
+        },
+        "BundleView": {
+          "properties": {
+            "bundle_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "epoch": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "legs": {
+              "items": {
+                "$ref": "#/definitions/BundleLegView"
+              },
+              "type": "array"
+            },
+            "status": {
+              "$ref": "#/definitions/BundleStatus"
+            },
+            "terms_hash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "bundle_id",
+            "epoch",
+            "legs",
+            "status",
+            "terms_hash"
+          ],
+          "type": "object"
         },
         "CircleConfig": {
           "properties": {
@@ -1252,6 +1509,25 @@
           "required": [
             "clearing_fee_bps",
             "solver_fee_bps"
+          ],
+          "type": "object"
+        },
+        "IntentView": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "intent_hash": {
+              "type": "string"
+            },
+            "posted_at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "account_id",
+            "intent_hash",
+            "posted_at"
           ],
           "type": "object"
         },
@@ -1873,12 +2149,35 @@
         "applied_at"
       ],
       "name": "upgrade_applied"
+    },
+    {
+      "fields": [
+        "intent_hash",
+        "account_id",
+        "posted_at"
+      ],
+      "name": "intent_posted"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "terms_hash",
+        "epoch",
+        "legs",
+        "solver"
+      ],
+      "list_item_fields": [
+        "payer",
+        "payee",
+        "max_amount"
+      ],
+      "name": "bundle_committed"
     }
   ],
-  "interface_version": "0.0.3",
+  "interface_version": "0.0.4",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.3"
+    "version": "0.0.4"
   },
   "schema_version": "0.4.0"
 }

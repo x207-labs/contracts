@@ -66,3 +66,12 @@ pub fn parse_signature(signature: &str) -> Option<[u8; 64]> {
     let encoded = signature.strip_prefix("ed25519:")?;
     near_sdk::bs58::decode(encoded).into_vec().ok()?.try_into().ok()
 }
+
+/// `sha256` of the NEP-413 payload for an arbitrary `message` and 32 byte `nonce` (barter bundles: `message` is the
+/// canonical terms JSON and `nonce` is the `terms_hash`; `sdk/spec/barter-format.md`).
+pub fn nep413_signing_hash(message: &str, nonce: [u8; 32], recipient: &str) -> [u8; 32] {
+    let payload = Nep413Payload { message: message.to_string(), nonce, recipient: recipient.to_string(), callback_url: None };
+    let mut bytes = borsh::to_vec(&NEP413_TAG).expect("tag serializes");
+    bytes.extend(borsh::to_vec(&payload).expect("payload serializes"));
+    env::sha256_array(bytes)
+}

@@ -1,1 +1,294 @@
-//! F5 barter bundle (P2): D8.
+//! F5 barter bundle (CT-061..064, ADR-38): D8. A bundle is a set of legs `(payer, payee, max_amount)` that all
+//! participants signed through its `terms_hash` (`sdk/spec/barter-format.md`). `commit_bundle` reserves headroom per
+//! leg for the epoch; `register_in_bundle` registers the voucher of a leg against that reservation. Intents are only
+//! hashes. Everything lives under its own storage keys (`StorageKey::Intents`, `Bundles`, `BundleReserves`, and two raw
+//! keys), so the contract root does not change layout.
+
+use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
+use near_sdk::json_types::{Base58CryptoHash, U128, U64};
+use near_sdk::store::LookupMap;
+use near_sdk::{env, near, require, AccountId};
+
+use crate::canonical::{nep413_signing_hash, parse_signature};
+use crate::clearing::EpochPhase;
+use crate::events::{BundleCommitted, IntentPosted, X207Event};
+use crate::member::MemberStatus;
+use crate::state::{StorageKey, X207Circle, X207CircleExt};
+use crate::types::EpochId;
+
+const SEQ_KEY: &[u8] = b"x207_bundle_seq";
+const HASH_KEY_PREFIX: &[u8] = b"x207_bundle_hash:";
+
+/// One leg: `payer` may owe `payee` at most `max_amount` in the epoch of the bundle.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleLeg {
+    pub payer: AccountId,
+    pub payee: AccountId,
+    pub max_amount: U128,
+}
+
+/// Argument of `commit_bundle`. `terms_hash` is computed by the contract from the circle, the epoch and the legs.
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleInput {
+    pub epoch: EpochId,
+    pub legs: Vec<BundleLeg>,
+}
+
+/// Signature of one participant over the `terms_hash`: `ed25519:<base58 64 bytes>` with the voucher key.
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleSignature {
+    pub account_id: AccountId,
+    pub signature: String,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleStatus {
+    Active,
+}
+
+/// D8 record.
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[borsh(crate = "near_sdk::borsh")]
+pub struct Bundle {
+    pub terms_hash: [u8; 32],
+    pub epoch: EpochId,
+    pub legs: Vec<BundleLeg>,
+    /// Per leg: obligation registered against it so far.
+    pub registered: Vec<u128>,
+    pub solver: AccountId,
+    pub status: BundleStatus,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, PartialEq, Eq)]
+#[borsh(crate = "near_sdk::borsh")]
+pub struct IntentRecord {
+    pub account_id: AccountId,
+    pub posted_at: u64,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleLegView {
+    pub payer: AccountId,
+    pub payee: AccountId,
+    pub max_amount: U128,
+    /// Obligation registered against this leg (CT-064).
+    pub registered: U128,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleView {
+    pub bundle_id: u64,
+    pub terms_hash: String,
+    pub epoch: EpochId,
+    pub legs: Vec<BundleLegView>,
+    pub status: BundleStatus,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IntentView {
+    pub intent_hash: Base58CryptoHash,
+    pub account_id: AccountId,
+    pub posted_at: U64,
+}
+
+fn bundles() -> LookupMap<u64, Bundle> {
+    LookupMap::new(StorageKey::Bundles)
+}
+
+fn intents() -> LookupMap<[u8; 32], IntentRecord> {
+    LookupMap::new(StorageKey::Intents)
+}
+
+fn reserves() -> LookupMap<(EpochId, AccountId), u128> {
+    LookupMap::new(StorageKey::BundleReserves)
+}
+
+/// Headroom reserved for bundle legs of `account` in `epoch`.
+pub fn reserved(epoch: EpochId, account: &AccountId) -> u128 {
+    reserves().get(&(epoch, account.clone())).copied().unwrap_or(0)
+}
+
+fn set_reserved(epoch: EpochId, account: &AccountId, value: u128) {
+    let mut map = reserves();
+    map.insert((epoch, account.clone()), value);
+    map.flush();
+}
+
+fn hash_key(terms_hash: &[u8; 32]) -> Vec<u8> {
+    [HASH_KEY_PREFIX, terms_hash.as_slice()].concat()
+}
+
+/// Canonical JSON of the terms (legs sorted by `(payer, payee)`), spec `sdk/spec/barter-format.md`.
+pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg]) -> String {
+    let mut sorted: Vec<&BundleLeg> = legs.iter().collect();
+    sorted.sort_by(|a, b| (a.payer.as_str(), a.payee.as_str()).cmp(&(b.payer.as_str(), b.payee.as_str())));
+    let legs: Vec<String> = sorted
+        .iter()
+        .map(|l| format!(r#"{{"payer":"{}","payee":"{}","max_amount":"{}"}}"#, l.payer, l.payee, l.max_amount.0))
+        .collect();
+    format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]}}"#, legs.join(","))
+}
+
+fn hex(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+impl Bundle {
+    fn view(&self, bundle_id: u64) -> BundleView {
+        BundleView {
+            bundle_id,
+            terms_hash: hex(&self.terms_hash),
+            epoch: self.epoch,
+            legs: self
+                .legs
+                .iter()
+                .zip(&self.registered)
+                .map(|(l, r)| BundleLegView { payer: l.payer.clone(), payee: l.payee.clone(), max_amount: l.max_amount, registered: U128(*r) })
+                .collect(),
+            status: self.status,
+        }
+    }
+}
+
+/// Leg of bundle `bundle_id` for `(payer, payee)`: `(index, remaining reserved amount)`.
+pub fn leg_remaining(bundle: &Bundle, payer: &AccountId, payee: &AccountId) -> Option<(usize, u128)> {
+    bundle.legs.iter().position(|l| &l.payer == payer && &l.payee == payee).map(|i| (i, bundle.legs[i].max_amount.0 - bundle.registered[i]))
+}
+
+pub fn load_bundle(bundle_id: u64) -> Bundle {
+    bundles().get(&bundle_id).cloned().unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_BUNDLE: {bundle_id}")))
+}
+
+/// Records `delta` as registered against leg `index` and releases the same amount of reservation.
+pub fn consume_leg(bundle_id: u64, index: usize, payer: &AccountId, delta: u128) {
+    let mut map = bundles();
+    let bundle = map.get_mut(&bundle_id).expect("bundle loaded before");
+    bundle.registered[index] += delta;
+    let epoch = bundle.epoch;
+    map.flush();
+    set_reserved(epoch, payer, reserved(epoch, payer).saturating_sub(delta));
+}
+
+#[near]
+impl X207Circle {
+    /// F5 (CT-062): an `active` member posts the hash of its barter intent. `ERR_PAYER_NOT_ACTIVE`, `ERR_INTENT_EXISTS`.
+    pub fn post_intent(&mut self, intent_hash: Base58CryptoHash) {
+        let account = env::predecessor_account_id();
+        let active = self.members.get(&account).map(|m| self.member_now(m)).is_some_and(|m| m.status == MemberStatus::Active);
+        require!(active, format!("ERR_PAYER_NOT_ACTIVE: {account}"));
+        let key: [u8; 32] = intent_hash.into();
+        let mut map = intents();
+        require!(map.get(&key).is_none(), format!("ERR_INTENT_EXISTS: {}", hex(&key)));
+        let posted_at = env::block_timestamp();
+        map.insert(key, IntentRecord { account_id: account.clone(), posted_at });
+        map.flush();
+        IntentPosted { intent_hash, account_id: account, posted_at: U64(posted_at) }.emit();
+    }
+
+    /// F5 (CT-063): permissionless. Checks in order: epoch (`ERR_UNKNOWN_EPOCH`, `ERR_WRONG_PHASE`), past cutoff
+    /// (`ERR_PAST_CUTOFF`), shape of the legs (`ERR_BAD_BUNDLE`), participants active (`ERR_PAYER_NOT_ACTIVE`,
+    /// `ERR_PAYEE_NOT_ACTIVE`), `terms_hash` new (`ERR_BUNDLE_EXISTS`), one valid signature per participant
+    /// (`ERR_BUNDLE_SIGNATURES`), headroom of every payer for the sum of its legs (`ERR_BUNDLE_HEADROOM`). Nothing is
+    /// written before the last check passes. Returns the `bundle_id`.
+    pub fn commit_bundle(&mut self, bundle: BundleInput, signatures: Vec<BundleSignature>) -> u64 {
+        let epoch_id = bundle.epoch;
+        let Some(epoch) = self.epochs.get(&epoch_id) else { env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch_id}")) };
+        if epoch_id != self.current_epoch || epoch.phase != EpochPhase::Open {
+            env::panic_str(&format!("ERR_WRONG_PHASE: epoch {epoch_id} is not the running open epoch"));
+        }
+        let now = env::block_timestamp();
+        require!(now < epoch.cutoff_at, format!("ERR_PAST_CUTOFF: cutoff_at {}", epoch.cutoff_at));
+
+        // shape: at least two legs, payer != payee, unique pairs, amounts > 0
+        require!(bundle.legs.len() >= 2, "ERR_BAD_BUNDLE: a bundle needs at least two legs");
+        let mut pairs = std::collections::BTreeSet::new();
+        for leg in &bundle.legs {
+            require!(leg.payer != leg.payee, format!("ERR_BAD_BUNDLE: leg pays itself {}", leg.payer));
+            require!(leg.max_amount.0 > 0, "ERR_BAD_BUNDLE: max_amount must be above 0");
+            require!(pairs.insert((leg.payer.clone(), leg.payee.clone())), format!("ERR_BAD_BUNDLE: duplicate leg {} -> {}", leg.payer, leg.payee));
+        }
+        let mut participants: Vec<AccountId> = Vec::new();
+        let mut owed: std::collections::BTreeMap<AccountId, u128> = std::collections::BTreeMap::new();
+        for leg in &bundle.legs {
+            for who in [&leg.payer, &leg.payee] {
+                if !participants.contains(who) {
+                    participants.push(who.clone());
+                }
+            }
+            let total = owed.entry(leg.payer.clone()).or_default();
+            *total = total.checked_add(leg.max_amount.0).unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: legs overflow"));
+        }
+        for leg in &bundle.legs {
+            let payer = self.members.get(&leg.payer).map(|m| self.member_now(m));
+            require!(payer.is_some_and(|m| m.status == MemberStatus::Active), format!("ERR_PAYER_NOT_ACTIVE: {}", leg.payer));
+            let payee = self.members.get(&leg.payee).map(|m| self.member_now(m));
+            require!(payee.is_some_and(|m| m.status == MemberStatus::Active), format!("ERR_PAYEE_NOT_ACTIVE: {}", leg.payee));
+        }
+
+        let circle = env::current_account_id();
+        let message = terms_message(&circle, epoch_id, &bundle.legs);
+        let terms_hash = env::sha256_array(message.as_bytes());
+        require!(!env::storage_has_key(&hash_key(&terms_hash)), format!("ERR_BUNDLE_EXISTS: {}", hex(&terms_hash)));
+
+        // exactly one valid signature per participant, nobody else
+        require!(signatures.len() == participants.len(), "ERR_BUNDLE_SIGNATURES: every participant signs exactly once");
+        let signing_hash = nep413_signing_hash(&message, terms_hash, circle.as_str());
+        for who in &participants {
+            let mut mine = signatures.iter().filter(|s| &s.account_id == who);
+            let signature = mine.next();
+            require!(signature.is_some() && mine.next().is_none(), format!("ERR_BUNDLE_SIGNATURES: {who} must sign exactly once"));
+            let pubkey = self.members.get(who).expect("participants are members").pubkey_voucher.clone();
+            let ok = parse_signature(&signature.expect("checked").signature)
+                .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
+                .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &signing_hash, &pk));
+            require!(ok, format!("ERR_BUNDLE_SIGNATURES: bad signature of {who}"));
+        }
+
+        // headroom of each payer: limit - outstanding debt - what other bundles of this epoch already reserve
+        for (payer, total) in &owed {
+            let member = self.members.get(payer).map(|m| self.member_now(m)).expect("checked above");
+            let debt = self.outstanding_debt.get(payer).copied().unwrap_or(0);
+            let free = member.limit.saturating_sub(debt).saturating_sub(reserved(epoch_id, payer));
+            require!(*total <= free, format!("ERR_BUNDLE_HEADROOM: {payer} needs {total} headroom {free}"));
+        }
+
+        // state change
+        let mut map = bundles();
+        let bundle_id = env::storage_read(SEQ_KEY).map_or(1, |b| u64::from_le_bytes(b.try_into().expect("8 bytes")) + 1);
+        env::storage_write(SEQ_KEY, &bundle_id.to_le_bytes());
+        env::storage_write(&hash_key(&terms_hash), &bundle_id.to_le_bytes());
+        let solver = env::predecessor_account_id();
+        let record = Bundle {
+            terms_hash,
+            epoch: epoch_id,
+            registered: vec![0; bundle.legs.len()],
+            legs: bundle.legs.clone(),
+            solver: solver.clone(),
+            status: BundleStatus::Active,
+        };
+        map.insert(bundle_id, record);
+        map.flush();
+        for (payer, total) in &owed {
+            set_reserved(epoch_id, payer, reserved(epoch_id, payer) + total);
+        }
+        BundleCommitted { bundle_id, terms_hash: hex(&terms_hash), epoch: epoch_id, legs: bundle.legs, solver }.emit();
+        bundle_id
+    }
+
+    pub fn get_bundle(&self, bundle_id: u64) -> Option<BundleView> {
+        bundles().get(&bundle_id).map(|b| b.view(bundle_id))
+    }
+
+    pub fn get_intent(&self, intent_hash: Base58CryptoHash) -> Option<IntentView> {
+        let key: [u8; 32] = intent_hash.into();
+        intents().get(&key).map(|r| IntentView { intent_hash, account_id: r.account_id.clone(), posted_at: U64(r.posted_at) })
+    }
+}

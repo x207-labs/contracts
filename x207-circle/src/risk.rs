@@ -55,13 +55,14 @@ impl X207Circle {
         U128(self.members.get(&account_id).map_or(0, |m| self.member_now(m).limit))
     }
 
-    /// `max(0, limit - outstanding_debt)` for an `active` member; `"0"` for anyone else (spec section 5).
+    /// `max(0, limit - outstanding_debt - headroom reserved for bundle legs of the running epoch)` for an `active` member; `"0"` for anyone else (spec section 5).
     pub fn headroom(&self, account_id: AccountId) -> U128 {
         let limit = match self.members.get(&account_id).map(|m| self.member_now(m)) {
             Some(m) if m.status == MemberStatus::Active => m.limit,
             _ => return U128(0),
         };
-        U128(limit.saturating_sub(self.outstanding_debt.get(&account_id).copied().unwrap_or(0)))
+        let debt = self.outstanding_debt.get(&account_id).copied().unwrap_or(0);
+        U128(limit.saturating_sub(debt).saturating_sub(crate::bundle::reserved(self.current_epoch, &account_id)))
     }
 }
 

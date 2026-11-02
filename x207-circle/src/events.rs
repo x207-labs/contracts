@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 23] = [
+pub const EVENT_SCHEMAS: [EventSchema; 25] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -108,6 +108,12 @@ pub const EVENT_SCHEMAS: [EventSchema; 23] = [
     schema("solver_fee_claim_failed", &["account_id", "amount"]),
     schema("upgrade_proposed", &["code_hash", "eta"]),
     schema("upgrade_applied", &["code_hash", "applied_at"]),
+    schema("intent_posted", &["intent_hash", "account_id", "posted_at"]),
+    EventSchema {
+        name: "bundle_committed",
+        fields: &["bundle_id", "terms_hash", "epoch", "legs", "solver"],
+        items: &["payer", "payee", "max_amount"],
+    },
 ];
 
 pub trait X207Event: Serialize {
@@ -308,6 +314,8 @@ event!("exit_requested", ExitRequested { account_id: AccountId, epoch: EpochId }
 event!("stake_withdrawn", StakeWithdrawn { account_id: AccountId, amount: U128 });
 event!("stake_withdraw_failed", StakeWithdrawFailed { account_id: AccountId, amount: U128 });
 event!("member_admitted", MemberAdmitted { account_id: AccountId, status: String });
+event!("intent_posted", IntentPosted { intent_hash: near_sdk::json_types::Base58CryptoHash, account_id: AccountId, posted_at: U64 });
+event!("bundle_committed", BundleCommitted { bundle_id: u64, terms_hash: String, epoch: EpochId, legs: Vec<crate::bundle::BundleLeg>, solver: AccountId });
 event!("upgrade_proposed", UpgradeProposed { code_hash: near_sdk::json_types::Base58CryptoHash, eta: U64 });
 event!("upgrade_applied", UpgradeApplied { code_hash: near_sdk::json_types::Base58CryptoHash, applied_at: U64 });
 event!("solver_fee_claimed", SolverFeeClaimed { account_id: AccountId, amount: U128 });
@@ -418,8 +426,10 @@ mod tests {
             (MemberAdmitted::NAME, MemberAdmitted { account_id: a.clone(), status: "pending".into() }.to_log()),
             (MemberReactivated::NAME, MemberReactivated { account_id: a.clone(), stake: U128(115), limit: U128(92), effective_epoch: 43 }.to_log()),
             (SolverFeeClaimed::NAME, SolverFeeClaimed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
-            (SolverFeeClaimFailed::NAME, SolverFeeClaimFailed { account_id: a, amount: U128(375_000) }.to_log()),
+            (SolverFeeClaimFailed::NAME, SolverFeeClaimFailed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
             (UpgradeProposed::NAME, UpgradeProposed { code_hash: [7u8; 32].into(), eta: t }.to_log()),
+            (IntentPosted::NAME, IntentPosted { intent_hash: [3u8; 32].into(), account_id: a.clone(), posted_at: t }.to_log()),
+            (BundleCommitted::NAME, BundleCommitted { bundle_id: 1, terms_hash: "ab".repeat(32), epoch: 42, legs: vec![crate::bundle::BundleLeg { payer: a.clone(), payee: b.clone(), max_amount: U128(10) }], solver: b.clone() }.to_log()),
             (UpgradeApplied::NAME, UpgradeApplied { code_hash: [7u8; 32].into(), applied_at: t }.to_log()),
         ]
     }
@@ -652,7 +662,7 @@ mod tests {
     #[test]
     fn frozen_event_list() {
         let names: Vec<&str> = EVENT_SCHEMAS.iter().map(|s| s.name).collect();
-        for p1 in ["intent_posted", "bundle_committed"] {
+        for p1 in [] {
             assert!(!names.contains(&p1), "{p1}");
         }
         assert_eq!(
@@ -663,6 +673,7 @@ mod tests {
                 "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested",
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
+                "intent_posted", "bundle_committed",
             ]
         );
     }

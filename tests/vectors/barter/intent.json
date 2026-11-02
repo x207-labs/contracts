@@ -1,0 +1,25 @@
+{
+  "circle": "x207-circle.near",
+  "intent": {
+    "circle": "x207-circle.near",
+    "account": "translator.x207-circle.near",
+    "offer": {
+      "service": "translate",
+      "calls": 50,
+      "value": "1000000"
+    },
+    "need": {
+      "service": "summarize",
+      "calls": 50,
+      "value": "1000000"
+    },
+    "expiresAt": 1793600000,
+    "nonce": "n1"
+  },
+  "message": "{\"circle\":\"x207-circle.near\",\"account\":\"translator.x207-circle.near\",\"offer\":{\"service\":\"translate\",\"calls\":50,\"value\":\"1000000\"},\"need\":{\"service\":\"summarize\",\"calls\":50,\"value\":\"1000000\"},\"expiresAt\":1793600000,\"nonce\":\"n1\"}",
+  "intentHash": "294f1871b91ae703ef7e207424a547f8a5a07a3174ac03351a7f74c4fe050f0a",
+  "intentHashBase58": "3nFfkLp4jqzmYte9gVdNNawCsFwHSy7eB9hM3aZNngc9",
+  "signingHash": "4757b5261724bd5f591d5d956c174e6655f011a64bbc16516595351a637b9ef2",
+  "pubkey": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+  "signature": "ed25519:4n4b9t4zREkrVhLufBf9XQbTKVjyx9TSnCB5T72Sk5SfFZd7fmJjKG4pZ8BHjxT5hmes4nEuN3nsBkbBBvjULjEB"
+}
