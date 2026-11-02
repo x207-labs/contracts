@@ -18,6 +18,24 @@ pub fn compute_limit(stake: u128, settled_history: u128, params: &Params) -> u12
     base.saturating_add(growth).min(params.limit_cap.0).min(stake)
 }
 
+/// P1 `limit_decay` (CT-053, spec 4.5 step 3): a member with no registration since `last_active_epoch` keeps
+/// `(1 - limit_decay / 10000)^(epoch - last_active_epoch)` of its limit. Integer arithmetic: the limit is
+/// multiplied and rounded down once per idle epoch. `limit_decay` 0, or a member active in `epoch`, changes nothing.
+pub fn decay_limit(limit: u128, last_active_epoch: u64, epoch: u64, limit_decay: u16) -> u128 {
+    if limit_decay == 0 || last_active_epoch >= epoch {
+        return limit;
+    }
+    let keep = BPS - u128::from(limit_decay);
+    let mut limit = limit;
+    for _ in 0..(epoch - last_active_epoch) {
+        if limit == 0 {
+            break;
+        }
+        limit = limit.saturating_mul(keep) / BPS;
+    }
+    limit
+}
+
 /// Guard for every path that changes stake or limit: panics `ERR_LIMIT_EXCEEDS_STAKE` when
 /// `limit > stake` (ADR-18, I-01).
 pub fn assert_limit_invariant(member: &Member) {
@@ -255,5 +273,18 @@ mod tests {
     fn headroom_without_debt_equals_limit() {
         let c = circle_with(&[("translator.near", MemberStatus::Active, 80 * CREDIT)], &[]);
         assert_eq!(c.headroom(acc("translator.near")), U128(80 * CREDIT));
+    }
+
+    #[test]
+    fn ct_053_decay_limit_arithmetic() {
+        use super::decay_limit;
+        assert_eq!(decay_limit(80 * CREDIT, 5, 5, 1_000), 80 * CREDIT, "active in the epoch");
+        assert_eq!(decay_limit(80 * CREDIT, 9, 5, 1_000), 80 * CREDIT, "last_active_epoch after the epoch");
+        assert_eq!(decay_limit(80 * CREDIT, 4, 5, 0), 80 * CREDIT, "limit_decay 0");
+        assert_eq!(decay_limit(80 * CREDIT, 4, 5, 1_000), 72 * CREDIT);
+        assert_eq!(decay_limit(80 * CREDIT, 3, 5, 1_000), 64_800_000, "80 * 0.9 * 0.9");
+        assert_eq!(decay_limit(100, 0, 3, 5_000), 12, "each step rounds down: 50, 25, 12");
+        assert_eq!(decay_limit(u128::MAX, 0, 1_000_000, 5_000), 0, "long idle ends at zero without overflow");
+        assert_eq!(decay_limit(0, 0, 9, 1_000), 0);
     }
 }

@@ -9,7 +9,7 @@ use crate::events::{
     chunked_logs, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualClaimFailed, ResidualClaimed, ResidualPaid, X207Event,
 };
 use crate::member::MemberStatus;
-use crate::risk::{assert_limit_invariant, compute_limit};
+use crate::risk::{assert_limit_invariant, compute_limit, decay_limit};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClaimDestination, EpochId};
 
@@ -256,7 +256,12 @@ impl X207Circle {
             if member.status != MemberStatus::Active {
                 continue;
             }
-            let new_limit = compute_limit(member.stake, member.settled_history, &params);
+            let new_limit = decay_limit(
+                compute_limit(member.stake, member.settled_history, &params),
+                member.last_active_epoch,
+                epoch,
+                params.limit_decay,
+            );
             if new_limit != member.limit {
                 changes.push(LimitChange {
                     account_id: account,
@@ -276,7 +281,7 @@ impl X207Circle {
 impl X207Circle {
     /// Permissionless after the payment window (spec 4.5). Every `due` left becomes `defaulted`
     /// (stake, then reserve, into the epoch pool), active limits are recomputed, and the epoch is
-    /// `finalized`. P1 `limit_decay` (CT-053) and the P2 haircut (CT-057) are not applied.
+    /// `finalized`. P1 `limit_decay` (CT-053) lowers the limit of idle members; the P2 haircut (CT-057) is not applied.
     pub fn finalize_epoch(&mut self, epoch: EpochId) {
         let now = env::block_timestamp();
         let block = env::block_height();
@@ -1287,15 +1292,30 @@ mod finalize_tests {
         assert_eq!(c.limit(acc("scraper")), U128(87 * CREDIT));
     }
 
-    // TC-CT-034-08
+    // TC-CT-034-08: with the default `limit_decay` 0 an idle member keeps its limit
     #[test]
-    fn tc_ct_034_08_limit_decay_is_not_applied_in_p0() {
+    fn tc_ct_034_08_default_limit_decay_changes_nothing() {
         assert_eq!(Params::default().limit_decay, 0);
+        let mut c = s1();
+        c.members.get_mut(&acc("translator")).unwrap().last_active_epoch = 0;
+        fin(&mut c);
+        assert_eq!(c.limit(acc("translator")), U128(80 * CREDIT));
+    }
+
+    // CT-053: `limit_decay` 1000 bps and a member idle since epoch 0 loses 10 % per idle epoch; active members do not
+    #[test]
+    fn ct_053_limit_decay_lowers_the_limit_of_an_idle_member() {
         let mut c = s1();
         c.epochs.get_mut(&1).unwrap().params.limit_decay = 1_000;
         c.members.get_mut(&acc("translator")).unwrap().last_active_epoch = 0;
         fin(&mut c);
-        assert_eq!(c.limit(acc("translator")), U128(80 * CREDIT));
+        // epoch 1, last active 0: one idle epoch, 80 * 0.9
+        assert_eq!(c.limit(acc("translator")), U128(72 * CREDIT));
+        assert_eq!(c.limit(acc("gpu")), U128(80 * CREDIT), "gpu took part in epoch 1");
+        let all = events();
+        let changes = named(&all, "limits_updated");
+        let list = changes[0]["data"][0]["changes"].as_array().unwrap();
+        assert!(list.iter().any(|ch| ch["account_id"] == "translator.near" && ch["new_limit"] == "72000000"));
     }
 
     // TC-CT-034-09
