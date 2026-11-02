@@ -790,4 +790,90 @@ mod register_tests {
         assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 5);
         assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 2), 0);
     }
+    type Snapshot = (u128, u64, u128, u128);
+
+    fn snapshot(c: &X207Circle, payer: &str, payee: &str) -> Snapshot {
+        let (payer, payee) = (acc(&format!("{payer}.near")), acc(&format!("{payee}.near")));
+        let pair = c.obligation(1, payer.clone(), payee.clone());
+        let e = c.get_epoch(Some(1)).unwrap();
+        (
+            pair.as_ref().map_or(0, |p| p.obligation.0),
+            c.last_seq(payer.clone(), payee, 1),
+            c.outstanding_debt(payer).0,
+            e.total_obligation.0,
+        )
+    }
+
+    // TC-CT-020-25: every negative case of TC-CT-020-04 to TC-CT-020-21 leaves the state as it was (I-06)
+    #[test]
+    fn tc_ct_020_25_failed_registration_leaves_no_trace() {
+        let good = v("translator", "scraper", 1, 6, 25 * CREDIT);
+        let bad_sig = sig_with("account-access-key", &good);
+        let cases: Vec<(Voucher, Option<String>)> = vec![
+            (v("translator", "scraper", 1, 6, 25 * CREDIT), None),
+            (v("translator", "scraper", 1, 4, 30 * CREDIT), None),
+            (v("translator", "scraper", 1, 7, 24 * CREDIT), None),
+            (v("translator", "scraper", 1, 7, 81 * CREDIT), None),
+            (v("translator", "gpu", 1, 1, 56 * CREDIT), None),
+            (Voucher { circle: acc("other.test.near"), ..v("translator", "scraper", 1, 7, 26 * CREDIT) }, None),
+            (Voucher { unit: "eur".into(), ..v("translator", "scraper", 1, 7, 26 * CREDIT) }, None),
+            (Voucher { resource: "caf\u{e9}".into(), ..v("translator", "scraper", 1, 7, 26 * CREDIT) }, None),
+            (v("translator", "translator", 1, 7, 26 * CREDIT), None),
+            (v("translator", "scraper", 2, 7, 26 * CREDIT), None),
+            (v("pending", "scraper", 1, 1, CREDIT), None),
+            (v("translator", "pending", 1, 1, CREDIT), None),
+            (good.clone(), Some(bad_sig)),
+            (good.clone(), Some("ed25519:abc".to_string())),
+        ];
+        let mut c = setup_25();
+        for (i, (voucher, sig)) in cases.into_iter().enumerate() {
+            let before = (snapshot(&c, "translator", "scraper"), snapshot(&c, "translator", "gpu"), c.get_epoch(Some(1)).unwrap().edge_count);
+            let payer = voucher.payer.as_str().trim_end_matches(".near").to_string();
+            let sig = sig.unwrap_or_else(|| sig_with(&payer, &voucher));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(voucher, sig)));
+            assert!(result.is_err(), "case {i} was accepted");
+            let after = (snapshot(&c, "translator", "scraper"), snapshot(&c, "translator", "gpu"), c.get_epoch(Some(1)).unwrap().edge_count);
+            assert_eq!(before, after, "case {i} left a trace");
+        }
+    }
+
+    // TC-CT-020-26: a pseudo-random mix of valid and invalid vouchers over several pairs keeps I-03 and I-05
+    #[test]
+    fn tc_ct_020_26_random_voucher_order_keeps_the_invariants() {
+        use std::collections::BTreeMap;
+        let names = ["translator", "scraper", "gpu"];
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = |n: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % n
+        };
+        let mut c = circle();
+        let mut model: BTreeMap<(usize, usize), (u64, u128)> = BTreeMap::new();
+        let mut accepted = 0;
+        for _ in 0..400 {
+            let (a, b) = (next(3) as usize, next(3) as usize);
+            let (seq, cumulative) = (1 + next(12), u128::from(next(30_000_001)));
+            let voucher = v(names[a], names[b], 1, seq, cumulative);
+            let sig = sig_with(names[a], &voucher);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(voucher, sig)));
+            let (last_seq, last_cum) = model.get(&(a, b)).copied().unwrap_or((0, 0));
+            if result.is_ok() {
+                accepted += 1;
+                assert!(a != b && seq > last_seq && cumulative >= last_cum, "accepted a bad voucher {a}->{b} seq {seq} cum {cumulative}");
+                model.insert((a, b), (seq, cumulative));
+            }
+            for (&(x, y), &(s, cum)) in &model {
+                let pair = c.obligation(1, acc(&format!("{}.near", names[x])), acc(&format!("{}.near", names[y]))).unwrap();
+                assert_eq!((pair.last_seq, pair.obligation.0), (s, cum), "I-05 {x}->{y}");
+            }
+            for (i, n) in names.iter().enumerate() {
+                let owed: u128 = model.iter().filter(|((x, _), _)| *x == i).map(|(_, (_, cum))| cum).sum();
+                assert_eq!(c.outstanding_debt(acc(&format!("{n}.near"))).0, owed);
+                assert!(owed <= 80 * CREDIT, "I-03 {n} owes {owed}");
+            }
+        }
+        assert!(accepted > 10, "the mix accepted only {accepted} vouchers");
+    }
 }
