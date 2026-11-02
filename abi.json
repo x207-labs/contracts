@@ -3,6 +3,32 @@
     "functions": [
       {
         "kind": "call",
+        "name": "accept_grant",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "delivery_pubkey",
+              "type_schema": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "admit_member",
         "params": {
           "args": [
@@ -320,6 +346,36 @@
       },
       {
         "kind": "view",
+        "name": "get_grant",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AccessGrant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_intent",
         "params": {
           "args": [
@@ -407,6 +463,36 @@
                 "type": "null"
               }
             ]
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "grants_of",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "role",
+              "type_schema": {
+                "$ref": "#/definitions/GrantRole"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "items": {
+              "$ref": "#/definitions/AccessGrant"
+            },
+            "type": "array"
           }
         }
       },
@@ -852,6 +938,29 @@
       },
       {
         "kind": "call",
+        "name": "offer_grant",
+        "params": {
+          "args": [
+            {
+              "name": "input",
+              "type_schema": {
+                "$ref": "#/definitions/GrantInput"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "modifiers": [
           "private"
         ],
@@ -1239,6 +1348,77 @@
     "root_schema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "definitions": {
+        "AccessGrant": {
+          "properties": {
+            "asset_type": {
+              "type": "string"
+            },
+            "class": {
+              "$ref": "#/definitions/AssetClass"
+            },
+            "delivery_pubkey": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "grant_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "grantee": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "grantor": {
+              "type": "string"
+            },
+            "limits": {
+              "$ref": "#/definitions/GrantLimits"
+            },
+            "operator": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proof_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proof_kind": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "$ref": "#/definitions/GrantStatus"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "unit_price": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_type",
+            "class",
+            "grant_id",
+            "grantor",
+            "limits",
+            "status",
+            "unit",
+            "unit_price"
+          ],
+          "type": "object"
+        },
         "Admission": {
           "enum": [
             "open",
@@ -1648,6 +1828,88 @@
             "solver_fee_bps"
           ],
           "type": "object"
+        },
+        "GrantInput": {
+          "properties": {
+            "asset_type": {
+              "type": "string"
+            },
+            "delivery_method": {
+              "type": "string"
+            },
+            "limits": {
+              "$ref": "#/definitions/GrantLimits"
+            },
+            "operator": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proof_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "proof_kind": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "unit": {
+              "type": "string"
+            },
+            "unit_price": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "asset_type",
+            "delivery_method",
+            "limits",
+            "unit",
+            "unit_price"
+          ],
+          "type": "object"
+        },
+        "GrantLimits": {
+          "properties": {
+            "expires_at": {
+              "type": "string"
+            },
+            "quota": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "scope": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expires_at",
+            "scope"
+          ],
+          "type": "object"
+        },
+        "GrantRole": {
+          "enum": [
+            "grantor",
+            "grantee"
+          ],
+          "type": "string"
+        },
+        "GrantStatus": {
+          "enum": [
+            "offered",
+            "active",
+            "revoked",
+            "expired"
+          ],
+          "type": "string"
         },
         "IntentView": {
           "properties": {
@@ -2322,6 +2584,26 @@
         "class"
       ],
       "name": "asset_class_set"
+    },
+    {
+      "fields": [
+        "grant_id",
+        "asset_type",
+        "grantor",
+        "class",
+        "unit",
+        "unit_price",
+        "expires_at"
+      ],
+      "name": "grant_offered"
+    },
+    {
+      "fields": [
+        "grant_id",
+        "grantee",
+        "delivery_pubkey"
+      ],
+      "name": "grant_activated"
     },
     {
       "fields": [

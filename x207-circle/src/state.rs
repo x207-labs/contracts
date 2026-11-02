@@ -55,6 +55,12 @@ pub enum StorageKey {
     BundleReserves = b'r',
     /// D10 `asset_type -> AssetClassEntry` (F8).
     AssetClasses = b'a',
+    /// D11 `GrantId -> AccessGrant` (F8).
+    Grants = b'g',
+    /// D11 `(role, AccountId) -> Vec<GrantId>` (F8).
+    GrantsBy = b'G',
+    /// D11 `AccountId -> open grants as grantor` (F8).
+    GrantCounts = b'k',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).
