@@ -7,7 +7,8 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId, PublicKey};
 
-use crate::events::{AssetClassSet, GrantActivated, GrantOffered, X207Event};
+use crate::events::{AssetClassSet, GrantActivated, GrantOffered, GrantRevoked, X207Event};
+use crate::settlement::PositionStatus;
 use crate::member::MemberStatus;
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 
@@ -213,6 +214,20 @@ impl X207Circle {
     }
 }
 
+impl X207Circle {
+    /// The grantee is `suspended` or has a D5 position `defaulted` in the running epoch or the two before it.
+    fn grantee_defaulted(&self, grant: &AccessGrant) -> bool {
+        let Some(grantee) = &grant.grantee else { return false };
+        if self.members.get(grantee).map(|m| self.member_now(m)).is_some_and(|m| m.status == MemberStatus::Suspended) {
+            return true;
+        }
+        let newest = self.current_epoch;
+        (newest.saturating_sub(2).max(1)..=newest).any(|epoch| {
+            self.positions.get(&(epoch, grantee.clone())).is_some_and(|p| p.status == PositionStatus::Defaulted)
+        })
+    }
+}
+
 #[near]
 impl X207Circle {
     /// F8 (CT-070): an `active` member offers access to an asset. Checks in order: member (`ERR_NOT_MEMBER`), active
@@ -294,6 +309,34 @@ impl X207Circle {
         map.flush();
         index(1, &caller, grant_id);
         GrantActivated { grant_id, grantee: caller, delivery_pubkey }.emit();
+    }
+
+    /// F8 (CT-071, spec 15.3): final. The grantor, the grantee or the `operator` may revoke at any time with the matching
+    /// `reason` (`grantor`, `grantee`, `operator`); anybody may when `now >= expires_at` (`expired`, status `expired`) or
+    /// when the grantee is `suspended` or defaulted (`defaulted`). Otherwise `ERR_GRANT_REVOKE_DENIED`; a grant that is
+    /// already `revoked` or `expired` gives `ERR_GRANT_FINAL`.
+    pub fn revoke_grant(&mut self, grant_id: GrantId, reason: RevokeReason) {
+        let mut grant = load_grant(grant_id);
+        require!(matches!(grant.status, GrantStatus::Offered | GrantStatus::Active), format!("ERR_GRANT_FINAL: {:?}", grant.status));
+        let caller = env::predecessor_account_id();
+        let (allowed, status) = match reason {
+            RevokeReason::Grantor => (caller == grant.grantor, GrantStatus::Revoked),
+            RevokeReason::Grantee => (grant.grantee.as_ref() == Some(&caller), GrantStatus::Revoked),
+            RevokeReason::Operator => (grant.operator.as_ref() == Some(&caller), GrantStatus::Revoked),
+            RevokeReason::Expired => (env::block_timestamp() >= grant.limits.expires_at.0, GrantStatus::Expired),
+            RevokeReason::Defaulted => (self.grantee_defaulted(&grant), GrantStatus::Revoked),
+        };
+        require!(allowed, format!("ERR_GRANT_REVOKE_DENIED: {caller} cannot revoke grant {grant_id} as {reason:?}"));
+        grant.status = status;
+        let grantor = grant.grantor.clone();
+        let mut map = grants();
+        map.insert(grant_id, grant);
+        map.flush();
+        let mut counts = grant_counts();
+        let open = counts.get(&grantor).copied().unwrap_or(1);
+        counts.insert(grantor, open.saturating_sub(1));
+        counts.flush();
+        GrantRevoked { grant_id, reason }.emit();
     }
 
     pub fn get_grant(&self, grant_id: GrantId) -> Option<AccessGrant> {

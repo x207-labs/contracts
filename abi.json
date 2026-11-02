@@ -1212,6 +1212,29 @@
       },
       {
         "kind": "call",
+        "name": "revoke_grant",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "reason",
+              "type_schema": {
+                "$ref": "#/definitions/RevokeReason"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "set_asset_class",
         "params": {
           "args": [
@@ -2215,6 +2238,16 @@
         "PromiseOrValueString": {
           "type": "string"
         },
+        "RevokeReason": {
+          "enum": [
+            "grantor",
+            "grantee",
+            "operator",
+            "expired",
+            "defaulted"
+          ],
+          "type": "string"
+        },
         "SearchLeg": {
           "properties": {
             "payee": {
@@ -2604,6 +2637,13 @@
         "delivery_pubkey"
       ],
       "name": "grant_activated"
+    },
+    {
+      "fields": [
+        "grant_id",
+        "reason"
+      ],
+      "name": "grant_revoked"
     },
     {
       "fields": [

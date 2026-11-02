@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 27] = [
+const CHANGE_METHODS: [&str; 28] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -29,6 +29,8 @@ const CHANGE_METHODS: [&str; 27] = [
     "set_asset_class",
     // CT-070
     "offer_grant", "accept_grant",
+    // CT-071
+    "revoke_grant",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
@@ -43,7 +45,7 @@ const P1_P2_METHODS: [&str; 1] = ["prune_epoch"];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 54] = [
+const SIGNATURES: [&str; 55] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_upgrade()->Promise []",
@@ -92,6 +94,7 @@ const SIGNATURES: [&str; 54] = [
     "register_in_bundle(bundle_id:integer:uint64,voucher:Voucher,signature:string)->string []",
     "register_voucher(voucher:Voucher,signature:string)->string []",
     "request_exit()-> [payable]",
+    "revoke_grant(grant_id:integer:uint64,reason:RevokeReason)-> []",
     "set_asset_class(asset_type:string,entry:AssetClassEntry)-> []",
     "set_params(params:Params)-> []",
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
@@ -100,12 +103,12 @@ const SIGNATURES: [&str; 54] = [
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
 ];
 
-const EVENTS: [&str; 28] = [
+const EVENTS: [&str; 29] = [
     "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied",
     "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed",
     "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed",
     "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed",
-    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "bundle_committed",
+    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "bundle_committed",
 ];
 
 fn strip_descriptions(value: &mut Value) {
