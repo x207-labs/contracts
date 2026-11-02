@@ -187,6 +187,7 @@ mod tests {
                 limit_decay: 0,
                 fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
                 admission: Admission::Open,
+                max_search_share_bps: 500,
             };
             let stake = (next(u64::MAX - 1) as u128) * (next(1_000_000) as u128);
             let history = (next(u64::MAX - 1) as u128) * (next(1_000_000) as u128);

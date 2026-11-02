@@ -1175,6 +1175,17 @@
                 "$ref": "#/definitions/BundleLeg"
               },
               "type": "array"
+            },
+            "search_leg": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SearchLeg"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "required": [
@@ -1667,6 +1678,12 @@
               "minimum": 0.0,
               "type": "integer"
             },
+            "max_search_share_bps": {
+              "default": 500,
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
             "payment_window": {
               "format": "uint64",
               "minimum": 0.0,
@@ -1809,6 +1826,21 @@
         },
         "PromiseOrValueString": {
           "type": "string"
+        },
+        "SearchLeg": {
+          "properties": {
+            "payee": {
+              "type": "string"
+            },
+            "payer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "payee",
+            "payer"
+          ],
+          "type": "object"
         },
         "SimulationResult": {
           "properties": {
@@ -2174,10 +2206,10 @@
       "name": "bundle_committed"
     }
   ],
-  "interface_version": "0.0.4",
+  "interface_version": "0.0.5",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.4"
+    "version": "0.0.5"
   },
   "schema_version": "0.4.0"
 }

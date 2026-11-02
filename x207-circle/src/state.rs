@@ -207,6 +207,7 @@ mod tests {
             limit_decay: 0,
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
+            max_search_share_bps: 500,
         }
     }
 

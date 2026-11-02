@@ -207,6 +207,32 @@ pub mod circle {
             (message, hash)
         }
 
+        /// Like `commit_bundle`, with `search` = `(payer, payee)` named as the seeker leg inside the signed terms (CT-082).
+        /// `sign_without_search` signs the terms without that field, for the refusal test.
+        pub async fn commit_bundle_with_search(
+            &self,
+            epoch: u64,
+            legs: &[(&str, &str, u128)],
+            search: (&str, &str),
+            signers: &[&str],
+            sign_without_search: bool,
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            let (plain, _) = self.bundle_terms(epoch, legs);
+            let message = if sign_without_search {
+                plain
+            } else {
+                let cut = plain.len() - 1;
+                format!(r#"{},"search_leg":{{"payer":"{}","payee":"{}"}}}}"#, &plain[..cut], account_of(search.0), account_of(search.1))
+            };
+            let hash: [u8; 32] = Sha256::digest(message.as_bytes()).into();
+            let signatures: Vec<serde_json::Value> =
+                signers.iter().map(|s| json!({"account_id": account_of(s), "signature": self.sign_terms(s, &message, hash)})).collect();
+            let legs_json: Vec<serde_json::Value> =
+                legs.iter().map(|(a, b, m)| json!({"payer": account_of(a), "payee": account_of(b), "max_amount": m.to_string()})).collect();
+            let bundle = json!({"epoch": epoch, "legs": legs_json, "search_leg": {"payer": account_of(search.0), "payee": account_of(search.1)}});
+            self.call_keeper("commit_bundle", json!({"bundle": bundle, "signatures": signatures})).await
+        }
+
         pub fn sign_terms(&self, signer: &str, message: &str, terms_hash: [u8; 32]) -> String {
             let circle = self.contract.id().to_string();
             let mut payload = Vec::new();

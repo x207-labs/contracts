@@ -34,6 +34,18 @@ pub struct BundleLeg {
 pub struct BundleInput {
     pub epoch: EpochId,
     pub legs: Vec<BundleLeg>,
+    /// F9 (CT-082): the leg that is the seeker's share. It is part of the signed terms, so every participant
+    /// agrees to it. Absent: no leg is a seeker share and `max_search_share_bps` does not apply.
+    #[serde(default)]
+    pub search_leg: Option<SearchLeg>,
+}
+
+/// Names the seeker leg by its pair; the pair is unique inside a bundle.
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchLeg {
+    pub payer: AccountId,
+    pub payee: AccountId,
 }
 
 /// Signature of one participant over the `terms_hash`: `ed25519:<base58 64 bytes>` with the voucher key.
@@ -127,14 +139,15 @@ fn hash_key(terms_hash: &[u8; 32]) -> Vec<u8> {
 }
 
 /// Canonical JSON of the terms (legs sorted by `(payer, payee)`), spec `sdk/spec/barter-format.md`.
-pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg]) -> String {
+pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg], search_leg: Option<&SearchLeg>) -> String {
     let mut sorted: Vec<&BundleLeg> = legs.iter().collect();
     sorted.sort_by(|a, b| (a.payer.as_str(), a.payee.as_str()).cmp(&(b.payer.as_str(), b.payee.as_str())));
     let legs: Vec<String> = sorted
         .iter()
         .map(|l| format!(r#"{{"payer":"{}","payee":"{}","max_amount":"{}"}}"#, l.payer, l.payee, l.max_amount.0))
         .collect();
-    format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]}}"#, legs.join(","))
+    let search = search_leg.map(|l| format!(r#","search_leg":{{"payer":"{}","payee":"{}"}}"#, l.payer, l.payee)).unwrap_or_default();
+    format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]{search}}}"#, legs.join(","))
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
@@ -215,6 +228,14 @@ impl X207Circle {
             require!(leg.max_amount.0 > 0, "ERR_BAD_BUNDLE: max_amount must be above 0");
             require!(pairs.insert((leg.payer.clone(), leg.payee.clone())), format!("ERR_BAD_BUNDLE: duplicate leg {} -> {}", leg.payer, leg.payee));
         }
+        if let Some(search) = &bundle.search_leg {
+            let leg = bundle.legs.iter().find(|l| l.payer == search.payer && l.payee == search.payee);
+            let leg = leg.unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: search_leg is not a leg of the bundle"));
+            let sum = bundle.legs.iter().try_fold(0u128, |a, l| a.checked_add(l.max_amount.0)).unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: legs overflow"));
+            let cap_bps = epoch.params.max_search_share_bps as u128;
+            let over = leg.max_amount.0.checked_mul(10_000).map_or(true, |scaled| scaled > cap_bps.saturating_mul(sum));
+            require!(!over, format!("ERR_SEARCH_SHARE_EXCEEDED: {} of {} exceeds {} bps", leg.max_amount.0, sum, cap_bps));
+        }
         let mut participants: Vec<AccountId> = Vec::new();
         let mut owed: std::collections::BTreeMap<AccountId, u128> = std::collections::BTreeMap::new();
         for leg in &bundle.legs {
@@ -234,7 +255,7 @@ impl X207Circle {
         }
 
         let circle = env::current_account_id();
-        let message = terms_message(&circle, epoch_id, &bundle.legs);
+        let message = terms_message(&circle, epoch_id, &bundle.legs, bundle.search_leg.as_ref());
         let terms_hash = env::sha256_array(message.as_bytes());
         require!(!env::storage_has_key(&hash_key(&terms_hash)), format!("ERR_BUNDLE_EXISTS: {}", hex(&terms_hash)));
 

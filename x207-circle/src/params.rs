@@ -20,6 +20,7 @@ pub const LIMIT_CAP_MAX: u128 = 100_000_000_000;
 pub const LIMIT_DECAY_MAX: u16 = 5_000;
 pub const CLEARING_FEE_BPS_MAX: u16 = 100;
 pub const SOLVER_FEE_BPS_MAX: u16 = 100;
+pub const MAX_SEARCH_SHARE_BPS_MAX: u16 = 10_000;
 
 // Defaults (ADR-25 and spec 3.4).
 pub const DEFAULT_EPOCH_LENGTH: u64 = 3_600;
@@ -29,6 +30,12 @@ pub const DEFAULT_BASE_LIMIT_RATIO: u16 = 8_000;
 pub const DEFAULT_LIMIT_GROWTH: u16 = 1_000;
 pub const DEFAULT_LIMIT_CAP: u128 = 1_000_000_000;
 pub const DEFAULT_LIMIT_DECAY: u16 = 0;
+/// F9 (CT-082): a declared seeker leg may take at most 5% of the sum of all legs of a bundle.
+pub const DEFAULT_MAX_SEARCH_SHARE_BPS: u16 = 500;
+
+fn default_max_search_share_bps() -> u16 {
+    DEFAULT_MAX_SEARCH_SHARE_BPS
+}
 
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +67,9 @@ pub struct Params {
     pub limit_decay: u16,
     pub fees: Fees,
     pub admission: Admission,
+    /// F9 (CT-082): cap of the seeker leg of a bundle in bps of the sum of its legs. Absent in JSON means the default.
+    #[serde(default = "default_max_search_share_bps")]
+    pub max_search_share_bps: u16,
 }
 
 impl Default for Params {
@@ -74,6 +84,7 @@ impl Default for Params {
             limit_decay: DEFAULT_LIMIT_DECAY,
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
+            max_search_share_bps: DEFAULT_MAX_SEARCH_SHARE_BPS,
         }
     }
 }
@@ -96,6 +107,7 @@ pub fn validate_params(p: &Params) {
     require_range(p.limit_decay, 0, LIMIT_DECAY_MAX, "limit_decay");
     require_range(p.fees.clearing_fee_bps, 0, CLEARING_FEE_BPS_MAX, "fees.clearing_fee_bps");
     require_range(p.fees.solver_fee_bps, 0, SOLVER_FEE_BPS_MAX, "fees.solver_fee_bps");
+    require_range(p.max_search_share_bps, 0, MAX_SEARCH_SHARE_BPS_MAX, "max_search_share_bps");
 }
 
 impl Params {
@@ -112,6 +124,7 @@ impl Params {
             ("fees.clearing_fee_bps", self.fees.clearing_fee_bps != other.fees.clearing_fee_bps),
             ("fees.solver_fee_bps", self.fees.solver_fee_bps != other.fees.solver_fee_bps),
             ("admission", self.admission != other.admission),
+            ("max_search_share_bps", self.max_search_share_bps != other.max_search_share_bps),
         ];
         checks.into_iter().filter(|(_, differs)| *differs).map(|(name, _)| name.to_string()).collect()
     }
@@ -175,7 +188,7 @@ mod tests {
                 "base_limit_ratio": 8000, "limit_growth": 1000, "limit_cap": "1000000000",
                 "limit_decay": 0,
                 "fees": {"clearing_fee_bps": 0, "solver_fee_bps": 0},
-                "admission": "open"
+                "admission": "open", "max_search_share_bps": 500
             })
         );
         validate_params(&Params::default());
@@ -185,7 +198,7 @@ mod tests {
     #[test]
     fn tc_ct_007_02_all_fields_present() {
         let json = serde_json::to_value(Params::default()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 9);
+        assert_eq!(json.as_object().unwrap().len(), 10);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 
@@ -295,7 +308,7 @@ mod tests {
         let c = circle(Params::default());
         assert_eq!(c.get_params(), Params::default());
         let json = serde_json::to_value(c.get_params()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 9);
+        assert_eq!(json.as_object().unwrap().len(), 10);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 

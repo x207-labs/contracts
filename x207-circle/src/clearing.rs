@@ -336,6 +336,7 @@ mod tests {
             limit_decay: 0,
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
+            max_search_share_bps: 500,
         }
     }
 
@@ -712,6 +713,7 @@ mod submit_tests {
             limit_decay: 0,
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
+            max_search_share_bps: 500,
         };
         let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), params, 0);
         for (d, k, v) in [("x", "y", 10), ("y", "z", 10), ("z", "x", 10), ("p", "q", 20), ("q", "p", 20)] {
