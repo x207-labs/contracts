@@ -93,6 +93,56 @@ async fn suspended_member_comes_back_by_stake() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn committed_with_fees() -> anyhow::Result<(Funded, near_workspaces::Account)> {
+    let mut params = Funded::params_short();
+    params["fees"] = json!({"clearing_fee_bps": 100, "solver_fee_bps": 100});
+    let mut f = Funded::deploy(Some(params)).await?;
+    for name in ["scraper", "gpu", "translator"] {
+        let account = f.account(name).await?;
+        assert!(f.join(name, Funded::join_deposit()).await?.is_success());
+        assert!(f.stake(&account, 100 * CREDIT).await?.is_success());
+    }
+    for (payer, payee, amount) in [("scraper", "gpu", 60), ("gpu", "translator", 25), ("translator", "scraper", 25)] {
+        assert!(f.circle.register(payer, payee, 1, amount * CREDIT).await?.is_success());
+    }
+    let solver = f.account("solver1").await?;
+    let c = &f.circle;
+    c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
+    assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
+    let edges = json!([edge("scraper", "gpu", 25 * CREDIT), edge("gpu", "translator", 25 * CREDIT), edge("translator", "scraper", 25 * CREDIT)]);
+    assert!(c.call_as(&solver, "submit_clearing", json!({"epoch": 1, "edges": edges})).await?.is_success());
+    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
+    let commit = c.call_keeper("commit_epoch", json!({"epoch": 1})).await?;
+    assert!(commit.is_success(), "{:?}", failure_text(&commit));
+    Ok((f, solver))
+}
+
+async fn claim_fee(f: &Funded, solver: &near_workspaces::Account) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    Ok(solver
+        .call(f.circle.contract.id(), "claim_solver_fee")
+        .deposit(NearToken::from_yoctonear(1))
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?)
+}
+
+// CT-052: the transfer is refused (the solver unregistered from the token), the callback restores the balance
+#[tokio::test]
+async fn failed_solver_fee_transfer_restores_the_balance() -> anyhow::Result<()> {
+    let (f, solver) = committed_with_fees().await?;
+    solver.call(f.usdt.id(), "storage_unregister").args_json(json!({"force": true})).deposit(NearToken::from_yoctonear(1)).transact().await?.into_result()?;
+    let before = usdt(&f, solver.id()).await?;
+    let claim = claim_fee(&f, &solver).await?;
+    assert!(events(&claim).iter().any(|(n, d)| n == "solver_fee_claim_failed" && d["amount"] == "750000"), "{:?}", events(&claim));
+    assert!(!events(&claim).iter().any(|(n, _)| n == "solver_fee_claimed"));
+    assert_eq!(f.circle.view("solver_fee_balance", json!({"account_id": solver.id()})).await?, "750000", "balance restored");
+    let pool = f.circle.view("get_pool", json!({})).await?;
+    assert_eq!((pool["solver_fees"].as_str(), pool["in_flight"].as_str()), (Some("750000"), Some("0")));
+    assert_eq!(usdt(&f, solver.id()).await?, before, "no USDT moved");
+    f.assert_d6().await?;
+    Ok(())
+}
+
 // CT-051 and CT-052: fees at commit_epoch, the solver claims its share as USDT
 #[tokio::test]
 async fn fees_reach_the_reserve_and_the_solver() -> anyhow::Result<()> {
