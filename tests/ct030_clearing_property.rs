@@ -11,7 +11,7 @@ use proptest::prelude::*;
 use x207_circle::clearing::EpochPhase;
 use x207_circle::params::Params;
 use x207_circle::types::ClearingEdge;
-use x207_circle::voucher::PairState;
+use x207_circle::voucher::{PairState, ParticipantTotals};
 use x207_circle::X207Circle;
 
 /// TC-CT-030-07: at least 1.000 graphs per run.
@@ -123,8 +123,70 @@ fn net(n: usize, obligations: &BTreeMap<(usize, usize), u128>) -> Vec<i128> {
     net
 }
 
+/// `circle(g)` with the D2 totals and participants that `register_cumulative` keeps, so `commit_epoch` can run.
+fn circle_with_totals(g: &Graph) -> X207Circle {
+    let mut c = circle(g);
+    c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Open;
+    for (&(d, k), &amount) in &g.obligations {
+        let e = c.epochs.get_mut(&1).unwrap();
+        e.edge_count += 1;
+        e.total_obligation += amount;
+        for (member, out, inn) in [(d, amount, 0), (k, 0, amount)] {
+            let key = (1, acc(member));
+            let is_new = c.totals.get(&key).is_none();
+            let mut totals = c.totals.get(&key).cloned().unwrap_or_else(ParticipantTotals::default);
+            totals.owed_out += out;
+            totals.owed_in += inn;
+            c.totals.insert(key, totals);
+            if is_new {
+                let e = c.epochs.get_mut(&1).unwrap();
+                e.participants.push(acc(member));
+                e.participant_count += 1;
+            }
+        }
+        let debt = c.outstanding_debt.get(&acc(d)).copied().unwrap_or(0);
+        c.outstanding_debt.insert(acc(d), debt + amount);
+    }
+    c
+}
+
+fn at(ns: u64, predecessor: &str) {
+    near_sdk::testing_env!(VMContextBuilder::new().predecessor_account_id(predecessor.parse().unwrap()).block_timestamp(ns).block_height(500).build());
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(CASES))]
+
+    // TC-CT-030-02 with the real steps: close, submit the valid proposal, commit. Every net position is the same
+    // before and after (I-08), the positions add up (I-09) and each pair keeps `obligation = cumulative - cleared`.
+    #[test]
+    fn net_positions_survive_the_real_commit(g in graph()) {
+        prop_assume!(!g.proposal.is_empty());
+        let mut c = circle_with_totals(&g);
+        let before_net = net(g.n, &g.obligations);
+        let cutoff = c.get_epoch(Some(1)).unwrap().cutoff_at.0;
+        at(cutoff, "keeper.near");
+        c.close_epoch(1);
+        let deadline = c.get_epoch(Some(1)).unwrap().proposal_deadline.unwrap().0;
+        at(cutoff + 1, "solver1.near");
+        c.submit_clearing(1, edges(&g.proposal));
+        at(deadline, "keeper.near");
+        c.commit_epoch(1);
+
+        let positions = c.list_positions(1, 0, 100);
+        let (mut due, mut claimable) = (0i128, 0i128);
+        for (i, expected) in before_net.iter().enumerate() {
+            let position = positions.iter().find(|p| p.account_id == acc(i));
+            let got = position.map_or(0, |p| p.net.0);
+            prop_assert_eq!(got, *expected, "member {}", i);
+            if got < 0 { due -= got } else { claimable += got }
+        }
+        prop_assert_eq!(due, claimable);
+        for (&(d, k), &o) in &g.obligations {
+            let pair = c.obligation(1, acc(d), acc(k)).unwrap();
+            prop_assert_eq!(pair.obligation.0, o - g.proposal.get(&(d, k)).copied().unwrap_or(0));
+        }
+    }
 
     // TC-CT-030-01
     #[test]
@@ -137,7 +199,8 @@ proptest! {
         prop_assert_eq!(r.edge_count as usize, g.proposal.len());
     }
 
-    // TC-CT-030-02 (arithmetic model of the apply step; the real commit step is a separate item): applying the proposal keeps every net position (I-08) and Σ due = Σ claimable (I-09).
+    // TC-CT-030-02, arithmetic part: applying the proposal keeps every net position (I-08) and Σ due = Σ claimable (I-09).
+    // The same property through the real `close_epoch`, `submit_clearing` and `commit_epoch` is `net_positions_survive_the_real_commit`.
     #[test]
     fn net_positions_survive_applying(g in graph()) {
         prop_assume!(!g.proposal.is_empty());
