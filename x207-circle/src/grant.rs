@@ -242,6 +242,15 @@ impl X207Circle {
         let entry = get_class(&input.asset_type).unwrap_or_else(|| env::panic_str(&format!("ERR_ASSET_TYPE_UNKNOWN: {}", input.asset_type)));
         require!(entry.class != AssetClass::X, format!("ERR_ASSET_CLASS_FORBIDDEN: {}", input.asset_type));
         require!(entry.delivery_methods.contains(&input.delivery_method), format!("ERR_DELIVERY_NOT_ALLOWED: {}", input.delivery_method));
+        // CT-072: a proof is a hash and a kind, both or none; the kind must be one the asset type accepts. The proof itself stays off-chain.
+        match (&input.proof_hash, &input.proof_kind) {
+            (None, None) => {}
+            (Some(hash), Some(kind)) => {
+                require!(is_hex64(hash), "ERR_BAD_GRANT: proof_hash must be 64 lowercase hex (sha256)");
+                require!(entry.accepted_proofs.contains(kind), format!("ERR_PROOF_KIND_NOT_ACCEPTED: {kind}"));
+            }
+            _ => env::panic_str("ERR_BAD_GRANT: proof_hash and proof_kind are given together or not at all"),
+        }
         require!(UNITS.contains(&input.unit.as_str()), format!("ERR_BAD_GRANT: unknown unit {}", input.unit));
         require!(input.unit_price.0 > 0, "ERR_BAD_GRANT: unit_price must be above 0");
         require!(input.limits.expires_at.0 > env::block_timestamp(), "ERR_BAD_GRANT: expires_at must be in the future");
