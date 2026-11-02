@@ -171,6 +171,32 @@ export function buildAdmitProposalArgs({ contract, account, description }) {
   };
 }
 
+export const SET_ASSET_CLASS_GAS = '30000000000000';
+const ASSET_CLASSES = ['A', 'B', 'C', 'D', 'X'];
+const PROOF_KINDS = ['rpc_access_key', 'tee_attestation', 'zktls'];
+
+/** Arguments of Sputnik `add_proposal`: one FunctionCall action to `set_asset_class({ asset_type, entry })` (CT-074, F8 D10). */
+export function buildAssetClassProposalArgs({ contract, assetType, assetClass, deliveryMethods = [], acceptedProofs = [], termsHash, description }) {
+  assertAccountId(contract);
+  if (!/^[a-z0-9._-]{1,64}:[a-z0-9._-]{1,64}$/.test(assetType ?? '')) throw new Error('asset type must look like <provider>:<kind>');
+  if (!ASSET_CLASSES.includes(assetClass)) throw new Error(`class must be one of ${ASSET_CLASSES.join(', ')}`);
+  for (const proof of acceptedProofs) if (!PROOF_KINDS.includes(proof)) throw new Error(`unknown proof kind ${proof}`);
+  if (!/^[0-9a-f]{64}$/.test(termsHash ?? '')) throw new Error('terms hash must be 64 lowercase hex characters');
+  const entry = { asset_type: assetType, class: assetClass, delivery_methods: deliveryMethods, accepted_proofs: acceptedProofs, terms_hash: termsHash };
+  const args = Buffer.from(JSON.stringify({ asset_type: assetType, entry })).toString('base64');
+  return {
+    proposal: {
+      description: description ?? `Register asset type ${assetType} as class ${assetClass} in the x207 circle`,
+      kind: {
+        FunctionCall: {
+          receiver_id: contract,
+          actions: [{ method_name: 'set_asset_class', args, deposit: '0', gas: SET_ASSET_CLASS_GAS }],
+        },
+      },
+    },
+  };
+}
+
 export function addProposalCommand({ dao, signer, network, addProposalArgs }) {
   assertAccountId(dao);
   assertAccountId(signer);

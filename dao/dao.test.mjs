@@ -170,3 +170,31 @@ test('propose-admit-member prints the add_proposal command and refuses a missing
   const bad = spawnSync('node', ['dao/propose-admit-member.mjs', '--dao', 'x207.sputnik-dao.testnet', '--contract', 'c.testnet', '--signer', 'a.testnet']);
   assert.notEqual(bad.status, 0);
 });
+
+// CT-074
+import { buildAssetClassProposalArgs } from './lib.mjs';
+
+test('asset class proposal: FunctionCall set_asset_class with asset_type and entry in base64 args', () => {
+  const termsHash = 'ab'.repeat(32);
+  const args = buildAssetClassProposalArgs({ contract: 'x207-circle.near', assetType: 'near-rpc:access', assetClass: 'B', deliveryMethods: ['near_access_key'], acceptedProofs: ['zktls'], termsHash });
+  const call = args.proposal.kind.FunctionCall;
+  assert.equal(call.receiver_id, 'x207-circle.near');
+  assert.equal(call.actions[0].method_name, 'set_asset_class');
+  assert.deepEqual(JSON.parse(Buffer.from(call.actions[0].args, 'base64').toString('utf8')), {
+    asset_type: 'near-rpc:access',
+    entry: { asset_type: 'near-rpc:access', class: 'B', delivery_methods: ['near_access_key'], accepted_proofs: ['zktls'], terms_hash: termsHash },
+  });
+  const base = { contract: 'x207-circle.near', assetType: 'a:b', assetClass: 'B', termsHash };
+  assert.throws(() => buildAssetClassProposalArgs({ ...base, assetType: 'nocolon' }), /<provider>:<kind>/);
+  assert.throws(() => buildAssetClassProposalArgs({ ...base, assetClass: 'Z' }), /class must be/);
+  assert.throws(() => buildAssetClassProposalArgs({ ...base, acceptedProofs: ['telepathy'] }), /unknown proof kind/);
+  assert.throws(() => buildAssetClassProposalArgs({ ...base, termsHash: 'AB' }), /terms hash/);
+});
+
+test('propose-asset-class prints the add_proposal command and refuses a missing class', () => {
+  const common = ['dao/propose-asset-class.mjs', '--dao', 'x207.sputnik-dao.testnet', '--contract', 'x207-circle.testnet', '--signer', 'a.testnet', '--asset-type', 'near-rpc:access', '--terms-hash', 'ab'.repeat(32)];
+  const out = execFileSync('node', [...common, '--class', 'B', '--delivery', 'near_access_key'], { encoding: 'utf8' });
+  assert.match(out, /add_proposal/);
+  assert.match(out, /set_asset_class|c2V0X2Fzc2V0X2NsYXNz|YXNzZXRfdHlwZ/);
+  assert.notEqual(spawnSync('node', common).status, 0);
+});

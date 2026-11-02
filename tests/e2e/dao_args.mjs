@@ -3,11 +3,13 @@
 //   node dao_args.mjs propose <contract> <params json>
 //   node dao_args.mjs act <id> <action>
 //   node dao_args.mjs admit <contract> <account>
-import { buildActProposalArgs, buildAddProposalArgs, buildAdmitProposalArgs, buildPolicy, parseParamsJson } from '../../dao/lib.mjs';
+//   node dao_args.mjs asset-class <contract> <asset type> <class> <terms hash>
+import { buildActProposalArgs, buildAddProposalArgs, buildAdmitProposalArgs, buildAssetClassProposalArgs, buildPolicy, parseParamsJson } from '../../dao/lib.mjs';
 
-const [kind, a, b] = process.argv.slice(2);
+const [kind, a, b, c, d] = process.argv.slice(2);
 if (kind === 'policy') console.log(JSON.stringify(buildPolicy(a.split(','))));
 else if (kind === 'propose') console.log(JSON.stringify(buildAddProposalArgs({ contract: a, params: parseParamsJson(b) })));
 else if (kind === 'act') console.log(JSON.stringify(buildActProposalArgs({ id: a, action: b })));
 else if (kind === 'admit') console.log(JSON.stringify(buildAdmitProposalArgs({ contract: a, account: b })));
+else if (kind === 'asset-class') console.log(JSON.stringify(buildAssetClassProposalArgs({ contract: a, assetType: b, assetClass: c, deliveryMethods: ['near_access_key'], acceptedProofs: ['rpc_access_key'], termsHash: d })));
 else throw new Error(`unknown kind ${kind}`);

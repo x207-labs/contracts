@@ -44,6 +44,12 @@ command, runs it, and confirms any mainnet run.
    node dao/propose-admit-member.mjs --dao x207.sputnik-dao.testnet --contract x207-circle.testnet --signer a.testnet --account newagent.testnet
    ```
 
+7. Register an asset type in the F8 registry (CT-074):
+
+   ```bash
+   node dao/propose-asset-class.mjs --dao x207.sputnik-dao.testnet --contract x207-circle.testnet --signer a.testnet --asset-type near-rpc:access --class B --delivery near_access_key --proofs rpc_access_key,zktls --terms-hash <64 lowercase hex>
+   ```
+
 Tests of the builders: `node --test dao/`.
 
 Not verified yet: the `act_proposal` arguments (`id`, `action`) follow `sputnikdao2` and may need the `proposal` field of newer DAO versions; the policy shape follows `sputnikdao2` and has not run against the factory wasm.

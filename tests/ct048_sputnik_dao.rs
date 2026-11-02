@@ -227,6 +227,27 @@ async fn proposal_admits_a_new_member() -> anyhow::Result<()> {
     Ok(())
 }
 
+// CT-074: a council proposal stores an entry of the F8 registry (D10) once enough members voted
+#[tokio::test]
+async fn proposal_registers_an_asset_class() -> anyhow::Result<()> {
+    let d = setup().await?;
+    let terms_hash = "ab".repeat(32);
+    let args = node(&["asset-class", d.f.circle.contract.id().as_str(), "near-rpc:access", "B", &terms_hash]);
+    let r = d.council[0].call(d.dao_id(), "add_proposal").args_json(args).deposit(NearToken::from_millinear(100)).gas(Gas::from_tgas(100)).transact().await?;
+    assert!(r.is_success(), "{:?}", failure_text(&r));
+    let id = r.json::<u64>()?;
+    assert_eq!(d.f.circle.view("get_asset_class", json!({"asset_type": "near-rpc:access"})).await?, Value::Null);
+    assert!(d.act(&d.council[0], id, "VoteApprove").await?.is_success());
+    let last = d.act(&d.council[1], id, "VoteApprove").await?;
+    assert!(last.is_success(), "{:?}", failure_text(&last));
+    assert_eq!(d.status(id).await?, "Approved");
+    assert!(events(&last).iter().any(|(n, data)| n == "asset_class_set" && data["asset_type"] == "near-rpc:access" && data["class"] == "B"));
+    let entry = d.f.circle.view("get_asset_class", json!({"asset_type": "near-rpc:access"})).await?;
+    assert_eq!(entry["terms_hash"], terms_hash.as_str());
+    assert_eq!(entry["delivery_methods"], json!(["near_access_key"]));
+    Ok(())
+}
+
 // CT-045 in the sandbox: the circle's owner is the DAO account, and the DAO policy built by `dao/lib.mjs` holds the
 // council and the one hour proposal period (ADR-25). Creating the DAO through the factory needs a transaction on a
 // real network and stays a human step.
