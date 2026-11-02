@@ -173,6 +173,64 @@ pub mod circle {
                 .await?)
         }
 
+        /// `register_in_bundle` for the next `seq` of the pair (CT-064).
+        pub async fn register_in_bundle(&mut self, bundle_id: u64, payer: &str, payee: &str, epoch: u64, cumulative: u128) -> anyhow::Result<ExecutionFinalResult> {
+            let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);
+            *seq += 1;
+            let seq = *seq;
+            let resource = "https://example.test/api";
+            let (circle, payer_id, payee_id) = (self.contract.id().to_string(), account_of(payer), account_of(payee));
+            let hash = signing_hash(&circle, &payer_id, &payee_id, epoch, seq, &cumulative.to_string(), resource);
+            let signature = format!("ed25519:{}", near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string());
+            let voucher = json!({
+                "circle": circle, "payer": payer_id, "payee": payee_id, "epoch": epoch, "seq": seq,
+                "cumulativeAmount": cumulative.to_string(), "unit": "credit", "resource": resource
+            });
+            Ok(self
+                .keeper
+                .call(self.contract.id(), "register_in_bundle")
+                .args_json(json!({"bundle_id": bundle_id, "voucher": voucher, "signature": signature}))
+                .gas(Gas::from_tgas(100))
+                .transact()
+                .await?)
+        }
+
+        /// Canonical terms of a bundle, its `terms_hash` and the signature of `signer` (sdk/spec/barter-format.md,
+        /// written byte by byte and independent of `bundle.rs`). Legs are `(payer, payee, max_amount)` by name.
+        pub fn bundle_terms(&self, epoch: u64, legs: &[(&str, &str, u128)]) -> (String, [u8; 32]) {
+            let circle = self.contract.id().to_string();
+            let mut named: Vec<(String, String, u128)> = legs.iter().map(|(a, b, m)| (account_of(a), account_of(b), *m)).collect();
+            named.sort_by(|x, y| (x.0.as_bytes(), x.1.as_bytes()).cmp(&(y.0.as_bytes(), y.1.as_bytes())));
+            let legs_json: Vec<String> = named.iter().map(|(a, b, m)| format!(r#"{{"payer":"{a}","payee":"{b}","max_amount":"{m}"}}"#)).collect();
+            let message = format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]}}"#, legs_json.join(","));
+            let hash: [u8; 32] = Sha256::digest(message.as_bytes()).into();
+            (message, hash)
+        }
+
+        pub fn sign_terms(&self, signer: &str, message: &str, terms_hash: [u8; 32]) -> String {
+            let circle = self.contract.id().to_string();
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&2_147_484_061u32.to_le_bytes());
+            payload.extend_from_slice(&(message.len() as u32).to_le_bytes());
+            payload.extend_from_slice(message.as_bytes());
+            payload.extend_from_slice(&terms_hash);
+            payload.extend_from_slice(&(circle.len() as u32).to_le_bytes());
+            payload.extend_from_slice(circle.as_bytes());
+            payload.push(0);
+            let digest: [u8; 32] = Sha256::digest(&payload).into();
+            format!("ed25519:{}", near_sdk::bs58::encode(self.keys[signer].sign(&digest).to_bytes()).into_string())
+        }
+
+        /// `commit_bundle` by the keeper with signatures from `signers` over the terms.
+        pub async fn commit_bundle(&self, epoch: u64, legs: &[(&str, &str, u128)], signers: &[&str]) -> anyhow::Result<ExecutionFinalResult> {
+            let (message, hash) = self.bundle_terms(epoch, legs);
+            let signatures: Vec<serde_json::Value> =
+                signers.iter().map(|s| json!({"account_id": account_of(s), "signature": self.sign_terms(s, &message, hash)})).collect();
+            let legs_json: Vec<serde_json::Value> =
+                legs.iter().map(|(a, b, m)| json!({"payer": account_of(a), "payee": account_of(b), "max_amount": m.to_string()})).collect();
+            self.call_keeper("commit_bundle", json!({"bundle": {"epoch": epoch, "legs": legs_json}, "signatures": signatures})).await
+        }
+
         /// The voucher public key of `name`, created on first use.
         pub fn key_for(&mut self, name: &str) -> String {
             let key = self.keys.entry(name.to_string()).or_insert_with(|| voucher_key(name));
