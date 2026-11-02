@@ -302,3 +302,229 @@ impl X207Circle {
 
 #[allow(dead_code)]
 fn _assert_borsh<T: BorshDeserialize>() {}
+
+#[cfg(test)]
+mod tests {
+    use near_sdk::json_types::{U128, U64};
+    use near_sdk::serde_json::{self, Value};
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::{test_vm_config, testing_env, PromiseResult, RuntimeFeesConfig};
+
+    use super::*;
+    use crate::grant::{AccessGrant, GrantLimits};
+    use crate::params::Params;
+
+    const CREDIT: u128 = 1_000_000;
+    const GRANT: GrantId = 7;
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    fn circle() -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
+        X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), 1_000)
+    }
+
+    /// The state that `complete_escrow` leaves after `register_with` for a new pair `bob -> alice` of `delta`, and the snapshot it keeps.
+    fn registered(c: &mut X207Circle, delta: u128) -> Snapshot {
+        let (payer, payee) = (acc("bob.near"), acc("alice.near"));
+        c.pairs.insert((1, payer.clone(), payee.clone()), PairState { cumulative: delta, last_seq: 1, cleared: 0 });
+        c.outstanding_debt.insert(payer.clone(), delta);
+        c.totals.insert((1, payer.clone()), ParticipantTotals { owed_out: delta, owed_in: 0 });
+        c.totals.insert((1, payee.clone()), ParticipantTotals { owed_out: 0, owed_in: delta });
+        let epoch = c.epochs.get_mut(&1).unwrap();
+        epoch.participants.push(payer.clone());
+        epoch.participants.push(payee.clone());
+        epoch.participant_count = 2;
+        epoch.total_obligation = delta;
+        epoch.edges.push((payer.clone(), payee.clone()));
+        epoch.edge_count = 1;
+        Snapshot { epoch: 1, payer, payee, pair_before: None, delta, payer_new: true, payee_new: true, seq: 1, cumulative: delta }
+    }
+
+    /// Everything `take_back` may touch, to compare before and after.
+    fn picture(c: &X207Circle) -> (Option<PairState>, u128, Option<ParticipantTotals>, Option<ParticipantTotals>, u32, u32, u128, usize, usize) {
+        let e = c.epochs.get(&1).unwrap();
+        (
+            c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).cloned(),
+            c.outstanding_debt.get(&acc("bob.near")).copied().unwrap_or(0),
+            c.totals.get(&(1, acc("bob.near"))).cloned(),
+            c.totals.get(&(1, acc("alice.near"))).cloned(),
+            e.participant_count,
+            e.edge_count,
+            e.total_obligation,
+            e.participants.len() as usize,
+            e.edges.len() as usize,
+        )
+    }
+
+    // TC-CT-075-U01: the baseline, so that the refusals below mean something
+    #[test]
+    fn take_back_undoes_a_registration_exactly() {
+        let mut c = circle();
+        let empty = picture(&c);
+        let snapshot = registered(&mut c, 10 * CREDIT);
+        assert_ne!(picture(&c), empty);
+        assert!(c.take_back(&snapshot));
+        assert_eq!(picture(&c), empty);
+    }
+
+    // TC-CT-075-U02: a payment on top of an earlier voucher of the pair returns to that voucher
+    #[test]
+    fn take_back_returns_the_pair_to_its_earlier_voucher() {
+        let mut c = circle();
+        let before = PairState { cumulative: 4 * CREDIT, last_seq: 1, cleared: 0 };
+        c.pairs.insert((1, acc("bob.near"), acc("alice.near")), before.clone());
+        c.outstanding_debt.insert(acc("bob.near"), 4 * CREDIT);
+        c.totals.insert((1, acc("bob.near")), ParticipantTotals { owed_out: 4 * CREDIT, owed_in: 0 });
+        c.totals.insert((1, acc("alice.near")), ParticipantTotals { owed_out: 0, owed_in: 4 * CREDIT });
+        // the escrow voucher raises the pair from 4 to 14
+        c.pairs.insert((1, acc("bob.near"), acc("alice.near")), PairState { cumulative: 14 * CREDIT, last_seq: 2, cleared: 0 });
+        c.outstanding_debt.insert(acc("bob.near"), 14 * CREDIT);
+        c.totals.insert((1, acc("bob.near")), ParticipantTotals { owed_out: 14 * CREDIT, owed_in: 0 });
+        c.totals.insert((1, acc("alice.near")), ParticipantTotals { owed_out: 0, owed_in: 14 * CREDIT });
+        let snapshot = Snapshot {
+            epoch: 1, payer: acc("bob.near"), payee: acc("alice.near"), pair_before: Some(before.clone()), delta: 10 * CREDIT,
+            payer_new: false, payee_new: false, seq: 2, cumulative: 14 * CREDIT,
+        };
+        assert!(c.take_back(&snapshot));
+        assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))), Some(&before));
+        assert_eq!(c.outstanding_debt.get(&acc("bob.near")), Some(&(4 * CREDIT)));
+        assert_eq!(c.totals.get(&(1, acc("bob.near"))), Some(&ParticipantTotals { owed_out: 4 * CREDIT, owed_in: 0 }));
+    }
+
+    // TC-CT-075-U03: the epoch is not `open` any more between the registration and the callback
+    #[test]
+    fn take_back_refuses_when_the_epoch_is_no_longer_open() {
+        let mut c = circle();
+        let snapshot = registered(&mut c, 10 * CREDIT);
+        c.epochs.get_mut(&1).unwrap().start_clearing(3_600_000_001_000);
+        let before = picture(&c);
+        assert!(!c.take_back(&snapshot));
+        assert_eq!(picture(&c), before, "nothing may change when the take back is refused");
+    }
+
+    // TC-CT-075-U04: the pair moved on (another voucher raised it)
+    #[test]
+    fn take_back_refuses_when_the_pair_changed() {
+        for (seq, cumulative) in [(2, 10 * CREDIT), (1, 12 * CREDIT), (3, 25 * CREDIT)] {
+            let mut c = circle();
+            let snapshot = registered(&mut c, 10 * CREDIT);
+            c.pairs.insert((1, acc("bob.near"), acc("alice.near")), PairState { cumulative, last_seq: seq, cleared: 0 });
+            let before = picture(&c);
+            assert!(!c.take_back(&snapshot), "seq {seq} cumulative {cumulative}");
+            assert_eq!(picture(&c), before);
+        }
+        // the pair vanished altogether
+        let mut c = circle();
+        let snapshot = registered(&mut c, 10 * CREDIT);
+        c.pairs.remove(&(1, acc("bob.near"), acc("alice.near")));
+        assert!(!c.take_back(&snapshot));
+    }
+
+    // TC-CT-075-U05: the debt of the payer fell below the delta (cleared or paid in between)
+    #[test]
+    fn take_back_refuses_when_the_debt_of_the_payer_is_lower_than_the_delta() {
+        let mut c = circle();
+        let snapshot = registered(&mut c, 10 * CREDIT);
+        c.outstanding_debt.insert(acc("bob.near"), 10 * CREDIT - 1);
+        let before = picture(&c);
+        assert!(!c.take_back(&snapshot));
+        assert_eq!(picture(&c), before);
+        c.outstanding_debt.remove(&acc("bob.near"));
+        assert!(!c.take_back(&snapshot), "no debt at all");
+    }
+
+    fn grant_offered() -> AccessGrant {
+        AccessGrant {
+            grant_id: GRANT, asset_type: "nft:ticket".into(), grantor: acc("alice.near"), grantee: None, class: AssetClass::A,
+            limits: GrantLimits { scope: "{}".into(), quota: None, expires_at: U64(9_000_000_000_000) }, unit: "once".into(), unit_price: U128(10 * CREDIT),
+            operator: None, delivery_pubkey: None, status: GrantStatus::Offered, proof_hash: None, proof_kind: None,
+        }
+    }
+
+    /// `complete_escrow` has run: state `Completing`, the voucher registered, the pair locked, the grant still `offered`.
+    fn completing(c: &mut X207Circle) -> Snapshot {
+        let snapshot = registered(c, 10 * CREDIT);
+        crate::grant::store_grant_for_test(&grant_offered());
+        env::storage_write(&lock_key(1, &snapshot.payer, &snapshot.payee), &[1]);
+        save(GRANT, Escrow {
+            nft_contract: acc("nft.near"), token_id: "t1".into(), state: EscrowState::Completing, buyer: Some(acc("bob.near")), snapshot: Some(snapshot.clone()),
+        });
+        snapshot
+    }
+
+    fn callback(c: &mut X207Circle, result: PromiseResult) {
+        testing_env!(
+            VMContextBuilder::new().current_account_id(acc("circle.near")).predecessor_account_id(acc("circle.near")).block_timestamp(5_000).build(),
+            test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![result]
+        );
+        c.on_escrow_resolved(GRANT, EscrowStep::Complete);
+    }
+
+    fn failed_event() -> Value {
+        let log = get_logs().into_iter().find(|l| l.contains("escrow_failed")).expect("escrow_failed event");
+        serde_json::from_str::<Value>(log.strip_prefix("EVENT_JSON:").unwrap()).unwrap()["data"][0].clone()
+    }
+
+    // TC-CT-075-U06: a failed transfer that cannot be taken back leaves the escrow `stuck`, the payment in place and the NFT in the circle
+    #[test]
+    fn a_failed_transfer_that_cannot_be_taken_back_leaves_the_escrow_stuck() {
+        for breakage in ["epoch", "pair", "debt"] {
+            let mut c = circle();
+            completing(&mut c);
+            match breakage {
+                "epoch" => c.epochs.get_mut(&1).unwrap().start_clearing(3_600_000_001_000),
+                "pair" => {
+                    c.pairs.insert((1, acc("bob.near"), acc("alice.near")), PairState { cumulative: 12 * CREDIT, last_seq: 2, cleared: 0 });
+                }
+                _ => {
+                    c.outstanding_debt.insert(acc("bob.near"), 1);
+                }
+            }
+            let before = picture(&c);
+            callback(&mut c, PromiseResult::Failed);
+            let escrow = load_escrow(GRANT).unwrap();
+            assert_eq!(escrow.state, EscrowState::Stuck, "{breakage}");
+            assert_eq!(escrow.buyer, None, "{breakage}");
+            assert!(escrow.snapshot.is_none(), "{breakage}");
+            // the registration stays, the lock is gone, the grant is still offered and the asset is still held
+            assert_eq!(picture(&c), before, "{breakage}");
+            assert!(!pair_locked(1, &acc("bob.near"), &acc("alice.near")), "{breakage}");
+            assert_eq!(load_grant(GRANT).status, GrantStatus::Offered, "{breakage}");
+            assert!(holds_asset(GRANT), "{breakage}: a stuck escrow still blocks revoke_grant");
+            let event = failed_event();
+            assert_eq!((event["reverted"].clone(), event["delta"].as_str(), event["step"].as_str()), (Value::Bool(false), Some("0"), Some("complete")), "{breakage}");
+        }
+    }
+
+    // TC-CT-075-U07: the same failed transfer with nothing in the way goes back to `held` and the registration is gone
+    #[test]
+    fn a_failed_transfer_that_can_be_taken_back_returns_the_escrow_to_held() {
+        let mut c = circle();
+        completing(&mut c);
+        callback(&mut c, PromiseResult::Failed);
+        let escrow = load_escrow(GRANT).unwrap();
+        assert_eq!((escrow.state, escrow.buyer), (EscrowState::Held, None));
+        assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))), None);
+        assert_eq!(c.outstanding_debt.get(&acc("bob.near")), Some(&0));
+        let event = failed_event();
+        assert_eq!((event["reverted"].clone(), event["delta"].as_str()), (Value::Bool(true), Some("10000000")));
+    }
+
+    // TC-CT-075-U08: a delivered NFT activates the grant for the buyer and releases the lock
+    #[test]
+    fn a_delivered_nft_activates_the_grant_and_releases_the_pair() {
+        let mut c = circle();
+        completing(&mut c);
+        callback(&mut c, PromiseResult::Successful(vec![]));
+        let escrow = load_escrow(GRANT).unwrap();
+        assert_eq!(escrow.state, EscrowState::Delivered);
+        assert!(!pair_locked(1, &acc("bob.near"), &acc("alice.near")));
+        let grant = load_grant(GRANT);
+        assert_eq!((grant.status, grant.grantee), (GrantStatus::Active, Some(acc("bob.near"))));
+        assert!(!holds_asset(GRANT));
+        assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).map(|p| p.cumulative), Some(10 * CREDIT));
+    }
+}

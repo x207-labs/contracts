@@ -159,6 +159,14 @@ fn grant_counts() -> LookupMap<AccountId, u32> {
     LookupMap::new(StorageKey::GrantCounts)
 }
 
+/// Unit tests of the escrow need a grant in storage without going through `offer_grant`.
+#[cfg(test)]
+pub(crate) fn store_grant_for_test(grant: &AccessGrant) {
+    let mut map = grants();
+    map.insert(grant.grant_id, grant.clone());
+    map.flush();
+}
+
 pub fn load_grant(grant_id: GrantId) -> AccessGrant {
     grants().get(&grant_id).cloned().unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_GRANT: {grant_id}")))
 }
