@@ -189,6 +189,34 @@
       },
       {
         "kind": "view",
+        "name": "get_asset_class",
+        "params": {
+          "args": [
+            {
+              "name": "asset_type",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AssetClassEntry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_bundle",
         "params": {
           "args": [
@@ -504,6 +532,40 @@
           "serialization_type": "json",
           "type_schema": {
             "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "list_asset_classes",
+        "params": {
+          "args": [
+            {
+              "name": "from_index",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "items": {
+              "$ref": "#/definitions/AssetClassEntry"
+            },
+            "type": "array"
           }
         }
       },
@@ -1041,6 +1103,27 @@
       },
       {
         "kind": "call",
+        "name": "set_asset_class",
+        "params": {
+          "args": [
+            {
+              "name": "asset_type",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "entry",
+              "type_schema": {
+                "$ref": "#/definitions/AssetClassEntry"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "set_params",
         "params": {
           "args": [
@@ -1162,6 +1245,49 @@
             "dao"
           ],
           "type": "string"
+        },
+        "AssetClass": {
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "X"
+          ],
+          "type": "string"
+        },
+        "AssetClassEntry": {
+          "properties": {
+            "accepted_proofs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "asset_type": {
+              "type": "string"
+            },
+            "class": {
+              "$ref": "#/definitions/AssetClass"
+            },
+            "delivery_methods": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "terms_hash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "accepted_proofs",
+            "asset_type",
+            "class",
+            "delivery_methods",
+            "terms_hash"
+          ],
+          "type": "object"
         },
         "BundleInput": {
           "properties": {
@@ -2192,6 +2318,13 @@
     },
     {
       "fields": [
+        "asset_type",
+        "class"
+      ],
+      "name": "asset_class_set"
+    },
+    {
+      "fields": [
         "bundle_id",
         "terms_hash",
         "epoch",
@@ -2206,10 +2339,10 @@
       "name": "bundle_committed"
     }
   ],
-  "interface_version": "0.0.5",
+  "interface_version": "0.0.6",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.5"
+    "version": "0.0.6"
   },
   "schema_version": "0.4.0"
 }

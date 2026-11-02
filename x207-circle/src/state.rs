@@ -53,6 +53,8 @@ pub enum StorageKey {
     Bundles = b'b',
     /// D8 `(EpochId, AccountId) -> reserved headroom` (P2).
     BundleReserves = b'r',
+    /// D10 `asset_type -> AssetClassEntry` (F8).
+    AssetClasses = b'a',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).
