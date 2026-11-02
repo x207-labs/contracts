@@ -61,6 +61,8 @@ pub enum StorageKey {
     GrantsBy = b'G',
     /// D11 `AccountId -> open grants as grantor` (F8).
     GrantCounts = b'k',
+    /// D11 class A: `GrantId -> Escrow` (CT-075).
+    Escrows = b'e',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).

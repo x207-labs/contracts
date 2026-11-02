@@ -8,6 +8,7 @@ pub mod canonical;
 pub mod clearing;
 pub mod commit;
 pub mod config;
+pub mod escrow;
 pub mod events;
 pub mod grant;
 pub mod member;
@@ -26,4 +27,4 @@ pub mod voucher;
 pub use state::X207Circle;
 
 /// Interface version; same value as the `version` field of every event (spec section 1).
-pub const INTERFACE_VERSION: &str = "0.0.6";
+pub const INTERFACE_VERSION: &str = "0.0.7";

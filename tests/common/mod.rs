@@ -173,6 +173,22 @@ pub mod circle {
                 .await?)
         }
 
+        /// A voucher of the next `seq` of the pair and its signature, for methods that take them as arguments (CT-075).
+        pub fn next_voucher(&mut self, payer: &str, payee: &str, epoch: u64, cumulative: u128) -> (Value, String) {
+            let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);
+            *seq += 1;
+            let seq = *seq;
+            let resource = "https://example.test/api";
+            let (circle, payer_id, payee_id) = (self.contract.id().to_string(), account_of(payer), account_of(payee));
+            let hash = signing_hash(&circle, &payer_id, &payee_id, epoch, seq, &cumulative.to_string(), resource);
+            let signature = format!("ed25519:{}", near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string());
+            let voucher = json!({
+                "circle": circle, "payer": payer_id, "payee": payee_id, "epoch": epoch, "seq": seq,
+                "cumulativeAmount": cumulative.to_string(), "unit": "credit", "resource": resource
+            });
+            (voucher, signature)
+        }
+
         /// `register_in_bundle` for the next `seq` of the pair (CT-064).
         pub async fn register_in_bundle(&mut self, bundle_id: u64, payer: &str, payee: &str, epoch: u64, cumulative: u128) -> anyhow::Result<ExecutionFinalResult> {
             let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);

@@ -1,0 +1,12 @@
+# NEP-171 mock for sandbox tests of the class A escrow (CT-075). Never deployed outside near-sandbox.
+[package]
+name = "mock-nft"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.29.1"

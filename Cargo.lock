@@ -1835,6 +1835,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-nft"
+version = "0.0.0"
+dependencies = [
+ "near-sdk",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4471,7 +4478,7 @@ dependencies = [
 
 [[package]]
 name = "x207-circle"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "anyhow",
  "ed25519-dalek",

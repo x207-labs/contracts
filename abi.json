@@ -54,6 +54,29 @@
       },
       {
         "kind": "call",
+        "name": "cancel_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "modifiers": [
           "payable"
         ],
@@ -161,6 +184,41 @@
             }
           ],
           "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "complete_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "voucher",
+              "type_schema": {
+                "$ref": "#/definitions/Voucher"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
         }
       },
       {
@@ -336,6 +394,36 @@
             "anyOf": [
               {
                 "$ref": "#/definitions/EpochView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/EscrowView"
               },
               {
                 "type": "null"
@@ -895,6 +983,45 @@
         }
       },
       {
+        "kind": "call",
+        "name": "nft_on_transfer",
+        "params": {
+          "args": [
+            {
+              "name": "sender_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "previous_owner_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "token_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "msg",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueBoolean"
+          }
+        }
+      },
+      {
         "kind": "view",
         "name": "obligation",
         "params": {
@@ -1001,6 +1128,32 @@
           "type_schema": {
             "type": "string"
           }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "name": "on_escrow_resolved",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "step",
+              "type_schema": {
+                "$ref": "#/definitions/EscrowStep"
+              }
+            }
+          ],
+          "serialization_type": "json"
         }
       },
       {
@@ -1833,6 +1986,84 @@
           ],
           "type": "object"
         },
+        "EscrowState": {
+          "oneOf": [
+            {
+              "enum": [
+                "held"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "completing"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "cancelling"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "delivered"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "stuck"
+              ],
+              "type": "string"
+            }
+          ]
+        },
+        "EscrowStep": {
+          "enum": [
+            "complete",
+            "cancel"
+          ],
+          "type": "string"
+        },
+        "EscrowView": {
+          "properties": {
+            "buyer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "grant_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "nft_contract": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/EscrowState"
+            },
+            "token_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "grant_id",
+            "nft_contract",
+            "state",
+            "token_id"
+          ],
+          "type": "object"
+        },
         "Fees": {
           "properties": {
             "clearing_fee_bps": {
@@ -2647,6 +2878,26 @@
     },
     {
       "fields": [
+        "grant_id",
+        "nft_contract",
+        "token_id"
+      ],
+      "name": "escrow_held"
+    },
+    {
+      "fields": [
+        "grant_id",
+        "step",
+        "epoch",
+        "payer",
+        "payee",
+        "delta",
+        "reverted"
+      ],
+      "name": "escrow_failed"
+    },
+    {
+      "fields": [
         "bundle_id",
         "terms_hash",
         "epoch",
@@ -2661,10 +2912,10 @@
       "name": "bundle_committed"
     }
   ],
-  "interface_version": "0.0.6",
+  "interface_version": "0.0.7",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.6"
+    "version": "0.0.7"
   },
   "schema_version": "0.4.0"
 }

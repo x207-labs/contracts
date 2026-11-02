@@ -154,6 +154,7 @@ impl X207Circle {
         let (limit, pubkey) = (payer.limit, payer.pubkey_voucher.clone());
         // 9-10
         let key = (epoch_id, voucher.payer.clone(), voucher.payee.clone());
+        require!(!crate::escrow::pair_locked(epoch_id, &voucher.payer, &voucher.payee), "ERR_ESCROW_PENDING: an escrow payment of this pair is in flight");
         let pair = self.pairs.get(&key).cloned();
         let is_new_pair = pair.is_none();
         let pair = pair.unwrap_or_default();

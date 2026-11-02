@@ -120,6 +120,31 @@ pub struct AccessGrant {
     pub proof_kind: Option<String>,
 }
 
+/// Class A (CT-075): the grant becomes `active` for `grantee` when the escrow delivered the asset.
+pub fn activate(grant: &mut AccessGrant, grantee: AccountId, delivery_pubkey: Option<PublicKey>) {
+    grant.status = GrantStatus::Active;
+    grant.grantee = Some(grantee.clone());
+    grant.delivery_pubkey = delivery_pubkey;
+    let id = grant.grant_id;
+    let mut map = grants();
+    map.insert(id, grant.clone());
+    map.flush();
+    index(1, &grantee, id);
+}
+
+/// Class A (CT-075): final status for a grant whose escrow ended; frees a slot of the grantor.
+pub fn close(grant: &mut AccessGrant, status: GrantStatus) {
+    grant.status = status;
+    let (id, grantor) = (grant.grant_id, grant.grantor.clone());
+    let mut map = grants();
+    map.insert(id, grant.clone());
+    map.flush();
+    let mut counts = grant_counts();
+    let open = counts.get(&grantor).copied().unwrap_or(1);
+    counts.insert(grantor, open.saturating_sub(1));
+    counts.flush();
+}
+
 fn grants() -> LookupMap<GrantId, AccessGrant> {
     LookupMap::new(StorageKey::Grants)
 }
@@ -309,6 +334,7 @@ impl X207Circle {
         let caller = self.assert_active_caller();
         require!(caller != grant.grantor, format!("ERR_GRANT_SELF: {caller}"));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        require!(grant.class != AssetClass::A, "ERR_GRANT_NOT_OFFERED: a class A grant is bought with complete_escrow");
         require!(env::block_timestamp() < grant.limits.expires_at.0, format!("ERR_GRANT_EXPIRED: expires_at {}", grant.limits.expires_at.0));
         grant.status = GrantStatus::Active;
         grant.grantee = Some(caller.clone());
@@ -328,6 +354,7 @@ impl X207Circle {
         let mut grant = load_grant(grant_id);
         require!(matches!(grant.status, GrantStatus::Offered | GrantStatus::Active), format!("ERR_GRANT_FINAL: {:?}", grant.status));
         let caller = env::predecessor_account_id();
+        require!(!crate::escrow::holds_asset(grant_id), format!("ERR_GRANT_REVOKE_DENIED: the escrow of grant {grant_id} holds an asset, use cancel_escrow"));
         let (allowed, status) = match reason {
             RevokeReason::Grantor => (caller == grant.grantor, GrantStatus::Revoked),
             RevokeReason::Grantee => (grant.grantee.as_ref() == Some(&caller), GrantStatus::Revoked),
