@@ -1,7 +1,9 @@
 //! `commit_epoch` (CT-028, spec 4.4): applies the stored proposal to D2, writes the D5 positions,
 //! sets the payment deadline, and emits `clearing_applied` and `epoch_committed`.
 //!
-//! Fees (P1, CT-051/052) are not charged here yet: `clearing_fee` and `solver_fee` are `"0"`.
+//! Fees (P1, CT-051/052, spec 4.4 step 4): `clearing_fee_bps` and `solver_fee_bps` of the epoch snapshot are
+//! charged on `cleared_total`, pro rata to each debtor's cleared amount, out of its stake. The clearing part goes
+//! to the reserve and the solver part to the balance of the winning solver. Both default to 0.
 //! Event logs: near caps the total log length of one call at 16 KiB, so a commit with more than
 //! about 60 edges at 64-character accounts does not fit the chunked events; see the CT-004 note.
 
@@ -17,7 +19,66 @@ fn checked_signed(value: u128) -> i128 {
     i128::try_from(value).unwrap_or_else(|_| env::panic_str("ERR_D2_ACCOUNTING: amount exceeds i128"))
 }
 
+/// Splits `fee_total` over the debtors of `edges` pro rata to their cleared amount: floor shares, then the
+/// leftover units one by one in account order. Returns `(account, share)` for every debtor with a share.
+pub fn pro_rata_fee(edges: &[ClearingEdge], cleared_total: u128, fee_total: u128) -> Vec<(AccountId, u128)> {
+    if fee_total == 0 || cleared_total == 0 {
+        return vec![];
+    }
+    let mut out: std::collections::BTreeMap<AccountId, u128> = std::collections::BTreeMap::new();
+    for edge in edges {
+        *out.entry(edge.debtor.clone()).or_default() += edge.cleared.0;
+    }
+    let mut shares: Vec<(AccountId, u128)> = out
+        .into_iter()
+        .map(|(account, cleared)| {
+            let product = fee_total.checked_mul(cleared).unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: fee share overflows u128"));
+            let share = product / cleared_total;
+            (account, share)
+        })
+        .collect();
+    let mut leftover = fee_total - shares.iter().map(|(_, s)| s).sum::<u128>();
+    for (_, share) in shares.iter_mut() {
+        if leftover == 0 {
+            break;
+        }
+        *share += 1;
+        leftover -= 1;
+    }
+    shares.retain(|(_, s)| *s > 0);
+    shares
+}
+
 impl X207Circle {
+    /// Charges the P1 fees of `epoch` from the stake of the debtors (what a stake cannot cover is not charged) and
+    /// credits the reserve and `solver`. Returns `(clearing_fee, solver_fee)` actually collected.
+    fn charge_fees(&mut self, epoch: EpochId, solver: &Option<AccountId>, cleared_total: u128, edges: &[ClearingEdge]) -> (u128, u128) {
+        let fees = self.epoch_or_panic(epoch).params.fees.clone();
+        let (clearing_bps, solver_bps) = (u128::from(fees.clearing_fee_bps), u128::from(fees.solver_fee_bps));
+        let Some(solver) = solver else { return (0, 0) };
+        if cleared_total == 0 || (clearing_bps == 0 && solver_bps == 0) {
+            return (0, 0);
+        }
+        let clearing_fee = cleared_total.saturating_mul(clearing_bps) / 10_000;
+        let solver_fee = cleared_total.saturating_mul(solver_bps) / 10_000;
+        let mut charged = 0u128;
+        for (account, share) in pro_rata_fee(edges, cleared_total, clearing_fee + solver_fee) {
+            let member = self.members.get_mut(&account).expect("a debtor of a cleared edge is a member");
+            let take = share.min(member.stake);
+            member.stake -= take;
+            member.limit = member.limit.min(member.stake);
+            charged += take;
+        }
+        let to_reserve = clearing_fee.min(charged);
+        let to_solver = charged - to_reserve;
+        self.d6_stake_to_fees(to_reserve, to_solver);
+        if to_solver > 0 {
+            let balance = self.solver_fees.get(solver).copied().unwrap_or(0);
+            self.solver_fees.insert(solver.clone(), balance + to_solver);
+        }
+        (to_reserve, to_solver)
+    }
+
     /// Applies the stored proposal of `epoch` to the pair map and marks it committed with its
     /// edges dropped. Returns the solver, `cleared_total`, and the edges that were applied.
     fn apply_proposal(&mut self, epoch: EpochId) -> (Option<AccountId>, u128, Vec<ClearingEdge>) {
@@ -44,6 +105,7 @@ impl X207Circle {
         self.epoch_mut_or_panic(epoch).start_payment_window(now);
 
         let (solver, cleared_total, edges) = self.apply_proposal(epoch);
+        let (clearing_fee, solver_fee) = self.charge_fees(epoch, &solver, cleared_total, &edges);
         let e = self.epoch_or_panic(epoch);
         let payment_deadline = e.payment_deadline.expect("payment_window epoch has payment_deadline");
         let committed_at = e.committed_at.expect("committed epoch has committed_at");
@@ -105,7 +167,7 @@ impl X207Circle {
         assert_eq!(total_due, total_claimable, "I-09: sum of due must equal sum of claimable");
         self.epoch_mut_or_panic(epoch).total_cleared = cleared_total;
 
-        emit_clearing_applied(epoch, solver, U128(cleared_total), &edges, U128(0), U128(0));
+        emit_clearing_applied(epoch, solver, U128(cleared_total), &edges, U128(clearing_fee), U128(solver_fee));
         emit_chunked(&entries, |positions, chunk, chunks| EpochCommitted {
             epoch,
             committed_at: U64(committed_at),
@@ -488,5 +550,76 @@ mod tests {
         let mut c = closed(c, Some(p_s1()));
         c.commit_epoch(1);
         assert_eq!(c.get_epoch(Some(1)).unwrap().payment_deadline.unwrap().0, T_PROP + 1800 * SEC);
+    }
+
+    fn s1_with_fees(clearing_bps: u16, solver_bps: u16, stake: u128) -> X207Circle {
+        let mut c = s1();
+        for name in ["scraper.near", "gpu.near", "translator.near"] {
+            let mut m = member(name);
+            m.stake = stake;
+            m.limit = stake.min(80 * CREDIT);
+            c.members.insert(acc(name), m);
+            c.member_index.push(acc(name));
+        }
+        c.total_stake = 3 * stake;
+        let fees = &mut c.epochs.get_mut(&1).unwrap().params.fees;
+        fees.clearing_fee_bps = clearing_bps;
+        fees.solver_fee_bps = solver_bps;
+        closed(c, Some(p_s1()))
+    }
+
+    // CT-051, CT-052: fees come out of the stake of the debtors of cleared edges, pro rata, and move to the reserve
+    // and to the winning solver; D6 stays balanced
+    #[test]
+    fn ct_051_052_fees_move_stake_to_reserve_and_solver() {
+        let mut c = s1_with_fees(100, 50, 100 * CREDIT);
+        let before = c.accounted();
+        let _ = get_logs();
+        c.commit_epoch(1);
+        // cleared_total 75: clearing 0.75, solver 0.375, three debtors of 25 each pay a third of 1.125
+        assert_eq!((c.reserve, c.solver_fees_total), (750_000, 375_000));
+        assert_eq!(c.solver_fees.get(&acc("solver1.near")).copied(), Some(375_000));
+        for name in ["scraper.near", "gpu.near", "translator.near"] {
+            assert_eq!(c.members.get(&acc(name)).unwrap().stake, 100 * CREDIT - 375_000, "{name}");
+        }
+        assert_eq!(c.total_stake, 3 * (100 * CREDIT - 375_000));
+        assert_eq!(c.accounted(), before, "I-04: stake plus reserve plus solver fees is unchanged");
+        let applied = log_events().into_iter().find(|e| e["event"] == "clearing_applied").unwrap();
+        assert_eq!((applied["data"][0]["clearing_fee"].as_str(), applied["data"][0]["solver_fee"].as_str()), (Some("750000"), Some("375000")));
+    }
+
+    // CT-051: default fees 0 charge nothing
+    #[test]
+    fn ct_051_default_fees_charge_nothing() {
+        let mut c = s1_with_fees(0, 0, 100 * CREDIT);
+        c.commit_epoch(1);
+        assert_eq!((c.reserve, c.solver_fees_total, c.total_stake), (0, 0, 300 * CREDIT));
+        assert_eq!(c.solver_fees.get(&acc("solver1.near")), None);
+    }
+
+    // CT-051: a stake that cannot cover its share pays what it has, and the limit is clamped to the stake (I-01)
+    #[test]
+    fn ct_051_stake_below_the_share_pays_what_it_has() {
+        let mut c = s1_with_fees(100, 0, 100_000);
+        let before = c.accounted();
+        c.commit_epoch(1);
+        // share per debtor is 250_000 but the stake is 100_000
+        assert_eq!(c.reserve, 300_000);
+        for name in ["scraper.near", "gpu.near", "translator.near"] {
+            let m = c.members.get(&acc(name)).unwrap();
+            assert_eq!((m.stake, m.limit), (0, 0), "{name}");
+        }
+        assert_eq!(c.accounted(), before);
+    }
+
+    #[test]
+    fn ct_051_pro_rata_fee_hands_out_every_unit() {
+        let edges = vec![edge("a.near", "b.near", 10), edge("b.near", "c.near", 10), edge("c.near", "a.near", 10)];
+        let shares = pro_rata_fee(&edges, 30, 10);
+        assert_eq!(shares.iter().map(|(_, s)| s).sum::<u128>(), 10);
+        assert_eq!(shares.iter().map(|(_, s)| *s).collect::<Vec<_>>(), vec![4, 3, 3]);
+        assert!(pro_rata_fee(&edges, 30, 0).is_empty());
+        let skew = vec![edge("a.near", "b.near", 90), edge("b.near", "a.near", 10)];
+        assert_eq!(pro_rata_fee(&skew, 100, 7), vec![(acc("a.near"), 7)], "floor shares 6 and 0, the leftover unit goes to the first account");
     }
 }

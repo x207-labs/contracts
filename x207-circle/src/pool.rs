@@ -92,6 +92,14 @@ impl X207Circle {
         self.pool_up(epoch, amount);
     }
 
+    /// `commit_epoch` fees (CT-051, CT-052): stake of the debtors moves to the reserve and to the solver fee
+    /// balances. The caller updates `Member.stake` and the solver's balance in `solver_fees`.
+    pub fn d6_stake_to_fees(&mut self, to_reserve: u128, to_solver: u128) {
+        self.total_stake = sub(self.total_stake, add(to_reserve, to_solver));
+        self.reserve = add(self.reserve, to_reserve);
+        self.solver_fees_total = add(self.solver_fees_total, to_solver);
+    }
+
     /// `claim`: pool of `epoch` goes in flight until the callback.
     pub fn d6_pool_to_in_flight(&mut self, epoch: EpochId, amount: u128) {
         self.pool_down(epoch, amount);
