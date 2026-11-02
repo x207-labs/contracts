@@ -206,3 +206,39 @@ async fn six_agents_three_transfers() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+// TC-BE-029-07: a settle payment below `due` is refunded in full by the contract (`ERR_UNDERPAYMENT`) and D9 keeps the
+// debtor at `due`: no `residual_paid`, the 207 report says 402.
+#[tokio::test]
+async fn underpayment_is_refunded_and_d9_stays_due() -> anyhow::Result<()> {
+    if !Path::new(BACKEND).exists() {
+        eprintln!("skipped: {BACKEND} not found (build the backend with `npm run build`)");
+        return Ok(());
+    }
+    let names = ["scraper", "gpu", "translator"];
+    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    f.circle.max_jump = 25;
+    let start_block = f.circle.worker.view_block().await?.height();
+    let rpc = format!("http://{}", f.circle.worker.rpc_addr().trim_start_matches("http://"));
+    let accounts: Vec<String> = names.iter().map(|n| account_of(n)).collect();
+    let db_dir = std::env::temp_dir().join(format!("x207-be029-{}", std::process::id()));
+    std::fs::create_dir_all(&db_dir)?;
+    let indexer = spawn_indexer(&rpc, f.circle.contract.id().as_str(), start_block, &db_dir.join("d9.sqlite"), &accounts)?;
+
+    let f = s1_committed_on(f).await?;
+    let before = usdt(&f, "scraper").await?;
+    let scraper = f.accounts["scraper"].clone();
+    let short = f.transfer_call(&f.usdt, &scraper, 30 * CREDIT, r#"{"action":"settle","epoch":1}"#).await?;
+    let _ = short; // the token call itself may succeed; what counts is the refund and the state
+    assert_eq!(usdt(&f, "scraper").await?, before, "the whole 30 is refunded");
+    f.circle.worker.fast_forward(10).await?;
+    let out = stop(indexer).await?;
+    let _ = std::fs::remove_dir_all(&db_dir);
+
+    let names_seen: Vec<&str> = out["eventNames"].as_array().unwrap().iter().map(|e| e.as_str().unwrap()).collect();
+    assert!(!names_seen.contains(&"residual_paid"), "{names_seen:?}");
+    let rows = out["report"]["1"]["body"]["members"].as_array().unwrap();
+    let scraper_row = rows.iter().find(|m| m["account"] == account_of("scraper").as_str()).unwrap();
+    assert_eq!((scraper_row["status"].as_u64(), scraper_row["settlement"].as_str(), scraper_row["amount"].as_str()), (Some(402), Some("due"), Some("35000000")));
+    Ok(())
+}
