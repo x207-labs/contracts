@@ -125,7 +125,9 @@ fn no_method_moves_d6_or_replaces_the_owner() {
         }
         assert!(!denied.iter().any(|d| name.contains(d)), "method {name} looks like an owner D6 or owner-change path");
         if !init {
-            assert!(!arg_names(&function).iter().any(|a| a.contains("owner")), "{name} takes an owner argument");
+            // `previous_owner_id` of the NEP-171 receiver `nft_on_transfer` (CT-075) is the account that sent the token, not an owner of the circle
+            let own = |a: &String| a.contains("owner") && !(name == "nft_on_transfer" && a == "previous_owner_id");
+            assert!(!arg_names(&function).iter().any(own), "{name} takes an owner argument");
         }
     }
 }
