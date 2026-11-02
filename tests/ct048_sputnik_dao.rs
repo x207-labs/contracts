@@ -226,3 +226,21 @@ async fn proposal_admits_a_new_member() -> anyhow::Result<()> {
     assert_eq!(d.f.member("newbie").await?["status"], "active");
     Ok(())
 }
+
+// CT-045 in the sandbox: the circle's owner is the DAO account, and the DAO policy built by `dao/lib.mjs` holds the
+// council and the one hour proposal period (ADR-25). Creating the DAO through the factory needs a transaction on a
+// real network and stays a human step.
+#[tokio::test]
+async fn owner_is_the_dao_with_the_demo_policy() -> anyhow::Result<()> {
+    let d = setup().await?;
+    assert_eq!(d.f.circle.view("get_owner", json!({})).await?, d.dao_id().as_str());
+    let policy: Value = d.f.circle.worker.view(d.dao_id(), "get_policy").await?.json()?;
+    assert_eq!(policy["proposal_period"], "3600000000000");
+    let council = policy["roles"].as_array().unwrap().iter().find(|r| r["name"] == "council").expect("council role");
+    let mut members: Vec<String> = council["kind"]["Group"].as_array().unwrap().iter().map(|m| m.as_str().unwrap().to_string()).collect();
+    members.sort();
+    let mut expected: Vec<String> = d.council.iter().map(|a| a.id().to_string()).collect();
+    expected.sort();
+    assert_eq!(members, expected);
+    Ok(())
+}
