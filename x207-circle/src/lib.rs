@@ -20,6 +20,8 @@ pub mod risk;
 pub mod settlement;
 pub mod stake;
 pub mod state;
+#[cfg(test)]
+mod stateful_tests;
 pub mod stubs;
 pub mod types;
 pub mod upgrade;
