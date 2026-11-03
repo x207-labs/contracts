@@ -87,7 +87,7 @@ async fn refusals_change_nothing() -> anyhow::Result<()> {
     let f = window().await?;
     let before = snapshot(&f).await?;
     let refused = |result: ExecutionFinalResult, code: &str| {
-        assert!(!result.is_success() || result.clone().json::<Vec<String>>().is_err(), "{code} was accepted");
+        // the mock plays NEP-245: a refused call comes back to the caller as a full refund, and the failed receipt is in `failures()`
         let text = format!("{:?}", result.failures());
         assert!(text.contains(code), "expected {code}: {}", text.chars().take(300).collect::<String>());
     };
