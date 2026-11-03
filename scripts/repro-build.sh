@@ -17,7 +17,7 @@ git archive "$ref" | tar -x -C "$src"
 chmod -R a+rwX "$src"
 mkdir -p "$out"
 docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
-  bash -c 'cargo near build non-reproducible-wasm --locked'
+  bash -c 'cargo near build non-reproducible-wasm --locked && chmod -R a+rX target/near'
 cp "$src/target/near/x207_circle.wasm" "$out/x207_circle.wasm"
 cp "$src/target/near/x207_circle_abi.json" "$out/x207_circle_abi.json" 2>/dev/null || true
 shasum -a 256 "$out/x207_circle.wasm"
