@@ -522,6 +522,36 @@
       },
       {
         "kind": "view",
+        "name": "get_mt_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/MtEscrowView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_owner",
         "result": {
           "serialization_type": "json",
@@ -2473,6 +2503,41 @@
           ],
           "type": "object"
         },
+        "MtEscrowView": {
+          "properties": {
+            "amount": {
+              "type": "string"
+            },
+            "buyer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "grant_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "mt_contract": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/EscrowState"
+            },
+            "token_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "amount",
+            "grant_id",
+            "mt_contract",
+            "state",
+            "token_id"
+          ],
+          "type": "object"
+        },
         "ObligationView": {
           "properties": {
             "cleared": {
@@ -3124,6 +3189,15 @@
     {
       "fields": [
         "grant_id",
+        "mt_contract",
+        "token_id",
+        "amount"
+      ],
+      "name": "mt_escrow_held"
+    },
+    {
+      "fields": [
+        "grant_id",
         "step",
         "epoch",
         "payer",
@@ -3162,10 +3236,10 @@
       "name": "intent_removed"
     }
   ],
-  "interface_version": "0.0.10",
+  "interface_version": "0.0.11",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.10"
+    "version": "0.0.11"
   },
   "schema_version": "0.4.0"
 }

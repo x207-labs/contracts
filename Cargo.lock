@@ -1835,6 +1835,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-mt"
+version = "0.0.0"
+dependencies = [
+ "near-sdk",
+]
+
+[[package]]
 name = "mock-nft"
 version = "0.0.0"
 dependencies = [
@@ -4485,7 +4492,7 @@ dependencies = [
 
 [[package]]
 name = "x207-circle"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "anyhow",
  "ed25519-dalek",

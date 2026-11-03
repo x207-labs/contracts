@@ -3,11 +3,11 @@
 # tests in `tests/*.rs` are auto-discovered without per-file manifest edits.
 [workspace]
 resolver = "2"
-members = ["probes/ct003_voucher_gas", "probes/ct004_clearing_gas", "probes/mock_ft", "probes/mock_intents", "probes/mock_nft", "probes/mock_rwa"]
+members = ["probes/ct003_voucher_gas", "probes/ct004_clearing_gas", "probes/mock_ft", "probes/mock_intents", "probes/mock_nft", "probes/mock_rwa", "probes/mock_mt"]
 
 [package]
 name = "x207-circle"
-version = "0.0.10"
+version = "0.0.11"
 edition = "2021"
 license = "Apache-2.0"
 description = "x207 mutual-credit circle contract"

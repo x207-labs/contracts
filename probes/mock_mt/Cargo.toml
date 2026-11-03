@@ -1,0 +1,12 @@
+# NEP-245 multi-token mock for sandbox tests of the class A multi-token escrow (CT-092). Never deployed outside near-sandbox.
+[package]
+name = "mock-mt"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.29.1"

@@ -14,7 +14,7 @@ use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, Promise, PromiseError, PromiseOrValue};
 
 use crate::clearing::EpochPhase;
-use crate::events::{EscrowFailed, EscrowHeld, FtEscrowHeld, GrantActivated, GrantRevoked, X207Event};
+use crate::events::{EscrowFailed, EscrowHeld, FtEscrowHeld, GrantActivated, MtEscrowHeld, GrantRevoked, X207Event};
 use crate::grant::{load_grant, AssetClass, GrantId, GrantStatus, RevokeReason};
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::EpochId;
@@ -90,6 +90,29 @@ pub struct FtEscrow {
     pub snapshot: Option<Snapshot>,
 }
 
+/// Class A escrow of an exact amount of one NEP-245 multi-token (CT-092). Same life cycle and take-back as the NFT and the NEP-141 escrow.
+#[near(serializers = [borsh])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MtEscrow {
+    pub mt_contract: AccountId,
+    pub token_id: String,
+    pub amount: u128,
+    pub state: EscrowState,
+    pub buyer: Option<AccountId>,
+    pub snapshot: Option<Snapshot>,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MtEscrowView {
+    pub grant_id: GrantId,
+    pub mt_contract: AccountId,
+    pub token_id: String,
+    pub amount: U128,
+    pub state: EscrowState,
+    pub buyer: Option<AccountId>,
+}
+
 #[near(serializers = [json])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FtEscrowView {
@@ -132,16 +155,25 @@ pub fn load_ft_escrow(grant_id: GrantId) -> Option<FtEscrow> {
     ft_escrows().get(&grant_id).cloned()
 }
 
+fn mt_escrows() -> LookupMap<GrantId, MtEscrow> {
+    LookupMap::new(StorageKey::MtEscrows)
+}
+
+pub fn load_mt_escrow(grant_id: GrantId) -> Option<MtEscrow> {
+    mt_escrows().get(&grant_id).cloned()
+}
+
 /// The escrow of a grant, whichever asset it holds. A grant has at most one.
 #[derive(Clone, Debug)]
 enum Held {
     Nft(Escrow),
     Ft(FtEscrow),
+    Mt(MtEscrow),
 }
 
 impl Held {
     fn load(grant_id: GrantId) -> Option<Held> {
-        load_escrow(grant_id).map(Held::Nft).or_else(|| load_ft_escrow(grant_id).map(Held::Ft))
+        load_escrow(grant_id).map(Held::Nft).or_else(|| load_ft_escrow(grant_id).map(Held::Ft)).or_else(|| load_mt_escrow(grant_id).map(Held::Mt))
     }
 
     fn save(self, grant_id: GrantId) {
@@ -152,6 +184,11 @@ impl Held {
                 map.insert(grant_id, e);
                 map.flush();
             }
+            Held::Mt(e) => {
+                let mut map = mt_escrows();
+                map.insert(grant_id, e);
+                map.flush();
+            }
         }
     }
 
@@ -159,6 +196,7 @@ impl Held {
         match self {
             Held::Nft(e) => e.state,
             Held::Ft(e) => e.state,
+            Held::Mt(e) => e.state,
         }
     }
 
@@ -166,6 +204,7 @@ impl Held {
         match self {
             Held::Nft(e) => e.state = state,
             Held::Ft(e) => e.state = state,
+            Held::Mt(e) => e.state = state,
         }
     }
 
@@ -173,6 +212,7 @@ impl Held {
         match self {
             Held::Nft(e) => e.buyer = buyer,
             Held::Ft(e) => e.buyer = buyer,
+            Held::Mt(e) => e.buyer = buyer,
         }
     }
 
@@ -180,6 +220,7 @@ impl Held {
         match self {
             Held::Nft(e) => e.buyer.clone(),
             Held::Ft(e) => e.buyer.clone(),
+            Held::Mt(e) => e.buyer.clone(),
         }
     }
 
@@ -187,6 +228,7 @@ impl Held {
         match self {
             Held::Nft(e) => e.snapshot = snapshot,
             Held::Ft(e) => e.snapshot = snapshot,
+            Held::Mt(e) => e.snapshot = snapshot,
         }
     }
 
@@ -194,6 +236,7 @@ impl Held {
         match self {
             Held::Nft(e) => e.snapshot.take(),
             Held::Ft(e) => e.snapshot.take(),
+            Held::Mt(e) => e.snapshot.take(),
         }
         .expect("snapshot of a completing escrow")
     }
@@ -203,6 +246,7 @@ impl Held {
         match self {
             Held::Nft(e) => circle.send_and_resolve(e.nft_contract.clone(), e.token_id.clone(), receiver, grant_id, step),
             Held::Ft(e) => circle.send_ft_and_resolve(e.ft_contract.clone(), e.amount, receiver, grant_id, step),
+            Held::Mt(e) => circle.send_mt_and_resolve(e.mt_contract.clone(), e.token_id.clone(), e.amount, receiver, grant_id, step),
         }
     }
 }
@@ -251,6 +295,10 @@ impl X207Circle {
 
     pub fn get_escrow(&self, grant_id: GrantId) -> Option<EscrowView> {
         load_escrow(grant_id).map(|e| EscrowView { grant_id, nft_contract: e.nft_contract, token_id: e.token_id, state: e.state, buyer: e.buyer })
+    }
+
+    pub fn get_mt_escrow(&self, grant_id: GrantId) -> Option<MtEscrowView> {
+        load_mt_escrow(grant_id).map(|e| MtEscrowView { grant_id, mt_contract: e.mt_contract, token_id: e.token_id, amount: U128(e.amount), state: e.state, buyer: e.buyer })
     }
 
     pub fn get_ft_escrow(&self, grant_id: GrantId) -> Option<FtEscrowView> {
@@ -379,6 +427,48 @@ impl X207Circle {
                 NFT_TRANSFER_GAS,
             )
             .then(Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).on_escrow_resolved(grant_id, step))
+    }
+
+    fn send_mt_and_resolve(&self, mt: AccountId, token_id: String, amount: u128, receiver: AccountId, grant_id: GrantId, step: EscrowStep) -> Promise {
+        Promise::new(mt)
+            .function_call(
+                "mt_transfer".to_string(),
+                json!({"receiver_id": receiver, "token_id": token_id, "amount": U128(amount), "approval": null, "memo": format!("x207 escrow grant {grant_id}")})
+                    .to_string()
+                    .into_bytes(),
+                NearToken::from_yoctonear(1),
+                NFT_TRANSFER_GAS,
+            )
+            .then(Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).on_escrow_resolved(grant_id, step))
+    }
+
+    /// The `escrow` action of `mt_on_transfer` (CT-092): exactly one multi-token, exactly the amount of the scope `{"mt_contract","token_id","amount"}`, put
+    /// by the grantor itself (`previous_owner_ids` is the grantor alone). The USDT of the circle held at Intents (`nep141:<usdt>`) is not an escrow asset.
+    /// Every refusal is a panic, so that the multi-token contract gives everything back. Returns `[0]`: all of it stays.
+    pub(crate) fn escrow_mt_from_transfer(
+        &mut self, mt_contract: AccountId, previous_owner_ids: Vec<AccountId>, token_ids: Vec<String>, amounts: Vec<U128>, grant_id: GrantId,
+    ) -> PromiseOrValue<Vec<U128>> {
+        require!(token_ids.len() == 1 && amounts.len() == 1 && previous_owner_ids.len() == 1, format!("ERR_ESCROW_MT_BATCH: one token, one amount and one owner per deposit, got {} tokens", token_ids.len()));
+        let (token_id, amount, owner) = (token_ids[0].clone(), amounts[0].0, previous_owner_ids[0].clone());
+        require!(amount > 0, "ERR_ZERO_AMOUNT");
+        require!(!(mt_contract == self.intents_id && token_id == format!("nep141:{}", self.usdt_token_id)), "ERR_ESCROW_USDT: the USDT of the circle is not an escrow asset");
+        let grant = load_grant(grant_id);
+        require!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
+        require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        let want = crate::grant::class_a_asset(&grant.limits.scope);
+        require!(
+            matches!(&want, Ok(crate::grant::ClassAAsset::Mt { mt_contract: c, token_id: t, .. }) if *c == mt_contract && *t == token_id),
+            format!("ERR_ESCROW_MT_MISMATCH: grant {grant_id} takes {want:?}, got {mt_contract} {token_id}")
+        );
+        if let Ok(crate::grant::ClassAAsset::Mt { amount: expected, .. }) = want {
+            require!(amount == expected, format!("ERR_ESCROW_MT_AMOUNT: grant {grant_id} takes {expected}, got {amount}"));
+        }
+        require!(owner == grant.grantor, format!("ERR_ESCROW_DEPOSITOR: only {} may put the asset of grant {grant_id}", grant.grantor));
+        require!(Held::load(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
+        require!(env::block_timestamp() < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
+        Held::Mt(MtEscrow { mt_contract: mt_contract.clone(), token_id: token_id.clone(), amount, state: EscrowState::Held, buyer: None, snapshot: None }).save(grant_id);
+        MtEscrowHeld { grant_id, mt_contract, token_id, amount: U128(amount) }.emit();
+        PromiseOrValue::Value(vec![U128(0)])
     }
 
     /// The `escrow` action of `ft_on_transfer` (CT-090) for a token that is not the USDT of the circle. `msg` is `{"action":"escrow","grant_id":N}`.
@@ -937,5 +1027,175 @@ mod tests {
         c.on_escrow_resolved(GRANT, EscrowStep::Cancel);
         assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Cancelled));
         assert_eq!(load_grant(GRANT).status, GrantStatus::Revoked);
+    }
+
+    // ---- CT-092: escrow of an exact amount of one NEP-245 multi-token ----
+
+    const MT_TOKEN: &str = "nep141:usdc.near";
+
+    fn grant_mt() -> AccessGrant {
+        let mut g = grant_offered();
+        g.asset_type = "mt:usdc".into();
+        g.limits.scope = format!("{{\"mt_contract\":\"mt.near\",\"token_id\":\"{MT_TOKEN}\",\"amount\":\"{RWA_AMOUNT}\"}}");
+        g
+    }
+
+    fn deposit_mt(c: &mut X207Circle, caller: &str, owners: &[&str], tokens: &[&str], amounts: &[u128], msg: &str) -> Result<Vec<u128>, String> {
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(caller)).block_timestamp(5_000).build());
+        let owners: Vec<AccountId> = owners.iter().map(|o| acc(o)).collect();
+        let tokens: Vec<String> = tokens.iter().map(|t| t.to_string()).collect();
+        let amounts: Vec<U128> = amounts.iter().map(|a| U128(*a)).collect();
+        let msg = msg.to_string();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.mt_on_transfer(acc("alice.near"), owners, tokens, amounts, msg)))
+            .map(|r| match r {
+                PromiseOrValue::Value(v) => v.into_iter().map(|u| u.0).collect(),
+                PromiseOrValue::Promise(_) => vec![u128::MAX],
+            })
+            .map_err(|e| e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default())
+    }
+
+    fn refused_mt(r: Result<Vec<u128>, String>, code: &str) {
+        let err = r.expect_err(&format!("expected {code}"));
+        assert!(err.contains(code), "expected {code}, got {err}");
+        assert!(load_mt_escrow(GRANT).is_none() && load_ft_escrow(GRANT).is_none() && load_escrow(GRANT).is_none(), "{code}: a refused deposit must leave no escrow");
+    }
+
+    // TC-CT-092-U01
+    #[test]
+    fn the_named_multi_token_and_amount_fill_the_mt_escrow() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_mt());
+        let unused = deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()).expect("accepted");
+        assert_eq!(unused, vec![0], "all of it stays in the circle");
+        let e = load_mt_escrow(GRANT).expect("escrow");
+        assert_eq!((e.mt_contract, e.token_id.as_str(), e.amount, e.state, e.buyer), (acc("mt.near"), MT_TOKEN, RWA_AMOUNT, EscrowState::Held, None));
+        assert_eq!(c.get_mt_escrow(GRANT).map(|v| v.amount), Some(U128(RWA_AMOUNT)));
+        assert!(c.get_escrow(GRANT).is_none() && c.get_ft_escrow(GRANT).is_none(), "the other views do not show it");
+        assert!(holds_asset(GRANT));
+        let log = get_logs().into_iter().find(|l| l.contains("mt_escrow_held")).expect("mt_escrow_held");
+        let data = serde_json::from_str::<Value>(log.strip_prefix("EVENT_JSON:").unwrap()).unwrap()["data"][0].clone();
+        assert_eq!((data["mt_contract"].as_str(), data["token_id"].as_str(), data["amount"].as_str()), (Some("mt.near"), Some(MT_TOKEN), Some("1000")));
+    }
+
+    // TC-CT-092-S01: attacks on the receiver; each one is a panic, so the multi-token contract gives everything back
+    #[test]
+    fn a_multi_token_deposit_that_does_not_match_the_grant_is_refused() {
+        let cases: [(&str, &[&str], &[&str], &[u128], &str); 9] = [
+            ("fake.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], "ERR_ESCROW_MT_MISMATCH"),
+            ("mt.near", &["alice.near"], &["nep141:other.near"], &[RWA_AMOUNT], "ERR_ESCROW_MT_MISMATCH"),
+            ("mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT - 1], "ERR_ESCROW_MT_AMOUNT"),
+            ("mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT + 1], "ERR_ESCROW_MT_AMOUNT"),
+            ("mt.near", &["mallory.near"], &[MT_TOKEN], &[RWA_AMOUNT], "ERR_ESCROW_DEPOSITOR"),
+            ("mt.near", &["alice.near"], &[MT_TOKEN], &[0], "ERR_ZERO_AMOUNT"),
+            ("mt.near", &["alice.near"], &[MT_TOKEN, "nep141:other.near"], &[RWA_AMOUNT, RWA_AMOUNT], "ERR_ESCROW_MT_BATCH"),
+            ("mt.near", &["alice.near", "mallory.near"], &[MT_TOKEN], &[RWA_AMOUNT], "ERR_ESCROW_MT_BATCH"),
+            ("mt.near", &[], &[MT_TOKEN], &[RWA_AMOUNT], "ERR_ESCROW_MT_BATCH"),
+        ];
+        for (caller, owners, tokens, amounts, code) in cases {
+            let mut c = circle();
+            crate::grant::store_grant_for_test(&grant_mt());
+            refused_mt(deposit_mt(&mut c, caller, owners, tokens, amounts, &escrow_msg()), code);
+        }
+    }
+
+    // TC-CT-092-S02
+    #[test]
+    fn a_second_mt_deposit_and_the_wrong_kind_of_grant_are_refused() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_mt());
+        deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()).expect("first");
+        let again = deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()).expect_err("second");
+        assert!(again.contains("ERR_ESCROW_EXISTS"), "{again}");
+        assert_eq!(load_mt_escrow(GRANT).map(|e| e.amount), Some(RWA_AMOUNT));
+        // an NFT grant and a NEP-141 grant take no multi-token
+        for g in [grant_offered(), grant_ft()] {
+            let mut c = circle();
+            let mut map = mt_escrows();
+            map.remove(&GRANT);
+            map.flush();
+            crate::grant::store_grant_for_test(&g);
+            refused_mt(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()), "ERR_ESCROW_MT_MISMATCH");
+        }
+    }
+
+    // TC-CT-092-S03: the USDT of the circle held at Intents is not an escrow asset; a settle through mt_on_transfer is not changed
+    #[test]
+    fn usdt_at_intents_is_not_an_escrow_asset_and_the_settle_path_is_untouched() {
+        let mut c = circle();
+        let mut g = grant_mt();
+        g.limits.scope = format!("{{\"mt_contract\":\"intents.near\",\"token_id\":\"nep141:usdt.near\",\"amount\":\"{RWA_AMOUNT}\"}}");
+        crate::grant::store_grant_for_test(&g);
+        refused_mt(deposit_mt(&mut c, "intents.near", &["alice.near"], &["nep141:usdt.near"], &[RWA_AMOUNT], &escrow_msg()), "ERR_ESCROW_USDT");
+        // another token at Intents can be the escrow asset
+        let mut g2 = grant_mt();
+        g2.limits.scope = format!("{{\"mt_contract\":\"intents.near\",\"token_id\":\"{MT_TOKEN}\",\"amount\":\"{RWA_AMOUNT}\"}}");
+        crate::grant::store_grant_for_test(&g2);
+        deposit_mt(&mut c, "intents.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()).expect("another token at Intents");
+        // stake and settle through a contract that is not Intents stay refused, as before
+        for msg in ["{\"action\":\"stake\",\"member_id\":null}", "{\"action\":\"settle\",\"epoch\":1,\"member_id\":null}", "not json"] {
+            let mut c = circle();
+            let err = deposit_mt(&mut c, "mt.near", &["alice.near"], &["nep141:usdt.near"], &[RWA_AMOUNT], msg).expect_err(msg);
+            assert!(err.contains("ERR_WRONG_TOKEN"), "{msg}: {err}");
+        }
+    }
+
+    // TC-CT-092-S04: the scope names one multi-token
+    #[test]
+    fn the_scope_of_a_class_a_grant_may_name_one_multi_token() {
+        use crate::grant::{class_a_asset, ClassAAsset};
+        assert_eq!(
+            class_a_asset("{\"mt_contract\":\"mt.near\",\"token_id\":\"a:b\",\"amount\":\"5\"}"),
+            Ok(ClassAAsset::Mt { mt_contract: acc("mt.near"), token_id: "a:b".into(), amount: 5 })
+        );
+        for bad in [
+            "{\"mt_contract\":\"mt.near\",\"token_id\":\"a\"}", "{\"mt_contract\":\"mt.near\",\"amount\":\"5\"}", "{\"mt_contract\":\"mt.near\",\"token_id\":\"\",\"amount\":\"5\"}",
+            "{\"mt_contract\":\"mt.near\",\"token_id\":\"a\",\"amount\":\"0\"}", "{\"mt_contract\":\"Bad Name\",\"token_id\":\"a\",\"amount\":\"5\"}",
+            "{\"mt_contract\":\"mt.near\",\"token_id\":\"a\",\"amount\":\"5\",\"nft_contract\":\"n.near\"}", "{\"mt_contract\":\"mt.near\",\"token_id\":\"a\",\"amount\":\"5\",\"ft_contract\":\"f.near\"}",
+        ] {
+            assert!(class_a_asset(bad).is_err(), "{bad}");
+        }
+    }
+
+    fn completing_mt(c: &mut X207Circle) -> Snapshot {
+        let snapshot = registered(c, 10 * CREDIT);
+        crate::grant::store_grant_for_test(&grant_mt());
+        env::storage_write(&lock_key(1, &snapshot.payer, &snapshot.payee), &[1]);
+        Held::Mt(MtEscrow { mt_contract: acc("mt.near"), token_id: MT_TOKEN.into(), amount: RWA_AMOUNT, state: EscrowState::Completing, buyer: Some(acc("bob.near")), snapshot: Some(snapshot.clone()) }).save(GRANT);
+        snapshot
+    }
+
+    // TC-CT-092-U02
+    #[test]
+    fn a_failed_mt_transfer_takes_the_voucher_back_and_a_delivered_one_activates_the_grant() {
+        let mut c = circle();
+        let empty = picture(&c);
+        completing_mt(&mut c);
+        callback(&mut c, PromiseResult::Failed);
+        let e = load_mt_escrow(GRANT).unwrap();
+        assert_eq!((e.state, e.buyer, e.amount), (EscrowState::Held, None, RWA_AMOUNT));
+        assert_eq!(picture(&c).0, empty.0);
+        assert_eq!(c.outstanding_debt.get(&acc("bob.near")), Some(&0));
+        assert!(!pair_locked(1, &acc("bob.near"), &acc("alice.near")) && holds_asset(GRANT));
+        let event = failed_event();
+        assert_eq!((event["reverted"].clone(), event["delta"].as_str()), (Value::Bool(true), Some("10000000")));
+
+        let mut c = circle();
+        completing_mt(&mut c);
+        callback(&mut c, PromiseResult::Successful(vec![]));
+        assert_eq!(load_mt_escrow(GRANT).map(|e| e.state), Some(EscrowState::Delivered));
+        let grant = load_grant(GRANT);
+        assert_eq!((grant.status, grant.grantee), (GrantStatus::Active, Some(acc("bob.near"))));
+        assert!(!holds_asset(GRANT));
+    }
+
+    // TC-CT-092-U03: a failure that cannot be taken back leaves the escrow stuck
+    #[test]
+    fn a_failed_mt_transfer_that_cannot_be_taken_back_leaves_the_escrow_stuck() {
+        let mut c = circle();
+        completing_mt(&mut c);
+        c.epochs.get_mut(&1).unwrap().start_clearing(3_600_000_001_000);
+        callback(&mut c, PromiseResult::Failed);
+        assert_eq!(load_mt_escrow(GRANT).map(|e| e.state), Some(EscrowState::Stuck));
+        assert!(holds_asset(GRANT) && !pair_locked(1, &acc("bob.near"), &acc("alice.near")));
     }
 }

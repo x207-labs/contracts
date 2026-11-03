@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 34] = [
+pub const EVENT_SCHEMAS: [EventSchema; 35] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -115,6 +115,7 @@ pub const EVENT_SCHEMAS: [EventSchema; 34] = [
     schema("grant_revoked", &["grant_id", "reason"]),
     schema("escrow_held", &["grant_id", "nft_contract", "token_id"]),
     schema("ft_escrow_held", &["grant_id", "ft_contract", "amount"]),
+    schema("mt_escrow_held", &["grant_id", "mt_contract", "token_id", "amount"]),
     schema("escrow_failed", &["grant_id", "step", "epoch", "payer", "payee", "delta", "reverted"]),
     EventSchema {
         name: "bundle_committed",
@@ -335,6 +336,7 @@ event!("grant_activated", GrantActivated { grant_id: u64, grantee: AccountId, de
 event!("grant_revoked", GrantRevoked { grant_id: u64, reason: crate::grant::RevokeReason });
 event!("escrow_held", EscrowHeld { grant_id: u64, nft_contract: AccountId, token_id: String });
 event!("ft_escrow_held", FtEscrowHeld { grant_id: u64, ft_contract: AccountId, amount: U128 });
+event!("mt_escrow_held", MtEscrowHeld { grant_id: u64, mt_contract: AccountId, token_id: String, amount: U128 });
 event!("escrow_failed", EscrowFailed { grant_id: u64, step: crate::escrow::EscrowStep, epoch: EpochId, payer: AccountId, payee: AccountId, delta: U128, reverted: bool });
 event!("bundle_committed", BundleCommitted { bundle_id: u64, terms_hash: String, epoch: EpochId, legs: Vec<crate::bundle::BundleLeg>, solver: AccountId });
 event!("upgrade_proposed", UpgradeProposed { code_hash: near_sdk::json_types::Base58CryptoHash, eta: U64 });
@@ -457,6 +459,7 @@ mod tests {
             (GrantActivated::NAME, GrantActivated { grant_id: 1, grantee: b.clone(), delivery_pubkey: None }.to_log()),
             (GrantRevoked::NAME, GrantRevoked { grant_id: 1, reason: crate::grant::RevokeReason::Grantor }.to_log()),
             (EscrowHeld::NAME, EscrowHeld { grant_id: 1, nft_contract: b.clone(), token_id: "t1".into() }.to_log()),
+            (MtEscrowHeld::NAME, MtEscrowHeld { grant_id: 1, mt_contract: b.clone(), token_id: "nep141:x.near".into(), amount: U128(5) }.to_log()),
             (FtEscrowHeld::NAME, FtEscrowHeld { grant_id: 1, ft_contract: b.clone(), amount: U128(5) }.to_log()),
             (EscrowFailed::NAME, EscrowFailed { grant_id: 1, step: crate::escrow::EscrowStep::Complete, epoch: 42, payer: a.clone(), payee: b.clone(), delta: U128(5), reverted: true }.to_log()),
             (BundleCommitted::NAME, BundleCommitted { bundle_id: 1, terms_hash: "ab".repeat(32), epoch: 42, legs: vec![crate::bundle::BundleLeg { payer: a.clone(), payee: b.clone(), max_amount: U128(10) }], solver: b.clone() }.to_log()),
@@ -703,7 +706,7 @@ mod tests {
                 "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested",
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
-                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "escrow_failed", "bundle_committed",
+                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "mt_escrow_held", "escrow_failed", "bundle_committed",
                 "intents_withdrawn", "intent_removed",
             ]
         );

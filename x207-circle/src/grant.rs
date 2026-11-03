@@ -192,11 +192,21 @@ pub fn class_a_target(scope: &str) -> Result<(AccountId, String), String> {
 pub enum ClassAAsset {
     Nft { nft_contract: AccountId, token_id: String },
     Ft { ft_contract: AccountId, amount: u128 },
+    Mt { mt_contract: AccountId, token_id: String, amount: u128 },
 }
 
 /// `{"nft_contract": ..., "token_id": ...}` or `{"ft_contract": ..., "amount": "..."}` (the amount is a decimal string above 0). Not both.
 pub fn class_a_asset(scope: &str) -> Result<ClassAAsset, String> {
     let value: near_sdk::serde_json::Value = near_sdk::serde_json::from_str(scope).map_err(|_| "scope is not JSON".to_string())?;
+    if value.get("mt_contract").is_some() {
+        if ["nft_contract", "ft_contract"].iter().any(|k| value.get(*k).is_some()) {
+            return Err("scope names more than one kind of asset".to_string());
+        }
+        let mt: AccountId = value.get("mt_contract").and_then(|v| v.as_str()).ok_or("scope.mt_contract is not text")?.parse().map_err(|_| "scope.mt_contract is not an account id".to_string())?;
+        let token = value.get("token_id").and_then(|v| v.as_str()).filter(|t| !t.is_empty() && t.len() <= 128).ok_or("scope.token_id is missing or longer than 128 bytes")?;
+        let amount = value.get("amount").and_then(|v| v.as_str()).and_then(|t| t.parse::<u128>().ok()).filter(|a| *a > 0).ok_or("scope.amount is missing, not a decimal string or 0")?;
+        return Ok(ClassAAsset::Mt { mt_contract: mt, token_id: token.to_string(), amount });
+    }
     if value.get("ft_contract").is_none() {
         return class_a_target(scope).map(|(nft_contract, token_id)| ClassAAsset::Nft { nft_contract, token_id });
     }
@@ -339,7 +349,7 @@ impl X207Circle {
         require!(input.limits.quota.map_or(true, |q| q.0 > 0), "ERR_BAD_GRANT: quota must be above 0 or null");
         if entry.class == AssetClass::A {
             if let Err(reason) = class_a_asset(&input.limits.scope) {
-                env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}} or {{\"ft_contract\": ..., \"amount\": \"...\"}}: {reason}"));
+                env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}}, {{\"ft_contract\": ..., \"amount\": \"...\"}} or {{\"mt_contract\": ..., \"token_id\": ..., \"amount\": \"...\"}}: {reason}"));
             }
         }
         let mut counts = grant_counts();

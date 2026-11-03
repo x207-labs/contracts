@@ -83,3 +83,20 @@ The class A escrow takes an exact amount of a fungible token as well as an NFT. 
 A fee token cannot be refused at `ft_on_transfer`: the NEP-141 callback carries the amount the sender asked to move, not the amount the circle received, and finding out would take a balance call plus a per-token sum of held escrows (more state and a second callback). It is documented as unsupported: the sale and `cancel_escrow` fail without loss, the escrow stays `held`. After failed deliveries `cancel_escrow` still returns the tokens once the grant has expired (`the_grantor_gets_the_tokens_back_after_failed_deliveries`).
 
 Limits that stay: a token that freezes the circle or the grantor after the deposit can keep the tokens in the circle for good, and `complete_escrow` / `cancel_escrow` then fail and are retried; a token with a transfer fee is a bad asset for this escrow, and the grantor should check the balance (`ft_balance_of` of the circle) before offering it. The scope says which contract and which amount, but not whether that token is worth anything: the buyer judges that, as with an NFT.
+
+## Escrow of an NEP-245 multi-token (CT-092), checked 2026-11-03
+`mt_on_transfer` takes the action `{"action":"escrow","grant_id":N}` from any multi-token contract; the scope is `{"mt_contract","token_id","amount"}` (exactly one token, exactly that amount) and `complete_escrow` pays the buyer with `mt_transfer`. The settle action keeps its own checks (caller is `intents_id`, token `nep141:<usdt>`); the escrow branch is taken only when the message says `escrow`, so a stake or settle through another contract is still `ERR_WRONG_TOKEN`. Same take-back and cancel path as the NFT and NEP-141 escrow.
+
+| Attack or failure | Result | Test |
+| --- | --- | --- |
+| Another account puts the right amount against the grant | `ERR_ESCROW_DEPOSITOR`, tokens back | unit + `ct092_mt_escrow` |
+| Amount below or above the scope | `ERR_ESCROW_MT_AMOUNT`, tokens back | unit + `ct092_mt_escrow` |
+| Another contract, or another token of the right contract | `ERR_ESCROW_MT_MISMATCH`, tokens back | unit + `ct092_mt_escrow` |
+| A batch of two tokens, or two owners | `ERR_ESCROW_MT_BATCH`, everything back | unit + `ct092_mt_escrow` |
+| A second deposit for the same grant | `ERR_ESCROW_EXISTS`, the first escrow is untouched | unit + `ct092_mt_escrow` |
+| `nep141:<usdt>` held at Intents as the asset | `ERR_ESCROW_USDT` | unit |
+| `stake` or `settle` through a multi-token contract that is not Intents | `ERR_WRONG_TOKEN`, no stake | unit + `ct092_mt_escrow` |
+| Buyer blocked or frozen at the token | `mt_transfer` fails, voucher taken back, escrow `held`, grant `offered`, no debt | `ct092_mt_escrow` |
+| Two failed deliveries, then the time of the grant passes | `cancel_escrow` returns the tokens | `ct092_mt_escrow` |
+
+Not covered: a multi-token contract that charges a fee (the same limit as the NEP-141 escrow: the sale and the cancel fail and the escrow stays `held`), real Intents (`intents.near` has no code on testnet, so an escrow of a token held at Intents ran only as a unit test), and the gas of `mt_transfer` on a contract heavier than the mock (30 Tgas attached).

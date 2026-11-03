@@ -69,6 +69,8 @@ pub enum StorageKey {
     BundleCounts = b'N',
     /// D11 class A, fungible token: `GrantId -> FtEscrow` (CT-090).
     FtEscrows = b'z',
+    /// D11 class A, multi-token (NEP-245): `GrantId -> MtEscrow` (CT-092).
+    MtEscrows = b'y',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).

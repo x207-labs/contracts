@@ -40,18 +40,18 @@ const CHANGE_METHODS: [&str; 37] = [
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 30] = [
+const VIEWS: [&str; 31] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
     "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "intents_balance",
+    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 67] = [
+const SIGNATURES: [&str; 68] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_upgrade()->Promise []",
@@ -73,6 +73,7 @@ const SIGNATURES: [&str; 67] = [
     "get_ft_escrow(grant_id:integer:uint64)->FtEscrowView|null []",
     "get_grant(grant_id:integer:uint64)->AccessGrant|null []",
     "get_intent(intent_hash:string)->IntentView|null []",
+    "get_mt_escrow(grant_id:integer:uint64)->MtEscrowView|null []",
     "get_owner()->string []",
     "get_params()->Params []",
     "get_pending_params()->PendingParams|null []",
@@ -121,12 +122,12 @@ const SIGNATURES: [&str; 67] = [
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
 ];
 
-const EVENTS: [&str; 34] = [
+const EVENTS: [&str; 35] = [
     "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied",
     "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed",
     "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed",
     "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed",
-    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
+    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
 ];
 
 fn strip_descriptions(value: &mut Value) {

@@ -31,4 +31,4 @@ pub mod voucher;
 pub use state::X207Circle;
 
 /// Interface version; same value as the `version` field of every event (spec section 1).
-pub const INTERFACE_VERSION: &str = "0.0.10";
+pub const INTERFACE_VERSION: &str = "0.0.11";
