@@ -11,7 +11,7 @@ use near_sdk::borsh::BorshDeserialize;
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
 use near_sdk::store::LookupMap;
-use near_sdk::{env, near, require, AccountId, Gas, NearToken, Promise, PromiseOrValue};
+use near_sdk::{env, near, require, AccountId, Gas, NearToken, Promise, PromiseError, PromiseOrValue};
 
 use crate::clearing::EpochPhase;
 use crate::events::{EscrowFailed, EscrowHeld, GrantActivated, GrantRevoked, X207Event};
@@ -200,7 +200,8 @@ impl X207Circle {
     /// Callback of the `nft_transfer` of `complete_escrow` or `cancel_escrow`.
     #[private]
     pub fn on_escrow_resolved(&mut self, grant_id: GrantId, step: EscrowStep) {
-        let ok = env::promise_result_checked(0, 64).is_ok();
+        // `TooLong` means the call succeeded and returned more than 64 bytes (a non-standard NFT contract); it is not a failure
+        let ok = !matches!(env::promise_result_checked(0, 64), Err(PromiseError::Failed));
         let mut escrow = load_escrow(grant_id).unwrap_or_else(|| env::panic_str("ERR_ESCROW_UNKNOWN"));
         let mut grant = load_grant(grant_id);
         match (step, ok) {
@@ -526,5 +527,32 @@ mod tests {
         assert_eq!((grant.status, grant.grantee), (GrantStatus::Active, Some(acc("bob.near"))));
         assert!(!holds_asset(GRANT));
         assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).map(|p| p.cumulative), Some(10 * CREDIT));
+    }
+
+    // TC-CT-075-S01 (security review): a transfer that succeeded and returned more than 64 bytes is a success, not a failure
+    #[test]
+    fn a_nft_contract_that_returns_a_long_value_still_delivers() {
+        let mut c = circle();
+        completing(&mut c);
+        callback(&mut c, PromiseResult::Successful(vec![7u8; 200]));
+        let escrow = load_escrow(GRANT).unwrap();
+        assert_eq!(escrow.state, EscrowState::Delivered, "the NFT moved, so the payment must stay and the grant must be active");
+        assert_eq!(load_grant(GRANT).status, GrantStatus::Active);
+        assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).map(|p| p.cumulative), Some(10 * CREDIT));
+    }
+
+    // TC-CT-075-S02 (security review, needs a decision, see docs/security-review.md F1): nft_on_transfer trusts its caller. Run with --ignored.
+    #[test]
+    #[ignore = "finding F1 needs a spec decision: the grant must name the NFT contract that may fill its escrow"]
+    fn an_account_that_is_not_the_nft_of_the_grant_cannot_fill_the_escrow() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_offered());
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("mallory.near")).block_timestamp(5_000).build());
+        // mallory is a plain account, not a NFT contract, and calls the receiver directly with the grantor as previous owner
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "fake".into(), format!("{{\"grant_id\":{GRANT}}}"));
+        }));
+        assert!(result.is_err(), "the escrow of the grant was filled by an account that never held a token");
+        assert!(load_escrow(GRANT).is_none());
     }
 }
