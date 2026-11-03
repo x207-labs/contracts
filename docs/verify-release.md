@@ -47,3 +47,10 @@ The last line is the sha256 of `/tmp/x207-build/x207_circle.wasm`. It must equal
 - A rehearsal or mainnet deployment uses the wasm **downloaded from the release**, not a local `cargo near build`. A local build has another sha256 and cannot be traced to a tag.
 - After `deploy_contract`, read the `code_hash` of the account and write it next to the transaction hash in the record of the run.
 - `apply_upgrade` takes the raw wasm of a release; `propose_upgrade` is given its `sha256` (base58). Check step 2 against the proposed hash before voting.
+
+## Result for v0.0.9 (run on 2026-11-03, `REBUILD=1 scripts/verify-release.sh v0.0.9`)
+- Assets of the release: `x207-circle-v0.0.9.wasm`, `abi-v0.0.9.json`, `SHA256SUMS`. `shasum -a 256 -c SHA256SUMS`: both files `OK`.
+- sha256 of the wasm (hex): `fa8309059a847263e2b7e59c08f1aff2370e706cff3ff58544412218c187d72b`; base58: `Hrtp8q8p8NfTWXqgF8q7446DTLbhfVJewq3npiXzQauQ`. These are also the two hashes of the builds of the release workflow on the runner.
+- Rebuild of the tag (`v0.0.9`, commit `b9236b1`) with `scripts/repro-build.sh` in the pinned image `sourcescan/cargo-near@sha256:c9655eaf…b5bb` on this Mac (Docker, amd64 under emulation): size 585501 bytes, sha256 `fa8309059a847263e2b7e59c08f1aff2370e706cff3ff58544412218c187d72b`. The script printed `REPRODUCED: the build of the tag has the same sha256 as the release`.
+- So three builds of the same source (two on the runner, one here) gave the same bytes, on two different machines.
+- Not done: no account was given, so the `code_hash` over RPC was not compared (no circle runs this release yet).
