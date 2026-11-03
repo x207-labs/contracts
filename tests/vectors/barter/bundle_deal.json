@@ -1,0 +1,39 @@
+{
+  "circle": "x207-circle.near",
+  "terms": {
+    "circle": "x207-circle.near",
+    "epoch": 42,
+    "legs": [
+      {
+        "payer": "summarizer.x207-circle.near",
+        "payee": "translator.x207-circle.near",
+        "max_amount": "120000000"
+      },
+      {
+        "payer": "translator.x207-circle.near",
+        "payee": "summarizer.x207-circle.near",
+        "max_amount": "100000000"
+      }
+    ],
+    "arbiter": "scraper.x207-circle.near",
+    "agreement_hash": "abababababababababababababababababababababababababababababababab",
+    "confirm_by": "1793900000000000000"
+  },
+  "message": "{\"circle\":\"x207-circle.near\",\"epoch\":42,\"legs\":[{\"payer\":\"summarizer.x207-circle.near\",\"payee\":\"translator.x207-circle.near\",\"max_amount\":\"120000000\"},{\"payer\":\"translator.x207-circle.near\",\"payee\":\"summarizer.x207-circle.near\",\"max_amount\":\"100000000\"}],\"arbiter\":\"scraper.x207-circle.near\",\"agreement_hash\":\"abababababababababababababababababababababababababababababababab\",\"confirm_by\":\"1793900000000000000\"}",
+  "termsHash": "464bf15a4d809e1bff9e1938656bc24218009e8dc73e784a3ae6994b05c8e2a2",
+  "signingHash": "db03a5c8df778b6f7f06b4b42a9563d5cc5e423b11586e69cbf0959478ce2b58",
+  "participants": {
+    "translator.x207-circle.near": "ed25519:AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9",
+    "summarizer.x207-circle.near": "ed25519:9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu"
+  },
+  "signatures": [
+    {
+      "account": "translator.x207-circle.near",
+      "signature": "ed25519:5ipCr3mnvRT2GKkGUgyfB7AdQWeAbVSPHaTzgs7LEjCf8qjU3niusdiANf5ewTn2yUXvDtnmzVLgVn3zZa8ytNqV"
+    },
+    {
+      "account": "summarizer.x207-circle.near",
+      "signature": "ed25519:46NXr84JTpG9ikmNeH2EC3CznWzcNcWMuC1Qxb4TPigdFwb2XJYwV4Ui5zh5xrEVRtjJHh2zGDZh9LxnG2hncEEs"
+    }
+  ]
+}
