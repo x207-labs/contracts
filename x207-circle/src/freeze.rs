@@ -256,6 +256,20 @@ mod tests {
         assert_eq!(panic_text_ok(|| assert_not_frozen(&acc("alice.near"), "x")), "ok", "an account that is not frozen is not looked at");
     }
 
+    // TC-CT-095-U04 (review C2): a freeze applied while epoch 4 is clearing is recorded in the open epoch 5, so a voucher of epoch 5 still registers and one of epoch 6 does not
+    #[test]
+    fn a_freeze_applied_while_an_epoch_clears_is_recorded_in_the_epoch_that_is_open() {
+        let mut c = circle();
+        c.current_epoch = 5;
+        as_caller("dao.near", T0);
+        c.propose_freeze(acc("bob.near"), None);
+        as_caller("anybody.near", T0 + FREEZE_TIMELOCK_NS);
+        c.apply_freeze(acc("bob.near"));
+        assert_eq!(c.get_freeze(acc("bob.near")).map(|v| v.from_epoch), Some(5));
+        assert_eq!(panic_text_ok(|| assert_not_frozen_for_voucher(&acc("bob.near"), 5)), "ok");
+        assert!(panic_text(|| assert_not_frozen_for_voucher(&acc("bob.near"), 6)).contains("ERR_FROZEN"));
+    }
+
     fn panic_text_ok(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         match std::panic::catch_unwind(f) {
             Ok(()) => "ok".into(),

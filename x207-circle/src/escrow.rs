@@ -192,6 +192,15 @@ impl Held {
         }
     }
 
+    /// The contract of the token that is held.
+    fn contract(&self) -> &AccountId {
+        match self {
+            Held::Nft(e) => &e.nft_contract,
+            Held::Ft(e) => &e.ft_contract,
+            Held::Mt(e) => &e.mt_contract,
+        }
+    }
+
     fn state(&self) -> EscrowState {
         match self {
             Held::Nft(e) => e.state,
@@ -319,6 +328,8 @@ impl X207Circle {
         require!(now < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
         let mut escrow = Held::load(grant_id).unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
         require!(escrow.state() == EscrowState::Held, format!("ERR_ESCROW_NOT_HELD: {:?}", escrow.state()));
+        // CT-096 (review C1): a token put in escrow before the owner set the list is not sold after it; `cancel_escrow` stays open so that the grantor takes it back
+        crate::asset_contracts::assert_official(&grant.asset_type, escrow.contract());
         let buyer = env::predecessor_account_id();
         crate::freeze::assert_not_frozen(&buyer, "buy an escrowed asset");
         require!(buyer != grant.grantor, format!("ERR_GRANT_SELF: {buyer}"));

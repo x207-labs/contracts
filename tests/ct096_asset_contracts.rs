@@ -5,7 +5,7 @@
 mod common;
 
 use common::circle::{events, failure_text};
-use common::ft_escrow::{deploy_rwa, offer, world, AMOUNT};
+use common::ft_escrow::{deploy_rwa, offer, world, AMOUNT, PRICE};
 use serde_json::{json, Value};
 
 const TYPE: &str = "rwa:bond";
@@ -83,5 +83,33 @@ async fn an_empty_list_takes_any_contract_again() -> anyhow::Result<()> {
     let msg = json!({"action": "escrow", "grant_id": id}).to_string();
     assert!(w.deposit_with(&fake, &alice, AMOUNT, &msg).await?.is_success());
     assert_eq!(w.f.circle.view("get_ft_escrow", json!({"grant_id": id})).await?["state"], "held");
+    Ok(())
+}
+
+// TC-CT-096-08 (review C1): a token put in escrow before the list is set cannot be bought after it; the grantor still takes it back
+#[tokio::test]
+async fn a_fake_token_in_escrow_before_the_list_cannot_be_bought_but_can_be_taken_back() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let dao = w.f.account("dao").await?;
+    let alice = w.alice.clone();
+    let official = w.rwa.id().to_string();
+    let fake = deploy_rwa(&w.f).await?;
+    fake.call("mint").args_json(json!({"account_id": alice.id(), "amount": (10 * AMOUNT).to_string()})).transact().await?.into_result()?;
+    let expires = w.f.circle.now_ns().await? + 90_000_000_000;
+    let id = w.f.circle.call_as(&alice, "offer_grant", offer(expires, fake.id().as_str(), AMOUNT)).await?.json::<u64>()?;
+    let msg = json!({"action": "escrow", "grant_id": id}).to_string();
+    assert!(w.deposit_with(&fake, &alice, AMOUNT, &msg).await?.is_success());
+    assert_eq!(w.f.circle.view("get_ft_escrow", json!({"grant_id": id})).await?["state"], "held");
+
+    assert!(w.f.circle.call_as(&dao, "set_asset_contracts", json!({"asset_type": TYPE, "contracts": [official]})).await?.is_success());
+    let epoch = w.epoch().await?;
+    let buy = w.buy("bob", epoch, PRICE, id).await?;
+    assert!(failure_text(&buy).expect("refused").contains("ERR_CONTRACT_NOT_OFFICIAL"), "{:?}", failure_text(&buy));
+    assert_eq!(w.f.circle.view("get_ft_escrow", json!({"grant_id": id})).await?["state"], "held");
+
+    w.f.circle.advance_to(expires + 2_000_000_000).await?;
+    let back = w.f.circle.call_as(&alice, "cancel_escrow", json!({"grant_id": id})).await?;
+    assert!(back.is_success(), "{:?}", failure_text(&back));
+    assert_eq!(w.balance(&fake, alice.id().as_str()).await?, 10 * AMOUNT);
     Ok(())
 }
