@@ -1,7 +1,7 @@
 // Runs the backend indexer against a near-sandbox chain and prints what the read API answers, as one JSON
 // object on stdout. Used by tests/be006_indexer_e2e.rs. Needs `npm run build` in ../backend.
 //   node index_chain.mjs <rpc url> <contract id> <start block> <circle id> <account...>
-import { FailoverRpcClient, Indexer, RpcBlockSource, createApiServer, openDatabase, rpcChainReader } from "../../../backend/dist/index.js";
+import { FailoverRpcClient, Indexer, RpcBlockSource, createApiServer, openDatabase, rpcChainReader, viewClearedEdges } from "../../../backend/dist/index.js";
 
 const [rpcUrl, contractId, startArg, circleId, ...accounts] = process.argv.slice(2);
 const startBlock = Number(startArg);
@@ -22,7 +22,8 @@ async function view(method, args) {
 const db = openDatabase(":memory:");
 const client = new FailoverRpcClient({ endpoints: [rpcUrl], timeoutMs: 30_000 });
 const source = new RpcBlockSource(rpcChainReader(client), contractId, startBlock);
-const indexer = new Indexer({ db, source, circleId, contractId, startBlock, fetchParams: () => view("get_params", {}) });
+// 0.0.13 (CT-099): the log of `commit_epoch` carries only the count and the hash of the edges; the indexer reads them from `list_obligations`
+const indexer = new Indexer({ db, source, circleId, contractId, startBlock, fetchParams: () => view("get_params", {}), fetchClearedEdges: (epoch) => viewClearedEdges(rpcUrl, contractId, epoch) });
 await indexer.bootstrap();
 // Follow the chain while the test runs: a sandbox drops old outcomes after a few epochs of height, so the
 // indexer must read each block soon after it is final. A line on stdin ends the run.

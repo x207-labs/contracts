@@ -2,7 +2,7 @@
 // object on stdout. Used by tests/be022_indexer_scenario.rs (BE-022): like index_chain.mjs, with a database file so a second run
 // resumes the first, and the endpoints of F1-F7. Needs `npm run build` in ../backend.
 //   X207_DB=<file> (optional, default in memory) node scenario_chain.mjs <rpc url> <contract id> <start block> <circle id> <account...>
-import { FailoverRpcClient, Indexer, RpcBlockSource, createApiServer, openDatabase, rpcChainReader } from "../../../backend/dist/index.js";
+import { FailoverRpcClient, Indexer, RpcBlockSource, createApiServer, openDatabase, rpcChainReader, viewClearedEdges } from "../../../backend/dist/index.js";
 
 const [rpcUrl, contractId, startArg, circleId, ...accounts] = process.argv.slice(2);
 const startBlock = Number(startArg);
@@ -23,7 +23,8 @@ async function view(method, args) {
 const db = openDatabase(process.env.X207_DB ?? ":memory:");
 const client = new FailoverRpcClient({ endpoints: [rpcUrl], timeoutMs: 30_000 });
 const source = new RpcBlockSource(rpcChainReader(client), contractId, startBlock);
-const indexer = new Indexer({ db, source, circleId, contractId, startBlock, fetchParams: () => view("get_params", {}) });
+// 0.0.13 (CT-099): the edges of a commit are read from `list_obligations`, the log has only their count and hash
+const indexer = new Indexer({ db, source, circleId, contractId, startBlock, fetchParams: () => view("get_params", {}), fetchClearedEdges: (epoch) => viewClearedEdges(rpcUrl, contractId, epoch) });
 await indexer.bootstrap();
 // Follow the chain while the test runs: a sandbox drops old outcomes after a few epochs of height, so the
 // indexer must read each block soon after it is final. A line on stdin ends the run.
