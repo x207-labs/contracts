@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 33] = [
+const CHANGE_METHODS: [&str; 34] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -33,8 +33,8 @@ const CHANGE_METHODS: [&str; 33] = [
     "revoke_grant",
     // 0.0.7: CT-075 (class A escrow)
     "nft_on_transfer", "complete_escrow", "cancel_escrow", "on_escrow_resolved",
-    // 0.0.8: security review F2
-    "remove_intent",
+    // 0.0.8: security review F2 and CT-079 (prune_epoch)
+    "remove_intent", "prune_epoch",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
@@ -45,11 +45,11 @@ const VIEWS: [&str; 28] = [
     "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow",
 ];
 
-const P1_P2_METHODS: [&str; 1] = ["prune_epoch"];
+const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 61] = [
+const SIGNATURES: [&str; 62] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_upgrade()->Promise []",
@@ -99,6 +99,7 @@ const SIGNATURES: [&str; 61] = [
     "outstanding_debt(account_id:string)->string []",
     "post_intent(intent_hash:string)-> []",
     "propose_upgrade(code_hash:string)-> []",
+    "prune_epoch(epoch:integer:uint64,max_items:integer:uint32)->integer:uint32 []",
     "register_cumulative(voucher:Voucher,signature:string)->string []",
     "register_in_bundle(bundle_id:integer:uint64,voucher:Voucher,signature:string)->string []",
     "register_voucher(voucher:Voucher,signature:string)->string []",

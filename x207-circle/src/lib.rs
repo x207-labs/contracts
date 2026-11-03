@@ -14,6 +14,7 @@ pub mod grant;
 pub mod member;
 pub mod params;
 pub mod pool;
+pub mod prune;
 pub mod risk;
 pub mod settlement;
 pub mod stake;

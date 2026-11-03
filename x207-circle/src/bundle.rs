@@ -21,6 +21,9 @@ const SEQ_KEY: &[u8] = b"x207_bundle_seq";
 pub const MAX_OPEN_INTENTS_PER_MEMBER: u32 = 64;
 /// Bundles one participant may be in per epoch (security review F2). The limit is per participant, so two accounts cannot use up the slots of a third.
 pub const MAX_BUNDLES_PER_MEMBER_PER_EPOCH: u32 = 16;
+/// Legs one bundle may have. Measured in near-sandbox (`ct080_gas_limits`): 64 legs cost 75 Tgas at most (a cycle through 64 members); without a cap, about 240 legs
+/// fill the 16 KiB of a log message with `bundle_committed` and the transaction fails with a host error instead of `ERR_BAD_BUNDLE`.
+pub const MAX_BUNDLE_LEGS: usize = 64;
 const HASH_KEY_PREFIX: &[u8] = b"x207_bundle_hash:";
 
 /// One leg: `payer` may owe `payee` at most `max_amount` in the epoch of the bundle.
@@ -115,7 +118,7 @@ pub struct IntentView {
     pub posted_at: U64,
 }
 
-fn bundles() -> LookupMap<u64, Bundle> {
+pub(crate) fn bundles() -> LookupMap<u64, Bundle> {
     LookupMap::new(StorageKey::Bundles)
 }
 
@@ -127,11 +130,11 @@ fn intent_counts() -> LookupMap<AccountId, u32> {
     LookupMap::new(StorageKey::IntentCounts)
 }
 
-fn bundle_counts() -> LookupMap<(EpochId, AccountId), u32> {
+pub(crate) fn bundle_counts() -> LookupMap<(EpochId, AccountId), u32> {
     LookupMap::new(StorageKey::BundleCounts)
 }
 
-fn reserves() -> LookupMap<(EpochId, AccountId), u128> {
+pub(crate) fn reserves() -> LookupMap<(EpochId, AccountId), u128> {
     LookupMap::new(StorageKey::BundleReserves)
 }
 
@@ -146,7 +149,24 @@ fn set_reserved(epoch: EpochId, account: &AccountId, value: u128) {
     map.flush();
 }
 
-fn hash_key(terms_hash: &[u8; 32]) -> Vec<u8> {
+fn epoch_ids_key(epoch: EpochId) -> Vec<u8> {
+    [b"x207_bundle_ids:".as_slice(), &epoch.to_le_bytes()].concat()
+}
+
+/// Ids of the bundles committed in `epoch`, oldest first: raw storage, little-endian `u64`s, so `prune_epoch` finds the bundles of an epoch.
+pub(crate) fn epoch_bundle_ids(epoch: EpochId) -> Vec<u64> {
+    env::storage_read(&epoch_ids_key(epoch)).map_or_else(Vec::new, |b| b.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes"))).collect())
+}
+
+pub(crate) fn set_epoch_bundle_ids(epoch: EpochId, ids: &[u64]) {
+    if ids.is_empty() {
+        env::storage_remove(&epoch_ids_key(epoch));
+    } else {
+        env::storage_write(&epoch_ids_key(epoch), &ids.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<u8>>());
+    }
+}
+
+pub(crate) fn hash_key(terms_hash: &[u8; 32]) -> Vec<u8> {
     [HASH_KEY_PREFIX, terms_hash.as_slice()].concat()
 }
 
@@ -254,6 +274,7 @@ impl X207Circle {
 
         // shape: at least two legs, payer != payee, unique pairs, amounts > 0
         require!(bundle.legs.len() >= 2, "ERR_BAD_BUNDLE: a bundle needs at least two legs");
+        require!(bundle.legs.len() <= MAX_BUNDLE_LEGS, format!("ERR_BAD_BUNDLE: {} legs, the limit is {MAX_BUNDLE_LEGS}", bundle.legs.len()));
         let mut pairs = std::collections::BTreeSet::new();
         for leg in &bundle.legs {
             require!(leg.payer != leg.payee, format!("ERR_BAD_BUNDLE: leg pays itself {}", leg.payer));
@@ -336,6 +357,9 @@ impl X207Circle {
         };
         map.insert(bundle_id, record);
         map.flush();
+        let mut ids = epoch_bundle_ids(epoch_id);
+        ids.push(bundle_id);
+        set_epoch_bundle_ids(epoch_id, &ids);
         for (payer, total) in &owed {
             set_reserved(epoch_id, payer, reserved(epoch_id, payer) + total);
         }
@@ -411,6 +435,24 @@ mod security_tests {
     fn panics_with(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).expect_err("expected a panic");
         err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_bundle_with_more_than_64_legs_is_refused_with_err_bad_bundle() {
+        let mut c = circle_with_member("gina.near");
+        let legs = |n: usize| -> Vec<BundleLeg> {
+            (0..n).map(|i| BundleLeg { payer: acc("gina.near"), payee: acc(&format!("p{i}.near")), max_amount: U128(1) }).collect()
+        };
+        let input = |n: usize| BundleInput { epoch: 1, legs: legs(n), search_leg: None };
+        let msg = panics_with(std::panic::AssertUnwindSafe(|| {
+            c.commit_bundle(input(MAX_BUNDLE_LEGS + 1), vec![]);
+        }));
+        assert!(msg.contains("ERR_BAD_BUNDLE") && msg.contains("limit is 64"), "{msg}");
+        // 64 legs pass the shape check and stop later (the payees are not members)
+        let msg = panics_with(std::panic::AssertUnwindSafe(|| {
+            c.commit_bundle(input(MAX_BUNDLE_LEGS), vec![]);
+        }));
+        assert!(msg.contains("ERR_PAYEE_NOT_ACTIVE"), "{msg}");
     }
 
     #[test]

@@ -1285,6 +1285,39 @@
       },
       {
         "kind": "call",
+        "name": "prune_epoch",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "max_items",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "format": "uint32",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "name": "register_cumulative",
         "params": {
           "args": [
