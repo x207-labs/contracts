@@ -98,3 +98,30 @@ async fn a_token_that_cannot_send_what_it_took_in_leaves_the_sale_unpaid() -> an
     assert_eq!(w.rwa_in_circle().await?, AMOUNT - 1);
     Ok(())
 }
+
+// TC-CT-091-10: after one or more failed deliveries the grantor still gets the tokens back once the time of the grant has passed
+#[tokio::test]
+async fn the_grantor_gets_the_tokens_back_after_failed_deliveries() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let id = w.offer(90_000_000_000).await?;
+    let alice = w.alice.clone();
+    let start = w.rwa_of(&alice).await?;
+    w.whitelist(&[w.f.circle.contract.id().as_str(), alice.id().as_str()]).await?;
+    assert!(w.deposit(&alice, AMOUNT, id).await?.is_success());
+    let epoch = w.epoch().await?;
+    // bob and carol are not whitelisted: both deliveries fail and are taken back
+    for buyer in ["bob", "carol"] {
+        let tried = w.buy(buyer, epoch, PRICE, id).await?;
+        assert!(events(&tried).iter().any(|(n, d)| n == "escrow_failed" && d["reverted"] == true), "{buyer}");
+        w.assert_clean_after_failure(id, epoch, buyer).await?;
+    }
+    assert_eq!(w.rwa_in_circle().await?, AMOUNT);
+    let expires = w.f.circle.view("get_grant", json!({"grant_id": id})).await?["limits"]["expires_at"].as_str().unwrap().parse::<u64>()?;
+    w.f.circle.advance_to(expires + 2_000_000_000).await?;
+    let done = w.f.circle.call_as(&alice, "cancel_escrow", json!({"grant_id": id})).await?;
+    assert!(done.is_success(), "{:?}", failure_text(&done));
+    assert_eq!((w.rwa_of(&alice).await?, w.rwa_in_circle().await?), (start, 0), "the tokens are back with the grantor");
+    assert_eq!(w.f.circle.view("get_ft_escrow", json!({"grant_id": id})).await?["state"], "cancelled");
+    assert_eq!(w.f.circle.view("get_grant", json!({"grant_id": id})).await?["status"], "revoked");
+    Ok(())
+}
