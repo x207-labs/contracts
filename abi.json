@@ -914,6 +914,60 @@
         "name": "migrate"
       },
       {
+        "kind": "call",
+        "name": "mt_on_transfer",
+        "params": {
+          "args": [
+            {
+              "name": "sender_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "previous_owner_ids",
+              "type_schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            {
+              "name": "token_ids",
+              "type_schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            {
+              "name": "amounts",
+              "type_schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            {
+              "name": "msg",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueArray_of_String"
+          }
+        }
+      },
+      {
         "kind": "view",
         "name": "net_position",
         "params": {
@@ -2527,6 +2581,12 @@
           "type": "object"
         },
         "Promise": true,
+        "PromiseOrValueArray_of_String": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "PromiseOrValueBoolean": {
           "type": "boolean"
         },
@@ -2976,10 +3036,10 @@
       "name": "bundle_committed"
     }
   ],
-  "interface_version": "0.0.8",
+  "interface_version": "0.0.9",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.8"
+    "version": "0.0.9"
   },
   "schema_version": "0.4.0"
 }

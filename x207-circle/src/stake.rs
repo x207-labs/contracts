@@ -107,6 +107,44 @@ impl X207Circle {
             TransferMsg::Settle { epoch, member_id } => self.settle_transfer(sender_id, amount, epoch, member_id),
         }
     }
+
+    /// NEP-245 receiver (BE-034, spec 18): the `settle` action for a payment that comes from `intents_id` as the multi-token
+    /// `nep141:<usdt_token_id>`. Order of checks: `ERR_WRONG_TOKEN` (predecessor, then the token), `ERR_BAD_MSG`, `ERR_ZERO_AMOUNT`, then
+    /// the checks of `settle_transfer`, which are those of `ft_on_transfer`. The debtor is `previous_owner_ids[0]`; the result is the
+    /// amount handed back per token (one entry), as in NEP-245.
+    pub fn mt_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        previous_owner_ids: Vec<AccountId>,
+        token_ids: Vec<String>,
+        amounts: Vec<U128>,
+        msg: String,
+    ) -> PromiseOrValue<Vec<U128>> {
+        let caller = env::predecessor_account_id();
+        if caller != self.intents_id {
+            env::panic_str(&format!("ERR_WRONG_TOKEN: {caller} is not the intents contract"));
+        }
+        let expected = format!("nep141:{}", self.usdt_token_id);
+        if token_ids.len() != 1 || token_ids[0] != expected {
+            env::panic_str(&format!("ERR_WRONG_TOKEN: expected the single token {expected}, got {token_ids:?}"));
+        }
+        if amounts.len() != 1 || previous_owner_ids.is_empty() {
+            env::panic_str("ERR_BAD_MSG: one amount and at least one previous owner are required");
+        }
+        let msg: TransferMsg = serde_json::from_str(&msg).unwrap_or_else(|e| env::panic_str(&format!("ERR_BAD_MSG: {e}")));
+        let amount = amounts[0];
+        if amount.0 == 0 {
+            env::panic_str("ERR_ZERO_AMOUNT");
+        }
+        let TransferMsg::Settle { epoch, member_id } = msg else {
+            env::panic_str("ERR_BAD_MSG: only the settle action comes through mt_on_transfer");
+        };
+        let _ = sender_id;
+        match self.settle_transfer(previous_owner_ids[0].clone(), amount, epoch, member_id) {
+            PromiseOrValue::Value(refund) => PromiseOrValue::Value(vec![refund]),
+            PromiseOrValue::Promise(_) => env::panic_str("ERR_D2_ACCOUNTING: settle_transfer returned a promise"),
+        }
+    }
 }
 
 /// Gas of the exit transfer and its callback (spec section 14); final values come from CT-043.

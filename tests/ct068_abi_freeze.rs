@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 34] = [
+const CHANGE_METHODS: [&str; 35] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -35,6 +35,8 @@ const CHANGE_METHODS: [&str; 34] = [
     "nft_on_transfer", "complete_escrow", "cancel_escrow", "on_escrow_resolved",
     // 0.0.8: security review F2 and CT-085 (prune_epoch)
     "remove_intent", "prune_epoch",
+    // 0.0.9: BE-034 (NEP-245 receiver)
+    "mt_on_transfer",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
@@ -49,7 +51,7 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 62] = [
+const SIGNATURES: [&str; 63] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_upgrade()->Promise []",
@@ -87,6 +89,7 @@ const SIGNATURES: [&str; 62] = [
     "list_positions(epoch:integer:uint64,from_index:integer:uint32,limit:integer:uint32)->array<PositionView> []",
     "member(account_id:string)->MemberView|null []",
     "migrate()-> [init,private]",
+    "mt_on_transfer(sender_id:string,previous_owner_ids:array<string>,token_ids:array<string>,amounts:array<string>,msg:string)->PromiseOrValueArray_of_String []",
     "net_position(epoch:integer:uint64,account_id:string)->PositionView|null []",
     "new(owner_id:string,circle_id:string,usdt_token_id:string,intents_id:string,params:Params|null)-> [init]",
     "nft_on_transfer(sender_id:string,previous_owner_id:string,token_id:string,msg:string)->PromiseOrValueBoolean []",

@@ -2,7 +2,8 @@
 //! and answers by a mode set by the test: use everything, hand part of it back, or fail.
 
 use near_sdk::json_types::U128;
-use near_sdk::{env, near, AccountId, PanicOnDefault};
+use near_sdk::serde_json::json;
+use near_sdk::{env, near, AccountId, Gas, NearToken, PanicOnDefault, Promise};
 
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
@@ -38,6 +39,25 @@ impl MockIntents {
         let back = if self.mode == "refund" { self.refund.min(amount.0) } else { 0 };
         self.received += amount.0 - back;
         U128(back)
+    }
+
+    /// Plays `intents.near` paying a circle in the multi-token (NEP-245): calls `mt_on_transfer` on `receiver_id` with this contract as the
+    /// predecessor. The call returns the receiver's answer (the amounts handed back). `previous_owner_id` is whoever the test says paid.
+    pub fn mt_transfer_call(&mut self, receiver_id: AccountId, previous_owner_id: AccountId, token_id: String, amount: U128, msg: String) -> Promise {
+        Promise::new(receiver_id).function_call(
+            "mt_on_transfer".to_string(),
+            json!({
+                "sender_id": previous_owner_id,
+                "previous_owner_ids": [previous_owner_id],
+                "token_ids": [token_id],
+                "amounts": [amount],
+                "msg": msg,
+            })
+            .to_string()
+            .into_bytes(),
+            NearToken::from_yoctonear(0),
+            Gas::from_tgas(100),
+        )
     }
 
     pub fn last_msg(&self) -> Option<String> {
