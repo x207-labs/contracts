@@ -264,12 +264,13 @@ impl X207Circle {
 }
 
 impl X207Circle {
-    /// The grantee is `suspended`, or is not `active` and has a D5 position `defaulted` in the running epoch or the two before it. A member that
+    /// The grantee is `suspended` or `exited`, or is not `active` and has a D5 position `defaulted` in the running epoch or the two before it. A member that
     /// was reactivated (`active` again) is not defaulted any more: an old default must not let a stranger revoke the grants it accepted since.
     fn grantee_defaulted(&self, grant: &AccessGrant) -> bool {
         let Some(grantee) = &grant.grantee else { return false };
         let Some(status) = self.members.get(grantee).map(|m| self.member_now(m).status) else { return false };
-        if status == MemberStatus::Suspended {
+        // an `exited` member has no stake left in the circle (security review 3, I-5): anybody may end the grants it still holds
+        if matches!(status, MemberStatus::Suspended | MemberStatus::Exited) {
             return true;
         }
         if status == MemberStatus::Active {
@@ -369,6 +370,9 @@ impl X207Circle {
         require!(caller != grant.grantor, format!("ERR_GRANT_SELF: {caller}"));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
         require!(grant.class != AssetClass::A, "ERR_GRANT_NOT_OFFERED: a class A grant is bought with complete_escrow");
+        // security review 3, I-5: the offer of a grantor that left or was suspended is not taken (the lessee would hold a grant of somebody with no stake in the circle)
+        let grantor_active = self.members.get(&grant.grantor).map(|m| self.member_now(m)).is_some_and(|m| m.status == MemberStatus::Active);
+        require!(grantor_active, format!("ERR_GRANT_NOT_ACTIVE_MEMBER: the grantor {} is not an active member", grant.grantor));
         require!(env::block_timestamp() < grant.limits.expires_at.0, format!("ERR_GRANT_EXPIRED: expires_at {}", grant.limits.expires_at.0));
         grant.status = GrantStatus::Active;
         grant.grantee = Some(caller.clone());
@@ -490,6 +494,35 @@ mod tests {
         let mut c = circle_with_defaulted_grantee(MemberStatus::Suspended);
         assert!(stranger_revokes(&mut c));
         assert_eq!(load_grant(3).status, GrantStatus::Revoked);
+    }
+
+    // security review 3, I-5 (b): a grantee that has `exited` can have its grants ended by anybody with the reason `defaulted`
+    #[test]
+    fn a_stranger_ends_the_grant_of_an_exited_grantee() {
+        let mut c = circle_with_defaulted_grantee(MemberStatus::Exited);
+        c.positions.remove(&(1, acc("gpu.near")));
+        assert!(stranger_revokes(&mut c), "the grant of an exited member could not be revoked");
+        assert_eq!(load_grant(3).status, GrantStatus::Revoked);
+    }
+
+    // security review 3, I-5 (a): nobody accepts the offer of a grantor that is not an active member
+    #[test]
+    fn the_offer_of_a_grantor_that_is_not_active_is_not_accepted() {
+        for status in [MemberStatus::Exited, MemberStatus::Suspended, MemberStatus::Pending] {
+            let mut c = circle_with_defaulted_grantee(MemberStatus::Active);
+            c.members.insert(acc("scraper.near"), member("scraper.near", status));
+            c.members.insert(acc("gina.near"), member("gina.near", MemberStatus::Active));
+            store_grant_for_test(&AccessGrant {
+                grant_id: 4, asset_type: "near-rpc:access".into(), grantor: acc("scraper.near"), grantee: None, class: AssetClass::B,
+                limits: GrantLimits { scope: "{}".into(), quota: None, expires_at: U64(9_000_000_000_000) }, unit: "day".into(), unit_price: U128(1),
+                operator: None, delivery_pubkey: None, status: GrantStatus::Offered, proof_hash: None, proof_kind: None,
+            });
+            near_sdk::testing_env!(near_sdk::test_utils::VMContextBuilder::new().predecessor_account_id(acc("gina.near")).block_timestamp(2_000).build());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.accept_grant(4, None)));
+            let text = result.err().and_then(|e| e.downcast_ref::<String>().cloned()).unwrap_or_default();
+            assert!(text.contains("ERR_GRANT_NOT_ACTIVE_MEMBER"), "{status:?}: {text}");
+            assert_eq!(load_grant(4).status, GrantStatus::Offered);
+        }
     }
 }
 

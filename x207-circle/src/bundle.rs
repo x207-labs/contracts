@@ -11,7 +11,7 @@ use near_sdk::{env, near, require, AccountId};
 
 use crate::canonical::{nep413_signing_hash, parse_signature};
 use crate::clearing::EpochPhase;
-use crate::events::{BundleCommitted, IntentPosted, X207Event};
+use crate::events::{BundleCommitted, IntentPosted, IntentRemoved, X207Event};
 use crate::member::MemberStatus;
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::EpochId;
@@ -243,19 +243,24 @@ impl X207Circle {
         IntentPosted { intent_hash, account_id: account, posted_at: U64(posted_at) }.emit();
     }
 
-    /// F5 (security review F2): the owner of an intent takes it away and gets the slot back. `ERR_UNKNOWN_INTENT`, `ERR_NOT_INTENT_OWNER`.
+    /// F5 (security review F2): the owner of an intent takes it away and gets the slot back. Anybody may remove the intent of a member that has `exited`
+    /// (security review 3, I-4): the member has no reason to, and the contract pays for the record. `ERR_UNKNOWN_INTENT`, `ERR_NOT_INTENT_OWNER`.
+    /// Emits `intent_removed` with the owner of the intent.
     pub fn remove_intent(&mut self, intent_hash: Base58CryptoHash) {
-        let account = env::predecessor_account_id();
+        let caller = env::predecessor_account_id();
         let key: [u8; 32] = intent_hash.into();
         let mut map = intents();
         let Some(record) = map.get(&key) else { env::panic_str(&format!("ERR_UNKNOWN_INTENT: {}", hex(&key))) };
-        require!(record.account_id == account, format!("ERR_NOT_INTENT_OWNER: {account}"));
+        let owner = record.account_id.clone();
+        let owner_exited = self.members.get(&owner).is_some_and(|m| m.status == MemberStatus::Exited);
+        require!(owner == caller || owner_exited, format!("ERR_NOT_INTENT_OWNER: {caller}"));
         map.remove(&key);
         map.flush();
         let mut counts = intent_counts();
-        let open = counts.get(&account).copied().unwrap_or(1);
-        counts.insert(account, open.saturating_sub(1));
+        let open = counts.get(&owner).copied().unwrap_or(1);
+        counts.insert(owner.clone(), open.saturating_sub(1));
         counts.flush();
+        IntentRemoved { intent_hash, account_id: owner }.emit();
     }
 
     /// F5 (CT-063): permissionless. Checks in order: epoch (`ERR_UNKNOWN_EPOCH`, `ERR_WRONG_PHASE`), past cutoff
@@ -455,6 +460,26 @@ mod security_tests {
         assert!(msg.contains("ERR_PAYEE_NOT_ACTIVE"), "{msg}");
     }
 
+    // security review 3, I-4: anybody removes the intent of a member that has exited, and only of such a member; the slot and the event are the owner's
+    #[test]
+    fn anybody_removes_the_intent_of_an_exited_member_and_of_nobody_else() {
+        let mut c = circle_with_member("gina.near");
+        post(&mut c, "gina.near", 1);
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("mallory.near")).block_timestamp(2_000).build());
+        for status in [MemberStatus::Active, MemberStatus::Suspended, MemberStatus::Pending] {
+            c.members.get_mut(&acc("gina.near")).unwrap().status = status;
+            let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(1))));
+            assert!(msg.contains("ERR_NOT_INTENT_OWNER"), "{status:?}: {msg}");
+        }
+        c.members.get_mut(&acc("gina.near")).unwrap().status = MemberStatus::Exited;
+        let _ = near_sdk::test_utils::get_logs();
+        c.remove_intent(hash_of(1));
+        let log = near_sdk::test_utils::get_logs().join("\n");
+        assert!(log.contains(r#""event":"intent_removed""#) && log.contains("gina.near") && !log.contains("mallory.near"), "{log}");
+        assert!(c.get_intent(hash_of(1)).is_none());
+        assert_eq!(intent_counts().get(&acc("gina.near")).copied(), Some(0), "the slot of the owner is free");
+    }
+
     #[test]
     fn the_65th_open_intent_of_a_member_is_refused_with_err_intent_limit() {
         let mut c = circle_with_member("gina.near");
@@ -475,7 +500,10 @@ mod security_tests {
         let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(3))));
         assert!(msg.contains("ERR_NOT_INTENT_OWNER"), "{msg}");
         testing_env!(VMContextBuilder::new().predecessor_account_id(acc("gina.near")).block_timestamp(2_000).build());
+        let _ = near_sdk::test_utils::get_logs();
         c.remove_intent(hash_of(3));
+        let log = near_sdk::test_utils::get_logs().join("\n");
+        assert!(log.contains(r#""event":"intent_removed""#) && log.contains("gina.near"), "{log}");
         let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(3))));
         assert!(msg.contains("ERR_UNKNOWN_INTENT"), "{msg}");
         post(&mut c, "gina.near", 1_000);
