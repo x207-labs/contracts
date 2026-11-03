@@ -68,7 +68,7 @@ impl X207Circle {
             let member = self.members.get_mut(&account).expect("a debtor of a cleared edge is a member");
             let take = share.min(member.stake);
             member.stake -= take;
-            member.limit = member.limit.min(member.stake);
+            member.limit = crate::deal::bound_limit(member.limit, member.stake, &account); // review C-6: the bond is not available as a limit
             charged += take;
         }
         let to_reserve = clearing_fee.min(charged);
@@ -643,6 +643,19 @@ mod tests {
         c.commit_epoch(1);
         assert_eq!((c.reserve, c.solver_fees_total, c.total_stake), (0, 0, 300 * CREDIT));
         assert_eq!(c.solver_fees.get(&acc("solver1.near")), None);
+    }
+
+    // CT-094 review C-6: the fee comes out of the stake, and the limit stays at most `stake - bond_locked`
+    #[test]
+    fn a_fee_keeps_the_limit_below_the_stake_minus_the_locked_bond() {
+        let mut c = s1_with_fees(100, 50, 100 * CREDIT);
+        let bond = 20 * CREDIT;
+        crate::deal::write_u128(&crate::deal::locked_key(&acc("scraper.near")), bond);
+        c.commit_epoch(1);
+        let m = c.members.get(&acc("scraper.near")).unwrap();
+        assert_eq!(m.stake, 100 * CREDIT - 375_000);
+        assert!(m.limit <= m.stake - bond, "limit {} stake {} bond {bond}", m.limit, m.stake);
+        assert_eq!(m.limit, m.stake - bond);
     }
 
     // CT-051: a stake that cannot cover its share pays what it has, and the limit is clamped to the stake (I-01)
