@@ -3162,10 +3162,10 @@
       "name": "intent_removed"
     }
   ],
-  "interface_version": "0.0.9",
+  "interface_version": "0.0.10",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.9"
+    "version": "0.0.10"
   },
   "schema_version": "0.4.0"
 }
