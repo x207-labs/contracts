@@ -99,7 +99,7 @@ async fn state_written_by_0_0_7_reads_the_same_after_the_upgrade() -> anyhow::Re
     let applied = dao.call(f.circle.contract.id(), "apply_upgrade").args(new_wasm).gas(Gas::from_tgas(300)).transact().await?;
     assert!(applied.is_success(), "{:?}", failure_text(&applied));
     assert!(events(&applied).iter().any(|(n, _)| n == "upgrade_applied"));
-    assert_eq!(f.circle.view("interface_version", json!({})).await?, "0.0.8");
+    assert_eq!(f.circle.view("interface_version", json!({})).await?, x207_circle::INTERFACE_VERSION);
 
     // 1. everything that was written reads the same
     assert_eq!(snapshot(&f).await?, before);
