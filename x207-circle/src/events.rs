@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 35] = [
+pub const EVENT_SCHEMAS: [EventSchema; 39] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -115,6 +115,10 @@ pub const EVENT_SCHEMAS: [EventSchema; 35] = [
     schema("grant_revoked", &["grant_id", "reason"]),
     schema("escrow_held", &["grant_id", "nft_contract", "token_id"]),
     schema("ft_escrow_held", &["grant_id", "ft_contract", "amount"]),
+    schema("freeze_proposed", &["account_id", "eta", "reason_hash"]),
+    schema("member_frozen", &["account_id", "from_epoch"]),
+    schema("freeze_cancelled", &["account_id"]),
+    schema("member_unfrozen", &["account_id"]),
     schema("mt_escrow_held", &["grant_id", "mt_contract", "token_id", "amount"]),
     schema("escrow_failed", &["grant_id", "step", "epoch", "payer", "payee", "delta", "reverted"]),
     EventSchema {
@@ -337,6 +341,10 @@ event!("grant_revoked", GrantRevoked { grant_id: u64, reason: crate::grant::Revo
 event!("escrow_held", EscrowHeld { grant_id: u64, nft_contract: AccountId, token_id: String });
 event!("ft_escrow_held", FtEscrowHeld { grant_id: u64, ft_contract: AccountId, amount: U128 });
 event!("mt_escrow_held", MtEscrowHeld { grant_id: u64, mt_contract: AccountId, token_id: String, amount: U128 });
+event!("freeze_proposed", FreezeProposed { account_id: AccountId, eta: U64, reason_hash: Option<String> });
+event!("member_frozen", MemberFrozen { account_id: AccountId, from_epoch: EpochId });
+event!("freeze_cancelled", FreezeCancelled { account_id: AccountId });
+event!("member_unfrozen", MemberUnfrozen { account_id: AccountId });
 event!("escrow_failed", EscrowFailed { grant_id: u64, step: crate::escrow::EscrowStep, epoch: EpochId, payer: AccountId, payee: AccountId, delta: U128, reverted: bool });
 event!("bundle_committed", BundleCommitted { bundle_id: u64, terms_hash: String, epoch: EpochId, legs: Vec<crate::bundle::BundleLeg>, solver: AccountId });
 event!("upgrade_proposed", UpgradeProposed { code_hash: near_sdk::json_types::Base58CryptoHash, eta: U64 });
@@ -459,6 +467,10 @@ mod tests {
             (GrantActivated::NAME, GrantActivated { grant_id: 1, grantee: b.clone(), delivery_pubkey: None }.to_log()),
             (GrantRevoked::NAME, GrantRevoked { grant_id: 1, reason: crate::grant::RevokeReason::Grantor }.to_log()),
             (EscrowHeld::NAME, EscrowHeld { grant_id: 1, nft_contract: b.clone(), token_id: "t1".into() }.to_log()),
+            (FreezeProposed::NAME, FreezeProposed { account_id: a.clone(), eta: t, reason_hash: None }.to_log()),
+            (MemberFrozen::NAME, MemberFrozen { account_id: a.clone(), from_epoch: 42 }.to_log()),
+            (FreezeCancelled::NAME, FreezeCancelled { account_id: a.clone() }.to_log()),
+            (MemberUnfrozen::NAME, MemberUnfrozen { account_id: a.clone() }.to_log()),
             (MtEscrowHeld::NAME, MtEscrowHeld { grant_id: 1, mt_contract: b.clone(), token_id: "nep141:x.near".into(), amount: U128(5) }.to_log()),
             (FtEscrowHeld::NAME, FtEscrowHeld { grant_id: 1, ft_contract: b.clone(), amount: U128(5) }.to_log()),
             (EscrowFailed::NAME, EscrowFailed { grant_id: 1, step: crate::escrow::EscrowStep::Complete, epoch: 42, payer: a.clone(), payee: b.clone(), delta: U128(5), reverted: true }.to_log()),
@@ -706,7 +718,7 @@ mod tests {
                 "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested",
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
-                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "mt_escrow_held", "escrow_failed", "bundle_committed",
+                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "mt_escrow_held", "escrow_failed", "bundle_committed",
                 "intents_withdrawn", "intent_removed",
             ]
         );

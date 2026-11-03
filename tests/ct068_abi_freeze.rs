@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 37] = [
+const CHANGE_METHODS: [&str; 41] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -37,25 +37,29 @@ const CHANGE_METHODS: [&str; 37] = [
     "remove_intent", "prune_epoch",
     // 0.0.9: BE-034 (NEP-245 receiver)
     "mt_on_transfer", "withdraw_intents_balance", "on_intents_withdrawn",
+    // 0.0.12: CT-095 (freeze_member)
+    "propose_freeze", "apply_freeze", "cancel_freeze", "unfreeze_member",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 31] = [
+const VIEWS: [&str; 33] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
     "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance",
+    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 68] = [
+const SIGNATURES: [&str; 74] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
+    "apply_freeze(account_id:string)-> []",
     "apply_upgrade()->Promise []",
     "cancel_escrow(grant_id:integer:uint64)->Promise []",
+    "cancel_freeze(account_id:string)-> []",
     "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
     "claim_solver_fee()->Promise [payable]",
     "close_epoch(epoch:integer:uint64)-> []",
@@ -70,6 +74,7 @@ const SIGNATURES: [&str; 68] = [
     "get_clearing_proposal(epoch:integer:uint64)->ClearingProposal|null []",
     "get_epoch(epoch:integer:uint64|null)->EpochView|null []",
     "get_escrow(grant_id:integer:uint64)->EscrowView|null []",
+    "get_freeze(account_id:string)->FreezeView|null []",
     "get_ft_escrow(grant_id:integer:uint64)->FtEscrowView|null []",
     "get_grant(grant_id:integer:uint64)->AccessGrant|null []",
     "get_intent(intent_hash:string)->IntentView|null []",
@@ -83,6 +88,7 @@ const SIGNATURES: [&str; 68] = [
     "headroom(account_id:string)->string []",
     "intents_balance()->string []",
     "interface_version()->string []",
+    "is_frozen(account_id:string)->boolean []",
     "join(circle_id:string,pubkey_voucher:string,terms_hash:string)->MemberView [payable]",
     "last_seq(payer:string,payee:string,epoch:integer:uint64)->integer:uint64 []",
     "limit(account_id:string)->string []",
@@ -105,6 +111,7 @@ const SIGNATURES: [&str; 68] = [
     "on_withdraw_resolved(account_id:string,amount:string)->boolean [private]",
     "outstanding_debt(account_id:string)->string []",
     "post_intent(intent_hash:string)-> []",
+    "propose_freeze(account_id:string,reason_hash:string|null)-> []",
     "propose_upgrade(code_hash:string)-> []",
     "prune_epoch(epoch:integer:uint64,max_items:integer:uint32)->integer:uint32 []",
     "register_cumulative(voucher:Voucher,signature:string)->string []",
@@ -118,16 +125,13 @@ const SIGNATURES: [&str; 68] = [
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
     "solver_fee_balance(account_id:string)->string []",
     "submit_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->string []",
+    "unfreeze_member(account_id:string)-> []",
     "withdraw_intents_balance()->Promise []",
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
 ];
 
-const EVENTS: [&str; 35] = [
-    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied",
-    "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed",
-    "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed",
-    "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed",
-    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
+const EVENTS: [&str; 39] = [
+    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
 ];
 
 fn strip_descriptions(value: &mut Value) {

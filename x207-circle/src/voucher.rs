@@ -146,6 +146,9 @@ impl X207Circle {
         // 6-8
         let payer = self.active_member(&voucher.payer, "ERR_PAYER_NOT_ACTIVE");
         let payee = self.active_member(&voucher.payee, "ERR_PAYEE_NOT_ACTIVE");
+        // CT-095: a freeze stops vouchers only from the epoch after the one in which it took effect
+        crate::freeze::assert_not_frozen_for_voucher(&voucher.payer, epoch_id);
+        crate::freeze::assert_not_frozen_for_voucher(&voucher.payee, epoch_id);
         for m in [&payer, &payee] {
             if let Some(exit) = m.exit_requested_epoch {
                 require!(exit >= epoch_id, format!("ERR_EXITING: {} exit_requested_epoch {exit}", m.account_id));

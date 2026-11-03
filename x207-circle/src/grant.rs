@@ -329,6 +329,7 @@ impl X207Circle {
         let grantor = env::predecessor_account_id();
         require!(self.members.get(&grantor).is_some(), format!("ERR_NOT_MEMBER: {grantor}"));
         self.assert_active_caller();
+        crate::freeze::assert_not_frozen(&grantor, "offer a grant");
         let entry = get_class(&input.asset_type).unwrap_or_else(|| env::panic_str(&format!("ERR_ASSET_TYPE_UNKNOWN: {}", input.asset_type)));
         require!(entry.class != AssetClass::X, format!("ERR_ASSET_CLASS_FORBIDDEN: {}", input.asset_type));
         require!(entry.delivery_methods.contains(&input.delivery_method), format!("ERR_DELIVERY_NOT_ALLOWED: {}", input.delivery_method));
@@ -402,6 +403,7 @@ impl X207Circle {
     pub fn accept_grant(&mut self, grant_id: GrantId, delivery_pubkey: Option<PublicKey>) {
         let mut grant = load_grant(grant_id);
         let caller = self.assert_active_caller();
+        crate::freeze::assert_not_frozen(&caller, "accept a grant");
         require!(caller != grant.grantor, format!("ERR_GRANT_SELF: {caller}"));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
         require!(grant.class != AssetClass::A, "ERR_GRANT_NOT_OFFERED: a class A grant is bought with complete_escrow");

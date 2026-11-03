@@ -319,6 +319,7 @@ impl X207Circle {
         let mut escrow = Held::load(grant_id).unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
         require!(escrow.state() == EscrowState::Held, format!("ERR_ESCROW_NOT_HELD: {:?}", escrow.state()));
         let buyer = env::predecessor_account_id();
+        crate::freeze::assert_not_frozen(&buyer, "buy an escrowed asset");
         require!(buyer != grant.grantor, format!("ERR_GRANT_SELF: {buyer}"));
         require!(voucher.payer == buyer && voucher.payee == grant.grantor, "ERR_ESCROW_VOUCHER: the caller pays the grantor");
 

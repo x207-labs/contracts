@@ -44,6 +44,21 @@
       },
       {
         "kind": "call",
+        "name": "apply_freeze",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "apply_upgrade",
         "result": {
           "serialization_type": "json",
@@ -73,6 +88,21 @@
           "type_schema": {
             "$ref": "#/definitions/Promise"
           }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "cancel_freeze",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
         }
       },
       {
@@ -434,6 +464,34 @@
       },
       {
         "kind": "view",
+        "name": "get_freeze",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/FreezeView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_ft_escrow",
         "params": {
           "args": [
@@ -698,6 +756,27 @@
           "serialization_type": "json",
           "type_schema": {
             "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "is_frozen",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "boolean"
           }
         }
       },
@@ -1418,6 +1497,30 @@
       },
       {
         "kind": "call",
+        "name": "propose_freeze",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "reason_hash",
+              "type_schema": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "propose_upgrade",
         "params": {
           "args": [
@@ -1717,6 +1820,21 @@
           "type_schema": {
             "type": "string"
           }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "unfreeze_member",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
         }
       },
       {
@@ -2302,6 +2420,40 @@
           "required": [
             "clearing_fee_bps",
             "solver_fee_bps"
+          ],
+          "type": "object"
+        },
+        "FreezeState": {
+          "enum": [
+            "pending",
+            "frozen"
+          ],
+          "type": "string"
+        },
+        "FreezeView": {
+          "properties": {
+            "eta": {
+              "type": "string"
+            },
+            "from_epoch": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "reason_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/definitions/FreezeState"
+            }
+          },
+          "required": [
+            "eta",
+            "from_epoch",
+            "state"
           ],
           "type": "object"
         },
@@ -3188,6 +3340,33 @@
     },
     {
       "fields": [
+        "account_id",
+        "eta",
+        "reason_hash"
+      ],
+      "name": "freeze_proposed"
+    },
+    {
+      "fields": [
+        "account_id",
+        "from_epoch"
+      ],
+      "name": "member_frozen"
+    },
+    {
+      "fields": [
+        "account_id"
+      ],
+      "name": "freeze_cancelled"
+    },
+    {
+      "fields": [
+        "account_id"
+      ],
+      "name": "member_unfrozen"
+    },
+    {
+      "fields": [
         "grant_id",
         "mt_contract",
         "token_id",
@@ -3236,10 +3415,10 @@
       "name": "intent_removed"
     }
   ],
-  "interface_version": "0.0.11",
+  "interface_version": "0.0.12",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.11"
+    "version": "0.0.12"
   },
   "schema_version": "0.4.0"
 }

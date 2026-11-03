@@ -229,6 +229,7 @@ impl X207Circle {
         let account = env::predecessor_account_id();
         let active = self.members.get(&account).map(|m| self.member_now(m)).is_some_and(|m| m.status == MemberStatus::Active);
         require!(active, format!("ERR_PAYER_NOT_ACTIVE: {account}"));
+        crate::freeze::assert_not_frozen(&account, "post an intent");
         let key: [u8; 32] = intent_hash.into();
         let mut map = intents();
         require!(map.get(&key).is_none(), format!("ERR_INTENT_EXISTS: {}", hex(&key)));
@@ -317,6 +318,8 @@ impl X207Circle {
         for who in &participants {
             let n = counts.get(&(epoch_id, who.clone())).copied().unwrap_or(0);
             require!(n < MAX_BUNDLES_PER_MEMBER_PER_EPOCH, format!("ERR_BUNDLE_LIMIT: {who} is in {n} bundles of epoch {epoch_id}, the limit is {MAX_BUNDLES_PER_MEMBER_PER_EPOCH}"));
+            // CT-095: a frozen member starts nothing new
+            crate::freeze::assert_not_frozen(who, "take part in a new bundle");
         }
 
         let circle = env::current_account_id();
