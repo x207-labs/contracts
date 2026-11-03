@@ -570,6 +570,22 @@
               "type_schema": {
                 "$ref": "#/definitions/GrantRole"
               }
+            },
+            {
+              "name": "from_index",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
             }
           ],
           "serialization_type": "json"
@@ -1354,6 +1370,21 @@
           "type_schema": {
             "type": "string"
           }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "remove_intent",
+        "params": {
+          "args": [
+            {
+              "name": "intent_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
         }
       },
       {
@@ -2912,10 +2943,10 @@
       "name": "bundle_committed"
     }
   ],
-  "interface_version": "0.0.7",
+  "interface_version": "0.0.8",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.7"
+    "version": "0.0.8"
   },
   "schema_version": "0.4.0"
 }

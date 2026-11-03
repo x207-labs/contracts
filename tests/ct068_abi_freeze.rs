@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 32] = [
+const CHANGE_METHODS: [&str; 33] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -33,6 +33,8 @@ const CHANGE_METHODS: [&str; 32] = [
     "revoke_grant",
     // 0.0.7: CT-075 (class A escrow)
     "nft_on_transfer", "complete_escrow", "cancel_escrow", "on_escrow_resolved",
+    // 0.0.8: security review F2
+    "remove_intent",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
@@ -47,7 +49,7 @@ const P1_P2_METHODS: [&str; 1] = ["prune_epoch"];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 60] = [
+const SIGNATURES: [&str; 61] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_upgrade()->Promise []",
@@ -73,7 +75,7 @@ const SIGNATURES: [&str; 60] = [
     "get_pending_params()->PendingParams|null []",
     "get_pool()->PoolView []",
     "get_upgrade()->UpgradeView|null []",
-    "grants_of(account_id:string,role:GrantRole)->array<AccessGrant> []",
+    "grants_of(account_id:string,role:GrantRole,from_index:integer:uint32,limit:integer:uint32)->array<AccessGrant> []",
     "headroom(account_id:string)->string []",
     "interface_version()->string []",
     "join(circle_id:string,pubkey_voucher:string,terms_hash:string)->MemberView [payable]",
@@ -100,6 +102,7 @@ const SIGNATURES: [&str; 60] = [
     "register_cumulative(voucher:Voucher,signature:string)->string []",
     "register_in_bundle(bundle_id:integer:uint64,voucher:Voucher,signature:string)->string []",
     "register_voucher(voucher:Voucher,signature:string)->string []",
+    "remove_intent(intent_hash:string)-> []",
     "request_exit()-> [payable]",
     "revoke_grant(grant_id:integer:uint64,reason:RevokeReason)-> []",
     "set_asset_class(asset_type:string,entry:AssetClassEntry)-> []",

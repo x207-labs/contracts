@@ -159,3 +159,18 @@ async fn bundle_legs_register_clear_and_leave_the_difference_as_residual() -> an
     f.assert_d6().await?;
     Ok(())
 }
+
+// security review F2: a participant is in at most 16 bundles of an epoch, so two accounts cannot use up the slots of a third
+#[tokio::test]
+async fn a_participant_is_in_at_most_16_bundles_per_epoch() -> anyhow::Result<()> {
+    let f = three().await?;
+    for n in 1..=16u128 {
+        let legs = [("scraper", "translator", n), ("translator", "summarizer", n), ("summarizer", "scraper", n)];
+        let commit = f.circle.commit_bundle(1, &legs, &ALL).await?;
+        assert!(commit.is_success(), "bundle {n}: {:?}", failure_text(&commit));
+    }
+    let legs = [("scraper", "translator", 17), ("translator", "summarizer", 17), ("summarizer", "scraper", 17)];
+    let refused = f.circle.commit_bundle(1, &legs, &ALL).await?;
+    assert!(failure_text(&refused).expect("refused").contains("ERR_BUNDLE_LIMIT"));
+    Ok(())
+}

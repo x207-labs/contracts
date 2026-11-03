@@ -130,6 +130,12 @@ impl X207Circle {
         let grant = load_grant(grant_id);
         require!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        // security review F1: only the NFT contract and the token that the grantor named in the scope may fill the escrow
+        let target = crate::grant::class_a_target(&grant.limits.scope);
+        require!(
+            target.as_ref().is_ok_and(|(nft, token)| *nft == nft_contract && *token == token_id),
+            format!("ERR_ESCROW_NFT_MISMATCH: grant {grant_id} takes {:?}, got {nft_contract} {token_id}", target.as_ref().ok())
+        );
         require!(previous_owner_id == grant.grantor, format!("ERR_ESCROW_DEPOSITOR: only {} may put the asset of grant {grant_id}", grant.grantor));
         require!(load_escrow(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
         require!(env::block_timestamp() < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
@@ -440,7 +446,7 @@ mod tests {
     fn grant_offered() -> AccessGrant {
         AccessGrant {
             grant_id: GRANT, asset_type: "nft:ticket".into(), grantor: acc("alice.near"), grantee: None, class: AssetClass::A,
-            limits: GrantLimits { scope: "{}".into(), quota: None, expires_at: U64(9_000_000_000_000) }, unit: "once".into(), unit_price: U128(10 * CREDIT),
+            limits: GrantLimits { scope: "{\"nft_contract\":\"nft.near\",\"token_id\":\"t1\"}".into(), quota: None, expires_at: U64(9_000_000_000_000) }, unit: "once".into(), unit_price: U128(10 * CREDIT),
             operator: None, delivery_pubkey: None, status: GrantStatus::Offered, proof_hash: None, proof_kind: None,
         }
     }
@@ -541,9 +547,8 @@ mod tests {
         assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).map(|p| p.cumulative), Some(10 * CREDIT));
     }
 
-    // TC-CT-075-S02 (security review, needs a decision, see docs/security-review.md F1): nft_on_transfer trusts its caller. Run with --ignored.
+    // TC-CT-075-S02 (security review F1): only the NFT contract and token named in the scope of the grant fill its escrow.
     #[test]
-    #[ignore = "finding F1 needs a spec decision: the grant must name the NFT contract that may fill its escrow"]
     fn an_account_that_is_not_the_nft_of_the_grant_cannot_fill_the_escrow() {
         let mut c = circle();
         crate::grant::store_grant_for_test(&grant_offered());
@@ -554,5 +559,26 @@ mod tests {
         }));
         assert!(result.is_err(), "the escrow of the grant was filled by an account that never held a token");
         assert!(load_escrow(GRANT).is_none());
+    }
+
+    #[test]
+    fn the_right_nft_contract_with_another_token_cannot_fill_the_escrow() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_offered());
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("nft.near")).block_timestamp(5_000).build());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "t2".into(), format!("{{\"grant_id\":{GRANT}}}"));
+        }));
+        assert!(result.is_err(), "another token filled the escrow");
+        assert!(load_escrow(GRANT).is_none());
+    }
+
+    #[test]
+    fn the_named_nft_contract_and_token_fill_the_escrow() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_offered());
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("nft.near")).block_timestamp(5_000).build());
+        let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "t1".into(), format!("{{\"grant_id\":{GRANT}}}"));
+        assert_eq!(load_escrow(GRANT).map(|e| e.state), Some(EscrowState::Held));
     }
 }

@@ -35,10 +35,10 @@ async fn world() -> anyhow::Result<World> {
     Ok(World { f, nft, alice, bob })
 }
 
-fn offer(expires_at: u64) -> Value {
+fn offer(expires_at: u64, nft: &str, token: &str) -> Value {
     json!({"input": {
         "asset_type": "nft:ticket", "delivery_method": "escrow_nft",
-        "limits": {"scope": "{}", "quota": null, "expires_at": expires_at.to_string()},
+        "limits": {"scope": json!({"nft_contract": nft, "token_id": token}).to_string(), "quota": null, "expires_at": expires_at.to_string()},
         "unit": "once", "unit_price": PRICE.to_string(), "operator": null, "proof_hash": null, "proof_kind": null
     }})
 }
@@ -46,7 +46,7 @@ fn offer(expires_at: u64) -> Value {
 impl World {
     async fn offer_and_deposit(&mut self, token: &str, expires_in_ns: u64) -> anyhow::Result<u64> {
         let expires = self.f.circle.now_ns().await? + expires_in_ns;
-        let id = self.f.circle.call_as(&self.alice, "offer_grant", offer(expires)).await?.json::<u64>()?;
+        let id = self.f.circle.call_as(&self.alice, "offer_grant", offer(expires, self.nft.id().as_str(), token)).await?.json::<u64>()?;
         self.nft.call("nft_mint").args_json(json!({"token_id": token, "owner_id": self.alice.id()})).transact().await?.into_result()?;
         self.deposit(&self.alice.clone(), token, id).await?;
         Ok(id)

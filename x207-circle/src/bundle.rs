@@ -17,6 +17,10 @@ use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::EpochId;
 
 const SEQ_KEY: &[u8] = b"x207_bundle_seq";
+/// Intents one member may have open at the same time (security review F2). `remove_intent` frees a slot.
+pub const MAX_OPEN_INTENTS_PER_MEMBER: u32 = 64;
+/// Bundles one participant may be in per epoch (security review F2). The limit is per participant, so two accounts cannot use up the slots of a third.
+pub const MAX_BUNDLES_PER_MEMBER_PER_EPOCH: u32 = 16;
 const HASH_KEY_PREFIX: &[u8] = b"x207_bundle_hash:";
 
 /// One leg: `payer` may owe `payee` at most `max_amount` in the epoch of the bundle.
@@ -119,6 +123,14 @@ fn intents() -> LookupMap<[u8; 32], IntentRecord> {
     LookupMap::new(StorageKey::Intents)
 }
 
+fn intent_counts() -> LookupMap<AccountId, u32> {
+    LookupMap::new(StorageKey::IntentCounts)
+}
+
+fn bundle_counts() -> LookupMap<(EpochId, AccountId), u32> {
+    LookupMap::new(StorageKey::BundleCounts)
+}
+
 fn reserves() -> LookupMap<(EpochId, AccountId), u128> {
     LookupMap::new(StorageKey::BundleReserves)
 }
@@ -200,10 +212,30 @@ impl X207Circle {
         let key: [u8; 32] = intent_hash.into();
         let mut map = intents();
         require!(map.get(&key).is_none(), format!("ERR_INTENT_EXISTS: {}", hex(&key)));
+        let mut counts = intent_counts();
+        let open = counts.get(&account).copied().unwrap_or(0);
+        require!(open < MAX_OPEN_INTENTS_PER_MEMBER, format!("ERR_INTENT_LIMIT: {account} has {open} open intents, the limit is {MAX_OPEN_INTENTS_PER_MEMBER}"));
         let posted_at = env::block_timestamp();
         map.insert(key, IntentRecord { account_id: account.clone(), posted_at });
         map.flush();
+        counts.insert(account.clone(), open + 1);
+        counts.flush();
         IntentPosted { intent_hash, account_id: account, posted_at: U64(posted_at) }.emit();
+    }
+
+    /// F5 (security review F2): the owner of an intent takes it away and gets the slot back. `ERR_UNKNOWN_INTENT`, `ERR_NOT_INTENT_OWNER`.
+    pub fn remove_intent(&mut self, intent_hash: Base58CryptoHash) {
+        let account = env::predecessor_account_id();
+        let key: [u8; 32] = intent_hash.into();
+        let mut map = intents();
+        let Some(record) = map.get(&key) else { env::panic_str(&format!("ERR_UNKNOWN_INTENT: {}", hex(&key))) };
+        require!(record.account_id == account, format!("ERR_NOT_INTENT_OWNER: {account}"));
+        map.remove(&key);
+        map.flush();
+        let mut counts = intent_counts();
+        let open = counts.get(&account).copied().unwrap_or(1);
+        counts.insert(account, open.saturating_sub(1));
+        counts.flush();
     }
 
     /// F5 (CT-063): permissionless. Checks in order: epoch (`ERR_UNKNOWN_EPOCH`, `ERR_WRONG_PHASE`), past cutoff
@@ -254,6 +286,13 @@ impl X207Circle {
             require!(payee.is_some_and(|m| m.status == MemberStatus::Active), format!("ERR_PAYEE_NOT_ACTIVE: {}", leg.payee));
         }
 
+        // security review F2: a participant is in at most MAX_BUNDLES_PER_MEMBER_PER_EPOCH bundles of an epoch
+        let counts = bundle_counts();
+        for who in &participants {
+            let n = counts.get(&(epoch_id, who.clone())).copied().unwrap_or(0);
+            require!(n < MAX_BUNDLES_PER_MEMBER_PER_EPOCH, format!("ERR_BUNDLE_LIMIT: {who} is in {n} bundles of epoch {epoch_id}, the limit is {MAX_BUNDLES_PER_MEMBER_PER_EPOCH}"));
+        }
+
         let circle = env::current_account_id();
         let message = terms_message(&circle, epoch_id, &bundle.legs, bundle.search_leg.as_ref());
         let terms_hash = env::sha256_array(message.as_bytes());
@@ -300,6 +339,12 @@ impl X207Circle {
         for (payer, total) in &owed {
             set_reserved(epoch_id, payer, reserved(epoch_id, payer) + total);
         }
+        let mut counts = bundle_counts();
+        for who in &participants {
+            let n = counts.get(&(epoch_id, who.clone())).copied().unwrap_or(0);
+            counts.insert((epoch_id, who.clone()), n + 1);
+        }
+        counts.flush();
         BundleCommitted { bundle_id, terms_hash: hex(&terms_hash), epoch: epoch_id, legs: bundle.legs, solver }.emit();
         bundle_id
     }
@@ -345,9 +390,8 @@ mod security_tests {
         c.post_intent(Base58CryptoHash::from(hash));
     }
 
-    // TC-CT-062-S02 (security review F2, needs a decision): a single member can post intents without limit. Run with --ignored.
+    // TC-CT-062-S02 (security review F2): a member has at most MAX_OPEN_INTENTS_PER_MEMBER intents open; remove_intent frees a slot.
     #[test]
-    #[ignore = "finding F2 needs a decision: a per-member cap or a storage deposit (ABI change) for post_intent"]
     fn one_member_cannot_fill_the_storage_of_the_contract_with_intents() {
         let mut c = circle_with_member("gina.near");
         let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -356,5 +400,42 @@ mod security_tests {
             }
         }));
         assert!(refused.is_err(), "5000 intents of one member were all accepted, paid by the balance of the contract");
+    }
+
+    fn hash_of(n: u32) -> Base58CryptoHash {
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&n.to_le_bytes());
+        Base58CryptoHash::from(hash)
+    }
+
+    fn panics_with(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
+        let err = std::panic::catch_unwind(f).expect_err("expected a panic");
+        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    }
+
+    #[test]
+    fn the_65th_open_intent_of_a_member_is_refused_with_err_intent_limit() {
+        let mut c = circle_with_member("gina.near");
+        for n in 0..MAX_OPEN_INTENTS_PER_MEMBER {
+            post(&mut c, "gina.near", n);
+        }
+        let msg = panics_with(std::panic::AssertUnwindSafe(|| post(&mut c, "gina.near", 1_000)));
+        assert!(msg.contains("ERR_INTENT_LIMIT"), "{msg}");
+    }
+
+    #[test]
+    fn remove_intent_frees_a_slot_and_only_the_owner_can_remove() {
+        let mut c = circle_with_member("gina.near");
+        for n in 0..MAX_OPEN_INTENTS_PER_MEMBER {
+            post(&mut c, "gina.near", n);
+        }
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("mallory.near")).block_timestamp(2_000).build());
+        let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(3))));
+        assert!(msg.contains("ERR_NOT_INTENT_OWNER"), "{msg}");
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("gina.near")).block_timestamp(2_000).build());
+        c.remove_intent(hash_of(3));
+        let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(3))));
+        assert!(msg.contains("ERR_UNKNOWN_INTENT"), "{msg}");
+        post(&mut c, "gina.near", 1_000);
     }
 }

@@ -132,9 +132,10 @@ pub fn activate(grant: &mut AccessGrant, grantee: AccountId, delivery_pubkey: Op
     index(1, &grantee, id);
 }
 
-/// Class A (CT-075): final status for a grant whose escrow ended; frees a slot of the grantor.
+/// Class A (CT-075): final status for a grant whose escrow ended; frees a slot of the grantor and takes the grant out of the indexes.
 pub fn close(grant: &mut AccessGrant, status: GrantStatus) {
     grant.status = status;
+    unindex_grant(grant);
     let (id, grantor) = (grant.grant_id, grant.grantor.clone());
     let mut map = grants();
     map.insert(id, grant.clone());
@@ -161,6 +162,29 @@ fn grant_counts() -> LookupMap<AccountId, u32> {
 
 pub fn load_grant(grant_id: GrantId) -> AccessGrant {
     grants().get(&grant_id).cloned().unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_GRANT: {grant_id}")))
+}
+
+/// A grant that ended (`revoked` or `expired`) leaves the index of its grantor and of its grantee, so `grants_of` lists open grants only and the vectors
+/// do not grow with the history of an account (security review F5). `get_grant` still answers for it.
+fn unindex_grant(grant: &AccessGrant) {
+    let mut map = grants_by();
+    for (role, account) in [(0u8, Some(&grant.grantor)), (1u8, grant.grantee.as_ref())] {
+        let Some(account) = account else { continue };
+        let key = (role, account.clone());
+        let Some(list) = map.get(&key) else { continue };
+        let kept: Vec<GrantId> = list.iter().copied().filter(|id| *id != grant.grant_id).collect();
+        map.insert(key, kept);
+    }
+    map.flush();
+}
+
+/// Class A (security review F1): the scope of a class A grant names the NFT contract and the token that may fill its escrow.
+pub fn class_a_target(scope: &str) -> Result<(AccountId, String), String> {
+    let value: near_sdk::serde_json::Value = near_sdk::serde_json::from_str(scope).map_err(|_| "scope is not JSON".to_string())?;
+    let nft = value.get("nft_contract").and_then(|v| v.as_str()).ok_or("scope.nft_contract is missing")?;
+    let token = value.get("token_id").and_then(|v| v.as_str()).filter(|t| !t.is_empty() && t.len() <= 128).ok_or("scope.token_id is missing or longer than 128 bytes")?;
+    let nft: AccountId = nft.parse().map_err(|_| "scope.nft_contract is not an account id".to_string())?;
+    Ok((nft, token.to_string()))
 }
 
 fn index(role: u8, account: &AccountId, grant_id: GrantId) {
@@ -291,6 +315,11 @@ impl X207Circle {
             "ERR_BAD_GRANT: scope must be JSON text of at most 1024 bytes"
         );
         require!(input.limits.quota.map_or(true, |q| q.0 > 0), "ERR_BAD_GRANT: quota must be above 0 or null");
+        if entry.class == AssetClass::A {
+            if let Err(reason) = class_a_target(&input.limits.scope) {
+                env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}}: {reason}"));
+            }
+        }
         let mut counts = grant_counts();
         let open = counts.get(&grantor).copied().unwrap_or(0);
         require!(open < MAX_ACTIVE_GRANTS_PER_MEMBER, format!("ERR_BAD_GRANT: {grantor} already has {open} open grants"));
@@ -369,6 +398,7 @@ impl X207Circle {
         };
         require!(allowed, format!("ERR_GRANT_REVOKE_DENIED: {caller} cannot revoke grant {grant_id} as {reason:?}"));
         grant.status = status;
+        unindex_grant(&grant);
         let grantor = grant.grantor.clone();
         let mut map = grants();
         map.insert(grant_id, grant);
@@ -384,11 +414,12 @@ impl X207Circle {
         grants().get(&grant_id).cloned()
     }
 
-    /// Grants where `account_id` is the grantor or the grantee, oldest first.
-    pub fn grants_of(&self, account_id: AccountId, role: GrantRole) -> Vec<AccessGrant> {
+    /// Open grants (`offered` or `active`) where `account_id` is the grantor or the grantee, oldest first, `limit` of them from `from_index`. Ended grants
+    /// are not in the index; read them with `get_grant`. `limit` 0 or a `from_index` past the end gives `[]`.
+    pub fn grants_of(&self, account_id: AccountId, role: GrantRole, from_index: u32, limit: u32) -> Vec<AccessGrant> {
         let code = if role == GrantRole::Grantor { 0 } else { 1 };
         let ids = grants_by().get(&(code, account_id)).cloned().unwrap_or_default();
-        ids.iter().filter_map(|id| grants().get(id).cloned()).collect()
+        ids.iter().skip(from_index as usize).take(limit as usize).filter_map(|id| grants().get(id).cloned()).collect()
     }
 }
 

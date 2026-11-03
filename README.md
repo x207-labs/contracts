@@ -86,6 +86,9 @@ The contract and its tests read no secrets. Two optional switches are read by te
 
 Secrets belong in `.env`, which is not committed.
 
+## Known risk: a class A escrow can hold an asset for good
+An NFT in the escrow of a class A grant (state `held`) leaves only through `complete_escrow` (a buyer pays) or `cancel_escrow` (the grantor, after the time). If the callback `on_escrow_resolved` never runs (for instance, out of gas) the escrow stays `completing`, and if the delivery fails in a way that cannot be taken back it is `stuck`. In both cases the NFT stays in the circle and the pair stays locked for that epoch. There is no rescue method, because ADR-20 forbids the owner to move assets. Offer only NFTs you accept to lose this way. See `docs/security-review.md`, F10.
+
 ## License
 
 Apache-2.0

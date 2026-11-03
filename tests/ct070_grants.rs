@@ -71,10 +71,10 @@ async fn a_member_offers_and_another_accepts() -> anyhow::Result<()> {
     let again = f.circle.call_as(&summarizer, "accept_grant", json!({"grant_id": 1, "delivery_pubkey": null})).await?;
     assert!(failure_text(&again).expect("refused").contains("ERR_GRANT_NOT_OFFERED"));
 
-    let by_grantor = f.circle.view("grants_of", json!({"account_id": scraper.id(), "role": "grantor"})).await?;
-    let by_grantee = f.circle.view("grants_of", json!({"account_id": translator.id(), "role": "grantee"})).await?;
+    let by_grantor = f.circle.view("grants_of", json!({"account_id": scraper.id(), "role": "grantor", "from_index": 0, "limit": 50})).await?;
+    let by_grantee = f.circle.view("grants_of", json!({"account_id": translator.id(), "role": "grantee", "from_index": 0, "limit": 50})).await?;
     assert_eq!((by_grantor.as_array().unwrap().len(), by_grantee.as_array().unwrap().len()), (1, 1));
-    assert_eq!(f.circle.view("grants_of", json!({"account_id": scraper.id(), "role": "grantee"})).await?, json!([]));
+    assert_eq!(f.circle.view("grants_of", json!({"account_id": scraper.id(), "role": "grantee", "from_index": 0, "limit": 50})).await?, json!([]));
     Ok(())
 }
 
@@ -151,5 +151,48 @@ async fn an_expired_offer_cannot_be_accepted() -> anyhow::Result<()> {
     let late = f.circle.call_as(&translator, "accept_grant", json!({"grant_id": 1, "delivery_pubkey": null})).await?;
     assert!(failure_text(&late).expect("refused").contains("ERR_GRANT_EXPIRED"));
     assert_eq!(f.circle.view("get_grant", json!({"grant_id": 1})).await?["status"], "offered");
+    Ok(())
+}
+
+// security review F1: a class A offer names the NFT contract and the token in its scope
+#[tokio::test]
+async fn a_class_a_offer_must_name_its_nft_and_token() -> anyhow::Result<()> {
+    let mut f = three().await?;
+    let (scraper, dao) = (f.accounts["scraper"].clone(), f.account("dao").await?);
+    let class_a = json!({"asset_type": "nft:ticket", "class": "A", "delivery_methods": ["escrow_nft"], "accepted_proofs": [], "terms_hash": "ab".repeat(32)});
+    assert!(f.circle.call_as(&dao, "set_asset_class", json!({"asset_type": "nft:ticket", "entry": class_a})).await?.is_success());
+    let expires = f.circle.now_ns().await? + 3_600_000_000_000;
+    let offer = |scope: &str| json!({"input": {
+        "asset_type": "nft:ticket", "delivery_method": "escrow_nft", "limits": {"scope": scope, "quota": null, "expires_at": expires.to_string()},
+        "unit": "once", "unit_price": "10000", "operator": null, "proof_hash": null, "proof_kind": null
+    }});
+    for bad in ["{}", "{\"nft_contract\":\"nft.near\"}", "{\"token_id\":\"t1\"}", "{\"nft_contract\":\"NOT AN ACCOUNT\",\"token_id\":\"t1\"}", "{\"nft_contract\":\"nft.near\",\"token_id\":\"\"}"] {
+        let refused = f.circle.call_as(&scraper, "offer_grant", offer(bad)).await?;
+        assert!(failure_text(&refused).expect("refused").contains("ERR_BAD_GRANT"), "{bad}");
+    }
+    let ok = f.circle.call_as(&scraper, "offer_grant", offer("{\"nft_contract\":\"nft.near\",\"token_id\":\"t1\"}")).await?;
+    assert!(ok.is_success(), "{:?}", failure_text(&ok));
+    Ok(())
+}
+
+// security review F5: grants_of pages and lists open grants only
+#[tokio::test]
+async fn grants_of_pages_and_drops_ended_grants() -> anyhow::Result<()> {
+    let mut f = three().await?;
+    let scraper = f.accounts["scraper"].clone();
+    let expires = f.circle.now_ns().await? + 3_600_000_000_000;
+    for _ in 0..3 {
+        assert!(f.circle.call_as(&scraper, "offer_grant", json!({"input": input("near-rpc:access", expires)})).await?.is_success());
+    }
+    let page = |from: u32, limit: u32| json!({"account_id": scraper.id(), "role": "grantor", "from_index": from, "limit": limit});
+    let ids = |v: Value| v.as_array().unwrap().iter().map(|g| g["grant_id"].as_u64().unwrap()).collect::<Vec<_>>();
+    assert_eq!(ids(f.circle.view("grants_of", page(0, 2)).await?), vec![1, 2]);
+    assert_eq!(ids(f.circle.view("grants_of", page(2, 2)).await?), vec![3]);
+    assert_eq!(ids(f.circle.view("grants_of", page(5, 2)).await?), Vec::<u64>::new());
+    assert_eq!(ids(f.circle.view("grants_of", page(0, 0)).await?), Vec::<u64>::new());
+    let revoke = f.circle.call_as(&scraper, "revoke_grant", json!({"grant_id": 2, "reason": "grantor"})).await?;
+    assert!(revoke.is_success(), "{:?}", failure_text(&revoke));
+    assert_eq!(ids(f.circle.view("grants_of", page(0, 10)).await?), vec![1, 3]);
+    assert_eq!(f.circle.view("get_grant", json!({"grant_id": 2})).await?["status"], "revoked");
     Ok(())
 }

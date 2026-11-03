@@ -63,6 +63,10 @@ pub enum StorageKey {
     GrantCounts = b'k',
     /// D11 class A: `GrantId -> Escrow` (CT-075).
     Escrows = b'e',
+    /// D8 `AccountId -> open intents` (security review F2).
+    IntentCounts = b'n',
+    /// D8 `(EpochId, AccountId) -> bundles the account is in` (security review F2).
+    BundleCounts = b'N',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).
