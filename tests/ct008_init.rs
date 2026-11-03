@@ -123,10 +123,16 @@ fn no_method_moves_d6_or_replaces_the_owner() {
         if name == "get_owner" || name == "withdraw_stake" || name == "on_withdraw_resolved" {
             continue; // the member's own exit (CT-077), gated by the member, not the owner
         }
+        if name == "withdraw_intents_balance" || name == "on_intents_withdrawn" {
+            continue; // BE-034: permissionless, the receiver is the circle itself, the amount is what `mt_on_transfer` booked; no owner is involved (and its private callback)
+        }
         assert!(!denied.iter().any(|d| name.contains(d)), "method {name} looks like an owner D6 or owner-change path");
         if !init {
             // `previous_owner_id` of the NEP-171 receiver `nft_on_transfer` (CT-075) is the account that sent the token, not an owner of the circle
-            let own = |a: &String| a.contains("owner") && !(name == "nft_on_transfer" && a == "previous_owner_id");
+            // `previous_owner_ids` of the NEP-245 receiver `mt_on_transfer` (BE-034) is the same: the accounts that sent the tokens
+            let own = |a: &String| {
+                a.contains("owner") && !(name == "nft_on_transfer" && a == "previous_owner_id") && !(name == "mt_on_transfer" && a == "previous_owner_ids")
+            };
             assert!(!arg_names(&function).iter().any(own), "{name} takes an owner argument");
         }
     }
