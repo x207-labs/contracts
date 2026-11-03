@@ -240,11 +240,16 @@ impl X207Circle {
 }
 
 impl X207Circle {
-    /// The grantee is `suspended` or has a D5 position `defaulted` in the running epoch or the two before it.
+    /// The grantee is `suspended`, or is not `active` and has a D5 position `defaulted` in the running epoch or the two before it. A member that
+    /// was reactivated (`active` again) is not defaulted any more: an old default must not let a stranger revoke the grants it accepted since.
     fn grantee_defaulted(&self, grant: &AccessGrant) -> bool {
         let Some(grantee) = &grant.grantee else { return false };
-        if self.members.get(grantee).map(|m| self.member_now(m)).is_some_and(|m| m.status == MemberStatus::Suspended) {
+        let Some(status) = self.members.get(grantee).map(|m| self.member_now(m).status) else { return false };
+        if status == MemberStatus::Suspended {
             return true;
+        }
+        if status == MemberStatus::Active {
+            return false;
         }
         let newest = self.current_epoch;
         (newest.saturating_sub(2).max(1)..=newest).any(|epoch| {
@@ -406,10 +411,57 @@ mod tests {
         }
         assert!(!valid_asset_type(&format!("{}:x", "a".repeat(65))));
     }
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    fn member(name: &str, status: MemberStatus) -> crate::member::Member {
+        crate::member::Member {
+            account_id: acc(name), pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap(), terms_hash: "a".repeat(64),
+            stake: 100, limit: 80, status, admitted: false, joined_at: 1, settled_history: 0, last_active_epoch: 1, exit_requested_epoch: None,
+            withdraw_pending: false, reactivate_epoch: None,
+        }
+    }
+
+    /// A circle with an active grant of `gpu.near`, whose member record has `status` and who has a defaulted position in epoch 1.
+    fn circle_with_defaulted_grantee(status: MemberStatus) -> X207Circle {
+        near_sdk::testing_env!(near_sdk::test_utils::VMContextBuilder::new().block_timestamp(1_000).build());
+        let mut c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), crate::params::Params::default(), 1_000);
+        c.members.insert(acc("gpu.near"), member("gpu.near", status));
+        c.put_position(1, acc("gpu.near"), crate::settlement::Position {
+            net: -5, role: crate::settlement::PositionRole::Debtor, status: PositionStatus::Defaulted, amount: 5, recovered: 0, payment_deadline: 9, updated_at_block: 5,
+        });
+        store_grant_for_test(&AccessGrant {
+            grant_id: 3, asset_type: "near-rpc:access".into(), grantor: acc("scraper.near"), grantee: Some(acc("gpu.near")), class: AssetClass::B,
+            limits: GrantLimits { scope: "{}".into(), quota: None, expires_at: U64(9_000_000_000_000) }, unit: "day".into(), unit_price: U128(1),
+            operator: None, delivery_pubkey: None, status: GrantStatus::Active, proof_hash: None, proof_kind: None,
+        });
+        c
+    }
+
+    fn stranger_revokes(c: &mut X207Circle) -> bool {
+        near_sdk::testing_env!(near_sdk::test_utils::VMContextBuilder::new().predecessor_account_id(acc("stranger.near")).block_timestamp(2_000).build());
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.revoke_grant(3, RevokeReason::Defaulted))).is_ok()
+    }
+
+    // TC-CT-071-S01 (security review): a member that was reactivated is not defaulted any more; a stranger cannot revoke its new grants with an old default
+    #[test]
+    fn a_reactivated_member_keeps_its_grants_against_a_stranger() {
+        let mut c = circle_with_defaulted_grantee(MemberStatus::Active);
+        assert!(!stranger_revokes(&mut c), "an active member was revoked for a default of an earlier epoch");
+        assert_eq!(load_grant(3).status, GrantStatus::Active);
+    }
+
+    // TC-CT-071-S02: while the member is suspended, anybody may revoke (spec 15.3), with or without the position in the window
+    #[test]
+    fn a_suspended_member_loses_its_grants_to_anybody() {
+        let mut c = circle_with_defaulted_grantee(MemberStatus::Suspended);
+        assert!(stranger_revokes(&mut c));
+        assert_eq!(load_grant(3).status, GrantStatus::Revoked);
+    }
 }
 
-// Kept last: the static analysis of tests/support/contract-writes.ts reads the source only up to the first `#[cfg(test)]`, so test-only code
-// must come after all the contract code.
 /// Unit tests of the escrow need a grant in storage without going through `offer_grant`.
 #[cfg(test)]
 pub(crate) fn store_grant_for_test(grant: &AccessGrant) {
