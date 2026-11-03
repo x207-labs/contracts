@@ -1,0 +1,94 @@
+{
+  "definition": "python3 -I scripts/clearing_hashes.py           # writes tests/vectors/clearing_hashes.json\n    python3 -I scripts/clearing_hashes.py --check   # recomputes and compares with the file; exit 1 on a difference\n\nDefinitions (the contract computes the same bytes in `events.rs`, a Rust test compares them with this file):\n  edges_hash     = sha256( compact JSON array of the edges with `cleared` > 0, sorted by (debtor, creditor) as byte strings, each edge\n                   {\"debtor\":..,\"creditor\":..,\"cleared\":\"<u128 as decimal string>\"} )\n  positions_hash = sha256( compact JSON array of all positions sorted by account_id as byte strings, each\n                   {\"account_id\":..,\"net\":\"<i128>\",\"role\":..,\"status\":<string or null>,\"amount\":\"<u128>\",\"outstanding_debt\":\"<u128>\"} )\nCompact JSON: no spaces, keys in the order above, UTF-8. An empty list is `[]`.",
+  "edges": [
+    {
+      "name": "three cycle, given out of order, one edge with cleared 0 that is dropped",
+      "input": [
+        {
+          "debtor": "citra.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "25000000"
+        },
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "25000000"
+        },
+        {
+          "debtor": "dewi.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "0"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "citra.x207-circle.near",
+          "cleared": "25000000"
+        }
+      ],
+      "canonical": "[{\"debtor\":\"andi.x207-circle.near\",\"creditor\":\"budi.x207-circle.near\",\"cleared\":\"25000000\"},{\"debtor\":\"budi.x207-circle.near\",\"creditor\":\"citra.x207-circle.near\",\"cleared\":\"25000000\"},{\"debtor\":\"citra.x207-circle.near\",\"creditor\":\"andi.x207-circle.near\",\"cleared\":\"25000000\"}]",
+      "edges_hash": "7eb3143f5ad84f2a9638e17d0d42f124da56a71ba7c4f3d28ccc389636b87c1f"
+    },
+    {
+      "name": "no edge",
+      "input": [],
+      "canonical": "[]",
+      "edges_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "names of 64 characters and the largest amount of a u128",
+      "input": [
+        {
+          "debtor": "m01xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near",
+          "creditor": "m00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near",
+          "cleared": "340282366920938463463374607431768211455"
+        },
+        {
+          "debtor": "m00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near",
+          "creditor": "m01xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near",
+          "cleared": "1"
+        }
+      ],
+      "canonical": "[{\"debtor\":\"m00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near\",\"creditor\":\"m01xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near\",\"cleared\":\"1\"},{\"debtor\":\"m01xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near\",\"creditor\":\"m00xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.test.near\",\"cleared\":\"340282366920938463463374607431768211455\"}]",
+      "edges_hash": "fd8225630971c0a7fb05415e42118fb55359ce4f573c1a1a78143bb4bca4fa70"
+    }
+  ],
+  "positions": [
+    {
+      "name": "a debtor, a creditor, a net zero participant (role none, status null), given out of order",
+      "input": [
+        {
+          "account_id": "citra.x207-circle.near",
+          "net": "0",
+          "role": "none",
+          "status": null,
+          "amount": "0",
+          "outstanding_debt": "0"
+        },
+        {
+          "account_id": "budi.x207-circle.near",
+          "net": "35000000",
+          "role": "creditor",
+          "status": "claimable",
+          "amount": "35000000",
+          "outstanding_debt": "0"
+        },
+        {
+          "account_id": "andi.x207-circle.near",
+          "net": "-35000000",
+          "role": "debtor",
+          "status": "due",
+          "amount": "35000000",
+          "outstanding_debt": "35000000"
+        }
+      ],
+      "canonical": "[{\"account_id\":\"andi.x207-circle.near\",\"net\":\"-35000000\",\"role\":\"debtor\",\"status\":\"due\",\"amount\":\"35000000\",\"outstanding_debt\":\"35000000\"},{\"account_id\":\"budi.x207-circle.near\",\"net\":\"35000000\",\"role\":\"creditor\",\"status\":\"claimable\",\"amount\":\"35000000\",\"outstanding_debt\":\"0\"},{\"account_id\":\"citra.x207-circle.near\",\"net\":\"0\",\"role\":\"none\",\"status\":null,\"amount\":\"0\",\"outstanding_debt\":\"0\"}]",
+      "positions_hash": "4e56d46bbdde5f92af72953e5dfb75c70165e4f87107c0f65e703076ee1cbb6c"
+    },
+    {
+      "name": "no position",
+      "input": [],
+      "canonical": "[]",
+      "positions_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}
