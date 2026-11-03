@@ -2,6 +2,9 @@
 
 The wasm of a release is built in a pinned container (`[package.metadata.near.reproducible_build]` in `Cargo.toml`: the image `sourcescan/cargo-near:0.22.0-rust-1.99.1` by digest, the command `cargo near build non-reproducible-wasm --locked`, `Cargo.lock` committed). Two builds of the same commit give the same bytes; the release workflow builds twice and publishes nothing if the two sha256 differ. So the `code_hash` of an account on chain can be traced to a tag. Versions up to v0.0.7 were built on a developer machine and are **not** reproducible (their wasm differs from a build in the container).
 
+## What this proves and what it does not
+`cargo near build reproducible-wasm` (the standard tool, also used by SourceScan) clones the repository from its remote. The repository is private, so it cannot run here ("remote authentication required"). `scripts/repro-build.sh` runs the **same image and the same command** that `Cargo.toml` names, on the files of a git ref, without the clone. It proves that this pipeline is deterministic (two builds, same bytes; the workflow `reproducible.yml` checks it on a GitHub runner). It does **not** prove that the sha256 equals what SourceScan or another third-party verifier would compute from the same tag, because their build path differs. When the repository is public, run `cargo near build reproducible-wasm` and compare with the number of the release; until then the check in this file is the one that holds.
+
 ## 1. Take the wasm of the release and check it against the published sums
 ```bash
 mkdir release-check && cd release-check

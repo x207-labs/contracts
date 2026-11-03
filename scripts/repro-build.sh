@@ -10,8 +10,11 @@ image=$(sed -n 's/^image = "\(.*\)"/\1/p' Cargo.toml | head -1)
 digest=$(sed -n 's/^image_digest = "\(.*\)"/\1/p' Cargo.toml | head -1)
 [ -n "$image" ] && [ -n "$digest" ] || { echo "no [package.metadata.near.reproducible_build] image in Cargo.toml" >&2; exit 1; }
 src=$(mktemp -d)
-trap 'rm -rf "$src"' EXIT
+# the container builds as the user `near` (uid 1000), the runner of GitHub as another uid: the tree must be readable and writable for both, and
+# what the container leaves in it may not be removable by the caller, which is not an error of the build
+trap 'rm -rf "$src" 2>/dev/null || true' EXIT
 git archive "$ref" | tar -x -C "$src"
+chmod -R a+rwX "$src"
 mkdir -p "$out"
 docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
   bash -c 'cargo near build non-reproducible-wasm --locked'
