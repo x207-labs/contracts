@@ -21,7 +21,7 @@ const SEQ_KEY: &[u8] = b"x207_bundle_seq";
 pub const MAX_OPEN_INTENTS_PER_MEMBER: u32 = 64;
 /// Bundles one participant may be in per epoch (security review F2). The limit is per participant, so two accounts cannot use up the slots of a third.
 pub const MAX_BUNDLES_PER_MEMBER_PER_EPOCH: u32 = 16;
-/// Legs one bundle may have. Measured in near-sandbox (`ct080_gas_limits`): 64 legs cost 75 Tgas at most (a cycle through 64 members); without a cap, about 240 legs
+/// Legs one bundle may have. Measured in near-sandbox (`ct086_gas_limits`): 64 legs cost 75 Tgas at most (a cycle through 64 members); without a cap, about 240 legs
 /// fill the 16 KiB of a log message with `bundle_committed` and the transaction fails with a host error instead of `ERR_BAD_BUNDLE`.
 pub const MAX_BUNDLE_LEGS: usize = 64;
 const HASH_KEY_PREFIX: &[u8] = b"x207_bundle_hash:";

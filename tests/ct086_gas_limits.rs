@@ -1,5 +1,5 @@
-//! CT-080 in near-sandbox: gas of the calls that grow with the size of their input or of a list, to set limits (security review, "Not checked").
-//! Table: `cargo test --test ct080_gas_limits -- --nocapture --test-threads=1 | grep GAS`. Needs `cargo near build non-reproducible-wasm` first.
+//! CT-086 in near-sandbox: gas of the calls that grow with the size of their input or of a list, to set limits (security review, "Not checked").
+//! Table: `cargo test --test ct086_gas_limits -- --nocapture --test-threads=1 | grep GAS`. Needs `cargo near build non-reproducible-wasm` first.
 //! Views are called as transactions here, because a transaction reports the gas it burnt and a view does not.
 
 mod common;
@@ -48,7 +48,7 @@ async fn commit(f: &Funded, legs: &[(usize, usize)]) -> anyhow::Result<Execution
     f.circle.commit_bundle(1, &spec, &signers).await
 }
 
-// TC-CT-080-01: a bundle that is one cycle through n members
+// TC-CT-086-01: a bundle that is one cycle through n members
 #[tokio::test]
 async fn commit_bundle_gas_for_a_cycle_of_n_members() -> anyhow::Result<()> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
@@ -64,7 +64,7 @@ async fn commit_bundle_gas_for_a_cycle_of_n_members() -> anyhow::Result<()> {
     Ok(())
 }
 
-// TC-CT-080-02: a dense bundle, every ordered pair of k members is a leg
+// TC-CT-086-02: a dense bundle, every ordered pair of k members is a leg
 #[tokio::test]
 async fn commit_bundle_gas_for_a_dense_bundle() -> anyhow::Result<()> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
@@ -80,7 +80,7 @@ async fn commit_bundle_gas_for_a_dense_bundle() -> anyhow::Result<()> {
     Ok(())
 }
 
-// TC-CT-080-03: grants_of with a long list for one grantee
+// TC-CT-086-03: grants_of with a long list for one grantee
 #[tokio::test]
 async fn grants_of_gas_for_a_long_list() -> anyhow::Result<()> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
@@ -110,7 +110,7 @@ async fn grants_of_gas_for_a_long_list() -> anyhow::Result<()> {
     Ok(())
 }
 
-// TC-CT-080-04: list_asset_classes with a long registry
+// TC-CT-086-04: list_asset_classes with a long registry
 #[tokio::test]
 async fn list_asset_classes_gas_for_a_long_registry() -> anyhow::Result<()> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
