@@ -772,6 +772,52 @@
       },
       {
         "kind": "view",
+        "name": "get_proposal",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "from_index",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "limit",
+              "type_schema": {
+                "format": "uint32",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/ProposalView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_upgrade",
         "result": {
           "serialization_type": "json",
@@ -3205,6 +3251,44 @@
         "PromiseOrValueString": {
           "type": "string"
         },
+        "ProposalView": {
+          "properties": {
+            "cleared_total": {
+              "type": "string"
+            },
+            "committed": {
+              "type": "boolean"
+            },
+            "edge_count": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/definitions/ClearingEdge"
+              },
+              "type": "array"
+            },
+            "epoch": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "solver": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cleared_total",
+            "committed",
+            "edge_count",
+            "edges",
+            "epoch",
+            "solver"
+          ],
+          "type": "object"
+        },
         "RevokeReason": {
           "enum": [
             "grantor",
@@ -3412,16 +3496,10 @@
         "epoch",
         "solver",
         "cleared_total",
-        "edges",
+        "edge_count",
+        "edges_hash",
         "clearing_fee",
-        "solver_fee",
-        "chunk",
-        "chunks"
-      ],
-      "list_item_fields": [
-        "debtor",
-        "creditor",
-        "cleared"
+        "solver_fee"
       ],
       "name": "clearing_applied"
     },
@@ -3432,9 +3510,9 @@
         "payment_deadline",
         "total_due",
         "total_claimable",
-        "positions",
-        "chunk",
-        "chunks"
+        "position_count",
+        "positions_hash",
+        "positions"
       ],
       "list_item_fields": [
         "account_id",
@@ -3788,10 +3866,10 @@
       "name": "intent_removed"
     }
   ],
-  "interface_version": "0.0.12",
+  "interface_version": "0.0.13",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.12"
+    "version": "0.0.13"
   },
   "schema_version": "0.4.0"
 }

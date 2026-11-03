@@ -12,7 +12,7 @@ use near_sdk::json_types::U128 as WireU128;
 use near_sdk::serde_json::json;
 use near_sdk::{assert_one_yocto, env, near, AccountId, NearToken, Promise};
 
-use crate::events::{emit_chunked, emit_clearing_applied, EpochCommitted, PositionEntry, SolverFeeClaimFailed, SolverFeeClaimed, X207Event};
+use crate::events::{emit_clearing_applied, positions_hash, EpochCommitted, PositionEntry, SolverFeeClaimFailed, SolverFeeClaimed, X207Event};
 use crate::settlement::{Position, PositionRole, PositionStatus};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClearingEdge, EpochId};
@@ -97,8 +97,35 @@ impl X207Circle {
     }
 }
 
+/// CT-099: a page of the stored proposal of an epoch (view `get_proposal`).
+#[near(serializers = [json])]
+#[derive(Clone, Debug)]
+pub struct ProposalView {
+    pub epoch: EpochId,
+    pub solver: AccountId,
+    pub cleared_total: U128,
+    /// `true` once `commit_epoch` applied it; its edges are then empty (read `list_obligations`).
+    pub committed: bool,
+    pub edge_count: u32,
+    pub edges: Vec<ClearingEdge>,
+}
+
 #[near]
 impl X207Circle {
+    /// CT-099: the stored proposal of `epoch`, a page of its edges, for a reader that wants the edges before `commit_epoch` (the log of the commit carries only `edge_count` and
+    /// `edges_hash`). After the commit the edges are gone from the proposal; `list_obligations` gives `cleared` per pair. `None` when there is no proposal.
+    pub fn get_proposal(&self, epoch: EpochId, from_index: u32, limit: u32) -> Option<ProposalView> {
+        let proposal = self.proposals.get(&epoch)?;
+        Some(ProposalView {
+            epoch,
+            solver: proposal.solver.clone(),
+            cleared_total: proposal.cleared_total,
+            committed: proposal.committed,
+            edge_count: proposal.edges.len() as u32,
+            edges: proposal.edges.iter().skip(from_index as usize).take(limit.min(300) as usize).cloned().collect(),
+        })
+    }
+
     /// Balance of the fee the solver earned at `commit_epoch` (CT-052); `"0"` for anyone else.
     pub fn solver_fee_balance(&self, account_id: AccountId) -> WireU128 {
         WireU128(self.solver_fees.get(&account_id).copied().unwrap_or(0))
@@ -216,16 +243,17 @@ impl X207Circle {
         self.epoch_mut_or_panic(epoch).total_cleared = cleared_total;
 
         emit_clearing_applied(epoch, solver, U128(cleared_total), &edges, U128(clearing_fee), U128(solver_fee));
-        emit_chunked(&entries, |positions, chunk, chunks| EpochCommitted {
+        EpochCommitted {
             epoch,
             committed_at: U64(committed_at),
             payment_deadline: U64(payment_deadline),
             total_due: U128(total_due),
             total_claimable: U128(total_claimable),
-            positions,
-            chunk,
-            chunks,
-        });
+            position_count: entries.len() as u32,
+            positions_hash: positions_hash(&entries),
+            positions: entries,
+        }
+        .emit();
     }
 }
 
@@ -384,16 +412,20 @@ mod tests {
         let applied = &events[0]["data"][0];
         assert_eq!(applied["solver"], "solver1.near");
         assert_eq!(applied["cleared_total"], "75000000");
-        assert_eq!(applied["edges"].as_array().unwrap().len(), 3);
+        // CT-099: a summary of fixed size, no edges and no chunks
+        assert_eq!(applied["edge_count"], 3);
+        assert_eq!(applied["edges_hash"].as_str().map(str::len), Some(64));
+        assert!(applied.get("edges").is_none() && applied.get("chunk").is_none());
         assert_eq!((applied["clearing_fee"].as_str(), applied["solver_fee"].as_str()), (Some("0"), Some("0")));
-        assert_eq!((applied["chunk"].as_u64(), applied["chunks"].as_u64()), (Some(0), Some(1)));
 
         let committed = &events[1]["data"][0];
         assert_eq!(committed["total_due"], "35000000");
         assert_eq!(committed["total_claimable"], "35000000");
         assert_eq!(committed["committed_at"], T_PROP.to_string());
         assert_eq!(committed["payment_deadline"], (T_PROP + 1800 * SEC).to_string());
-        assert_eq!((committed["chunk"].as_u64(), committed["chunks"].as_u64()), (Some(0), Some(1)));
+        assert!(committed.get("chunk").is_none() && committed.get("chunks").is_none());
+        assert_eq!(committed["position_count"], 3);
+        assert_eq!(committed["positions_hash"].as_str().map(str::len), Some(64));
         let positions = committed["positions"].as_array().unwrap();
         assert_eq!(positions.len(), 3);
         let by = |name: &str| positions.iter().find(|p| p["account_id"] == name).unwrap();
@@ -492,7 +524,9 @@ mod tests {
         let applied = &events[0]["data"][0];
         assert!(applied["solver"].is_null());
         assert_eq!(applied["cleared_total"], "0");
-        assert_eq!(applied["edges"].as_array().unwrap().len(), 0);
+        assert_eq!(applied["edge_count"], 0);
+        // the hash of an empty list of edges: sha256 of `[]`
+        assert_eq!(applied["edges_hash"], "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
         assert_eq!(position(&c, "scraper.near").unwrap().status, PositionStatus::Due);
         assert_eq!(position(&c, "scraper.near").unwrap().amount.0, 35 * CREDIT);
         assert_eq!(position(&c, "gpu.near").unwrap().status, PositionStatus::Claimable);
@@ -533,9 +567,9 @@ mod tests {
         assert_eq!(c.outstanding_debt(acc("translator.near")).0, 0);
     }
 
-    // TC-CT-028-11
+    // TC-CT-028-11, CT-099: all positions in one log, with their count and hash, no chunks
     #[test]
-    fn positions_event_is_chunked_at_fifty() {
+    fn positions_event_is_one_log_with_a_count_and_a_hash() {
         let mut c = circle();
         for i in 0..32 {
             register(&mut c, 1, &format!("d{i:02}.near"), &format!("c{i:02}.near"), 10 * CREDIT);
@@ -543,15 +577,27 @@ mod tests {
         let mut c = closed(c, None);
         let _ = get_logs();
         c.commit_epoch(1);
-        let chunks: Vec<Value> = log_events().into_iter().filter(|e| e["event"] == "epoch_committed").collect();
-        assert_eq!(chunks.len(), 2);
-        for (index, chunk) in chunks.iter().enumerate() {
-            let data = &chunk["data"][0];
-            assert_eq!((data["chunk"].as_u64(), data["chunks"].as_u64()), (Some(index as u64), Some(2)));
-            assert_eq!(data["total_due"], "320000000");
-        }
-        assert_eq!(chunks[0]["data"][0]["positions"].as_array().unwrap().len(), 50);
-        assert_eq!(chunks[1]["data"][0]["positions"].as_array().unwrap().len(), 14);
+        let logs: Vec<Value> = log_events().into_iter().filter(|e| e["event"] == "epoch_committed").collect();
+        assert_eq!(logs.len(), 1);
+        let data = &logs[0]["data"][0];
+        assert_eq!(data["total_due"], "320000000");
+        assert_eq!((data["position_count"].as_u64(), data["positions"].as_array().unwrap().len()), (Some(64), 64));
+        assert!(data.get("chunk").is_none() && data.get("chunks").is_none());
+        assert_eq!(data["positions_hash"].as_str().map(str::len), Some(64));
+    }
+
+    // CT-099: the view of the stored proposal, before and after the commit
+    #[test]
+    fn get_proposal_pages_the_edges_until_the_commit() {
+        let mut c = closed(s1(), Some(p_s1()));
+        let view = c.get_proposal(1, 0, 2).expect("a proposal");
+        assert_eq!((view.edge_count, view.edges.len(), view.committed, view.cleared_total.0), (3, 2, false, 75 * CREDIT));
+        assert_eq!(c.get_proposal(1, 2, 10).unwrap().edges.len(), 1);
+        assert_eq!(c.get_proposal(1, 3, 10).unwrap().edges.len(), 0);
+        assert!(c.get_proposal(2, 0, 10).is_none());
+        c.commit_epoch(1);
+        let after = c.get_proposal(1, 0, 10).unwrap();
+        assert_eq!((after.committed, after.edges.len()), (true, 0));
     }
 
     // TC-CT-028-12

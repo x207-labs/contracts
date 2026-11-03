@@ -14,7 +14,8 @@ use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClaimDestination, EpochId};
 
 /// Total log bytes one call may write (near protocol), and the room kept for the "left out" line.
-const LOG_LIMIT: usize = 16 * 1024;
+/// CT-099: 90 percent of the 16 KiB that a receipt may log in total, so that the log of `finalize_epoch` keeps a margin.
+const LOG_LIMIT: usize = 16 * 1024 / 10 * 9;
 const OMITTED_NOTE_ROOM: usize = 160;
 
 /// Gas constants of spec 4.6; the final values come from CT-043.

@@ -46,18 +46,18 @@ const CHANGE_METHODS: [&str; 46] = [
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 36] = [
+const VIEWS: [&str; 37] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
     "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked",
+    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked", "get_proposal",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 82] = [
+const SIGNATURES: [&str; 83] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
@@ -92,6 +92,7 @@ const SIGNATURES: [&str; 82] = [
     "get_params()->Params []",
     "get_pending_params()->PendingParams|null []",
     "get_pool()->PoolView []",
+    "get_proposal(epoch:integer:uint64,from_index:integer:uint32,limit:integer:uint32)->ProposalView|null []",
     "get_upgrade()->UpgradeView|null []",
     "grants_of(account_id:string,role:GrantRole,from_index:integer:uint32,limit:integer:uint32)->array<AccessGrant> []",
     "headroom(account_id:string)->string []",

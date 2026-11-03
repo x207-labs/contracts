@@ -57,8 +57,8 @@ pub const EVENT_SCHEMAS: [EventSchema; 46] = [
     ),
     EventSchema {
         name: "clearing_applied",
-        fields: &["epoch", "solver", "cleared_total", "edges", "clearing_fee", "solver_fee", "chunk", "chunks"],
-        items: &["debtor", "creditor", "cleared"],
+        fields: &["epoch", "solver", "cleared_total", "edge_count", "edges_hash", "clearing_fee", "solver_fee"],
+        items: &[],
     },
     EventSchema {
         name: "epoch_committed",
@@ -68,9 +68,9 @@ pub const EVENT_SCHEMAS: [EventSchema; 46] = [
             "payment_deadline",
             "total_due",
             "total_claimable",
+            "position_count",
+            "positions_hash",
             "positions",
-            "chunk",
-            "chunks",
         ],
         items: &["account_id", "net", "role", "status", "amount", "outstanding_debt"],
     },
@@ -218,15 +218,16 @@ event!("clearing_submitted", ClearingSubmitted {
     replaced_cleared_total: Option<U128>,
 });
 
+/// CT-099 (interface 0.0.13): a summary of fixed size. The edges are not in the log (300 edges with long names are more than the 16 KiB that a receipt may log in
+/// total): they are read from the view `get_proposal` before the commit and from `list_obligations` (`cleared`) after it, and `edges_hash` checks them.
 event!("clearing_applied", ClearingApplied {
     epoch: EpochId,
     solver: Option<AccountId>,
     cleared_total: U128,
-    edges: Vec<ClearingEdge>,
+    edge_count: u32,
+    edges_hash: String,
     clearing_fee: U128,
     solver_fee: U128,
-    chunk: u32,
-    chunks: u32,
 });
 
 /// One element of `epoch_committed.positions[]`. Net-zero participants carry `role` `"none"`,
@@ -242,15 +243,18 @@ pub struct PositionEntry {
     pub outstanding_debt: U128,
 }
 
+/// CT-099 (interface 0.0.13): all positions in one log, no chunks. At most `MAX_MEMBERS` (64) entries; with account names of 64 characters and amounts of 12 digits
+/// (`limit_cap` is at most 1e11) the log is about 12.6 KB, which is under the 16 KiB of a receipt with a margin of about 20 percent (a sandbox test keeps it so).
+/// `positions_hash` is the hash of the same positions, so that a reader can check them against the state at the commit.
 event!("epoch_committed", EpochCommitted {
     epoch: EpochId,
     committed_at: U64,
     payment_deadline: U64,
     total_due: U128,
     total_claimable: U128,
+    position_count: u32,
+    positions_hash: String,
     positions: Vec<PositionEntry>,
-    chunk: u32,
-    chunks: u32,
 });
 
 event!("residual_paid", ResidualPaid {
@@ -384,7 +388,27 @@ pub fn emit_chunked<T: Clone, E: X207Event>(items: &[T], build: impl Fn(Vec<T>, 
     }
 }
 
-/// Emits `clearing_applied` with only the edges that have `cleared > 0` (ADR-31).
+/// `edges_hash` (CT-099): sha256 of the compact JSON of the edges with `cleared > 0`, sorted by (debtor, creditor) as byte strings. The definition and a golden vector are in
+/// `tests/vectors/clearing_hashes.json`.
+pub fn edges_hash(edges: &[ClearingEdge]) -> String {
+    let mut kept: Vec<&ClearingEdge> = edges.iter().filter(|edge| edge.cleared.0 > 0).collect();
+    kept.sort_by(|a, b| (a.debtor.as_str(), a.creditor.as_str()).cmp(&(b.debtor.as_str(), b.creditor.as_str())));
+    hash_of(&kept)
+}
+
+/// `positions_hash` (CT-099): sha256 of the compact JSON of all positions sorted by `account_id` as byte strings.
+pub fn positions_hash(positions: &[PositionEntry]) -> String {
+    let mut sorted: Vec<&PositionEntry> = positions.iter().collect();
+    sorted.sort_by(|a, b| a.account_id.as_str().cmp(b.account_id.as_str()));
+    hash_of(&sorted)
+}
+
+fn hash_of<T: Serialize>(items: &[&T]) -> String {
+    let json = near_sdk::serde_json::to_string(items).unwrap_or_else(|_| env::panic_str("ERR_HASH_JSON"));
+    env::sha256(json.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Emits `clearing_applied`: the summary and `edges_hash` of the edges that have `cleared > 0` (ADR-31, CT-099).
 pub fn emit_clearing_applied(
     epoch: EpochId,
     solver: Option<AccountId>,
@@ -393,17 +417,8 @@ pub fn emit_clearing_applied(
     clearing_fee: U128,
     solver_fee: U128,
 ) {
-    let edges: Vec<ClearingEdge> = edges.iter().filter(|edge| edge.cleared.0 > 0).cloned().collect();
-    emit_chunked(&edges, |edges, chunk, chunks| ClearingApplied {
-        epoch,
-        solver: solver.clone(),
-        cleared_total,
-        edges,
-        clearing_fee,
-        solver_fee,
-        chunk,
-        chunks,
-    });
+    let edge_count = edges.iter().filter(|edge| edge.cleared.0 > 0).count() as u32;
+    ClearingApplied { epoch, solver, cleared_total, edge_count, edges_hash: edges_hash(edges), clearing_fee, solver_fee }.emit();
 }
 
 /// Serializes `event` and returns its `data[0]` object, for unit tests of event emitters.
@@ -456,8 +471,8 @@ mod tests {
             (VoucherRegistered::NAME, VoucherRegistered { payer: a.clone(), payee: b.clone(), epoch: 42, seq: 137, cumulative_amount: U128(2_740_000), delta: U128(20_000), obligation: U128(2_740_000), outstanding_debt: U128(2_740_000), mode: "cumulative".into() }.to_log()),
             (EpochCutoff::NAME, EpochCutoff { epoch: 42, closed_at: t, proposal_deadline: t, edge_count: 30, participant_count: 6, total_obligation: U128(5), next_epoch: 43, next_cutoff_at: t }.to_log()),
             (ClearingSubmitted::NAME, ClearingSubmitted { epoch: 42, solver: a.clone(), cleared_total: U128(5), edge_count: 3, replaced_solver: None, replaced_cleared_total: None }.to_log()),
-            (ClearingApplied::NAME, ClearingApplied { epoch: 42, solver: None, cleared_total: U128(0), edges: vec![edge(1, 5)], clearing_fee: U128(0), solver_fee: U128(0), chunk: 0, chunks: 1 }.to_log()),
-            (EpochCommitted::NAME, EpochCommitted { epoch: 42, committed_at: t, payment_deadline: t, total_due: U128(35), total_claimable: U128(35), positions: vec![position("s.near", -35, "debtor", Some("due"), 35, 35)], chunk: 0, chunks: 1 }.to_log()),
+            (ClearingApplied::NAME, ClearingApplied { epoch: 42, solver: None, cleared_total: U128(0), edge_count: 1, edges_hash: "ab".repeat(32), clearing_fee: U128(0), solver_fee: U128(0) }.to_log()),
+            (EpochCommitted::NAME, EpochCommitted { epoch: 42, committed_at: t, payment_deadline: t, total_due: U128(35), total_claimable: U128(35), position_count: 1, positions_hash: "cd".repeat(32), positions: vec![position("s.near", -35, "debtor", Some("due"), 35, 35)] }.to_log()),
             (ResidualPaid::NAME, ResidualPaid { epoch: 42, account_id: a.clone(), sender_id: b.clone(), amount: U128(35), refunded: U128(0), settled_history: U128(35) }.to_log()),
             (MemberDefaulted::NAME, MemberDefaulted { epoch: 42, account_id: a.clone(), due: U128(35), from_stake: U128(35), from_reserve: U128(0), shortfall: U128(0), stake: U128(65), status: "suspended".into(), position_status: "defaulted".into(), outstanding_debt: U128(0) }.to_log()),
             (LimitsUpdated::NAME, LimitsUpdated { epoch: 42, changes: vec![change(a.clone())], chunk: 0, chunks: 1 }.to_log()),
@@ -594,13 +609,13 @@ mod tests {
             payment_deadline: U64(2),
             total_due: U128(35_000_000),
             total_claimable: U128(35_000_000),
+            position_count: 3,
+            positions_hash: "cd".repeat(32),
             positions: vec![
                 position("scraper.near", -35_000_000, "debtor", Some("due"), 35_000_000, 35_000_000),
                 position("gpu.near", 35_000_000, "creditor", Some("claimable"), 35_000_000, 0),
                 position("translator.near", 0, "none", None, 0, 0),
             ],
-            chunk: 0,
-            chunks: 1,
         };
         let payload = event_data(&event);
         assert_eq!(payload["positions"][0]["outstanding_debt"], "35000000");
@@ -622,9 +637,10 @@ mod tests {
         emit_clearing_applied(1, Some(acc("solver.near")), U128(25), &[edge(1, 25), edge(2, 0)], U128(0), U128(0));
         let logs = get_logs();
         assert_eq!(logs.len(), 1);
-        let edges = data(&logs[0])["edges"].as_array().unwrap().clone();
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0]["cleared"], "25");
+        // CT-099: a summary; the edge with cleared 0 is not counted and not in the hash
+        let payload = data(&logs[0]);
+        assert_eq!(payload["edge_count"], 1);
+        assert_eq!(payload["edges_hash"], edges_hash(&[edge(1, 25)]));
     }
 
     fn limit_changes(n: usize) -> Vec<LimitChange> {
@@ -685,42 +701,41 @@ mod tests {
         let limits = LimitsUpdated { epoch: u64::MAX, changes, chunk: 0, chunks: 1 }.to_log();
         assert!(limits.len() <= LOG_LIMIT, "limits_updated {}", limits.len());
 
-        let positions: Vec<PositionEntry> = (0..50)
+        // CT-099: the positions of the epoch in ONE log, up to MAX_MEMBERS, with account names of 64 characters and amounts of 13 digits (`limit_cap` is at most 1e11 and
+        // a sum over 64 members is below 1e13). The whole log of `commit_epoch` must keep a margin of 10 percent under the 16 KiB of a receipt.
+        let bound = U128(9_999_999_999_999);
+        let positions: Vec<PositionEntry> = (0..64)
             .map(|i| PositionEntry {
                 account_id: long(i),
-                net: I128(i128::MIN),
-                role: "creditor".into(),
-                status: Some("claimable".into()),
-                amount: max,
-                outstanding_debt: max,
+                net: I128(-(bound.0 as i128)),
+                role: "debtor".into(),
+                status: Some("due".into()),
+                amount: bound,
+                outstanding_debt: bound,
             })
             .collect();
         let committed = EpochCommitted {
             epoch: u64::MAX,
             committed_at: U64(u64::MAX),
             payment_deadline: U64(u64::MAX),
-            total_due: max,
-            total_claimable: max,
+            total_due: bound,
+            total_claimable: bound,
+            position_count: 64,
+            positions_hash: "cd".repeat(32),
             positions,
-            chunk: 0,
-            chunks: 1,
         }
         .to_log();
-        assert!(committed.len() <= LOG_LIMIT, "epoch_committed {}", committed.len());
-
-        let edges: Vec<ClearingEdge> =
-            (0..50).map(|i| ClearingEdge { debtor: long(i), creditor: long(i + 50), cleared: max }).collect();
         let applied = ClearingApplied {
             epoch: u64::MAX,
             solver: Some(long(99)),
             cleared_total: max,
-            edges,
+            edge_count: 300,
+            edges_hash: "ab".repeat(32),
             clearing_fee: max,
             solver_fee: max,
-            chunk: 0,
-            chunks: 1,
         }
         .to_log();
+        assert!(committed.len() + applied.len() <= LOG_LIMIT / 10 * 9, "commit_epoch logs {} + {}", committed.len(), applied.len());
         assert!(applied.len() <= LOG_LIMIT, "clearing_applied {}", applied.len());
     }
 

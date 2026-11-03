@@ -1,6 +1,6 @@
 # Gas and storage of the public methods of interface 0.0.12 (CT-098)
 
-Status: measured on 2026-11-03 in near-sandbox with the wasm built from the working tree of `contracts` at `46c2e62` (the interface of the release `v0.0.12`). **One method does not work at the size that the contract accepts: `commit_epoch` with many edges (see "Finding" below).**
+Status: the tables are measured on 2026-11-03 in near-sandbox with the wasm of interface 0.0.12 (`46c2e62`). They show one method that did not work at the size that the contract accepts, `commit_epoch` with many edges; **the finding is fixed in 0.0.13** (section "Finding", with the numbers of 0.0.13).
 
 ## How to repeat it
 ```bash
@@ -114,8 +114,19 @@ A group takes one to six minutes. Run them one at a time.
 | claim to Intents, with its callback | 11.5 |
 | register_cumulative, a continuing pair | 4.4 |
 
-## Finding: `commit_epoch` fails above about 180 edges (found by this report, 2026-11-03)
-NEAR limits the **total** length of the logs of one receipt to 16,384 bytes (`HostError::TotalLogLengthExceeded`). The chunks of 50 edges of `clearing_applied` and the chunks of `epoch_committed` are each small, but their sum is not: with account names of 50 characters, 210 edges give 17,615 bytes (a unit test reproduced it) and 300 edges give 19,785; with names of 64 characters the limit is reached at about 100 edges. `submit_clearing` accepts 300 edges (`MAX_EDGES_PER_TX`) and stores them, so a proposal that the verifier accepts can be one that `commit_epoch` can never apply, and the epoch cannot leave the clearing phase unless a better proposal replaces it. This is item CT-099; this table is the evidence. Until it is fixed the safe size of a proposal is below 100 edges.
+## Finding: `commit_epoch` failed above about 180 edges (found by this report, fixed in 0.0.13)
+NEAR limits the **total** length of the logs of one receipt to 16,384 bytes (`HostError::TotalLogLengthExceeded`). In 0.0.12 `commit_epoch` logged every edge (`clearing_applied`, chunks of 50) and every position (`epoch_committed`); the chunks are small, their sum is not: with account names of 50 characters 210 edges gave 17,615 bytes and 300 edges 19,785 (the tables above, measured on 0.0.12, show `REFUSED`); with names of 64 characters the limit was reached at about 100 edges. `submit_clearing` accepts 300 edges, so an accepted proposal could be one that `commit_epoch` could never apply.
+
+**Fixed in 0.0.13 (CT-099).** `clearing_applied` is a summary (`edge_count`, `edges_hash`) and `epoch_committed` carries all positions in one log with `position_count` and `positions_hash`. Measured in the sandbox on the 0.0.13 wasm, with account names of 64 characters:
+
+| call | gas, Tgas | total log, bytes | budget (90 percent of 16,384 = 14,745) |
+| --- | ---: | ---: | --- |
+| `commit_epoch`, 300 edges, 30 members, fees on | 103.8 | 5,333 | passes |
+| `commit_epoch`, 256 edges, 64 members (the most members), fees on | 113.7 | 10,637 | passes |
+| `commit_bundle`, 64 legs (the most), 64 members | | 11,071 | passes |
+| `finalize_epoch`, 63 defaults, 64 members | | 14,532 | passes (the `member_defaulted` events are cut to fit 90 percent; before the change it logged 16,252, under the limit but with no margin) |
+
+The gas of `commit_epoch` grows with the edges (about 0.3 Tgas per edge, 104 Tgas at 300), far below 300 Tgas. The tests are `tests/ct099_commit_log_size.rs` (they fail above the budget) and `tests/ct099_hash_vectors.rs`; repeat one at a time with `cargo test --test ct099_commit_log_size <name> -- --nocapture --test-threads=1`.
 
 ## What is above 100 Tgas
 `apply_upgrade` 110 Tgas (deploys the code and runs `migrate`; the limit of the transaction is 300). Nothing is above 300 Tgas.
