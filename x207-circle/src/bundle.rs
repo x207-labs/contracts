@@ -313,3 +313,48 @@ impl X207Circle {
         intents().get(&key).map(|r| IntentView { intent_hash, account_id: r.account_id.clone(), posted_at: U64(r.posted_at) })
     }
 }
+
+#[cfg(test)]
+mod security_tests {
+    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::testing_env;
+
+    use super::*;
+    use crate::member::Member;
+    use crate::params::Params;
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    fn circle_with_member(name: &str) -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
+        let mut c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), 1_000);
+        c.members.insert(acc(name), Member {
+            account_id: acc(name), pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap(), terms_hash: "a".repeat(64),
+            stake: 100, limit: 80, status: MemberStatus::Active, admitted: false, joined_at: 1, settled_history: 0, last_active_epoch: 1, exit_requested_epoch: None,
+            withdraw_pending: false, reactivate_epoch: None,
+        });
+        c
+    }
+
+    fn post(c: &mut X207Circle, who: &str, n: u32) {
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(who)).block_timestamp(2_000).build());
+        let mut hash = [0u8; 32];
+        hash[..4].copy_from_slice(&n.to_le_bytes());
+        c.post_intent(Base58CryptoHash::from(hash));
+    }
+
+    // TC-CT-062-S02 (security review F2, needs a decision): a single member can post intents without limit. Run with --ignored.
+    #[test]
+    #[ignore = "finding F2 needs a decision: a per-member cap or a storage deposit (ABI change) for post_intent"]
+    fn one_member_cannot_fill_the_storage_of_the_contract_with_intents() {
+        let mut c = circle_with_member("gina.near");
+        let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            for n in 0..5_000 {
+                post(&mut c, "gina.near", n);
+            }
+        }));
+        assert!(refused.is_err(), "5000 intents of one member were all accepted, paid by the balance of the contract");
+    }
+}
