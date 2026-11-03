@@ -76,6 +76,10 @@ impl World {
         self.balance(&self.rwa, who.id().as_str()).await
     }
 
+    pub async fn in_circle_of(&self, token: &Contract) -> anyhow::Result<u128> {
+        self.balance(token, self.f.circle.contract.id().as_str()).await
+    }
+
     pub async fn rwa_in_circle(&self) -> anyhow::Result<u128> {
         self.balance(&self.rwa, self.f.circle.contract.id().as_str()).await
     }

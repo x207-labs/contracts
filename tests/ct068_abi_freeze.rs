@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 41] = [
+const CHANGE_METHODS: [&str; 42] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -39,21 +39,23 @@ const CHANGE_METHODS: [&str; 41] = [
     "mt_on_transfer", "withdraw_intents_balance", "on_intents_withdrawn",
     // 0.0.12: CT-095 (freeze_member)
     "propose_freeze", "apply_freeze", "cancel_freeze", "unfreeze_member",
+    // 0.0.12: CT-096 (official contracts)
+    "set_asset_contracts",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 33] = [
+const VIEWS: [&str; 34] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
     "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen",
+    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 74] = [
+const SIGNATURES: [&str; 76] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
@@ -69,6 +71,7 @@ const SIGNATURES: [&str; 74] = [
     "finalize_epoch(epoch:integer:uint64)-> []",
     "ft_on_transfer(sender_id:string,amount:string,msg:string)->PromiseOrValueString []",
     "get_asset_class(asset_type:string)->AssetClassEntry|null []",
+    "get_asset_contracts(asset_type:string)->array<string> []",
     "get_bundle(bundle_id:integer:uint64)->BundleView|null []",
     "get_circle()->CircleConfig []",
     "get_clearing_proposal(epoch:integer:uint64)->ClearingProposal|null []",
@@ -121,6 +124,7 @@ const SIGNATURES: [&str; 74] = [
     "request_exit()-> [payable]",
     "revoke_grant(grant_id:integer:uint64,reason:RevokeReason)-> []",
     "set_asset_class(asset_type:string,entry:AssetClassEntry)-> []",
+    "set_asset_contracts(asset_type:string,contracts:array<string>)-> []",
     "set_params(params:Params)-> []",
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
     "solver_fee_balance(account_id:string)->string []",
@@ -130,8 +134,8 @@ const SIGNATURES: [&str; 74] = [
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
 ];
 
-const EVENTS: [&str; 39] = [
-    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
+const EVENTS: [&str; 40] = [
+    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
 ];
 
 fn strip_descriptions(value: &mut Value) {

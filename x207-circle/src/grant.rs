@@ -353,8 +353,12 @@ impl X207Circle {
         );
         require!(input.limits.quota.map_or(true, |q| q.0 > 0), "ERR_BAD_GRANT: quota must be above 0 or null");
         if entry.class == AssetClass::A {
-            if let Err(reason) = class_a_asset(&input.limits.scope) {
-                env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}}, {{\"ft_contract\": ..., \"amount\": \"...\"}} or {{\"mt_contract\": ..., \"token_id\": ..., \"amount\": \"...\"}}: {reason}"));
+            match class_a_asset(&input.limits.scope) {
+                Err(reason) => env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}}, {{\"ft_contract\": ..., \"amount\": \"...\"}} or {{\"mt_contract\": ..., \"token_id\": ..., \"amount\": \"...\"}}: {reason}")),
+                // CT-096: with a list of official contracts for this asset type, the scope must name one of them (the owner finds out before anything is put in escrow)
+                Ok(ClassAAsset::Nft { nft_contract: c, .. }) | Ok(ClassAAsset::Ft { ft_contract: c, .. }) | Ok(ClassAAsset::Mt { mt_contract: c, .. }) => {
+                    crate::asset_contracts::assert_official(&input.asset_type, &c);
+                }
             }
         }
         let mut counts = grant_counts();
@@ -561,6 +565,17 @@ mod tests {
             assert_eq!(load_grant(4).status, GrantStatus::Offered);
         }
     }
+}
+
+/// Unit tests need an asset type registered without going through `set_asset_class`.
+#[cfg(test)]
+pub(crate) fn set_class_for_test(asset_type: &str, class: AssetClass) {
+    let mut map = asset_classes();
+    map.insert(
+        asset_type.to_string(),
+        AssetClassEntry { asset_type: asset_type.to_string(), class, delivery_methods: vec!["escrow_ft".into()], accepted_proofs: vec![], terms_hash: "5a".repeat(32) },
+    );
+    map.flush();
 }
 
 /// Unit tests of the escrow need a grant in storage without going through `offer_grant`.

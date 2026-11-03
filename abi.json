@@ -331,6 +331,30 @@
       },
       {
         "kind": "view",
+        "name": "get_asset_contracts",
+        "params": {
+          "args": [
+            {
+              "name": "asset_type",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_bundle",
         "params": {
           "args": [
@@ -1716,6 +1740,30 @@
               "name": "entry",
               "type_schema": {
                 "$ref": "#/definitions/AssetClassEntry"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "set_asset_contracts",
+        "params": {
+          "args": [
+            {
+              "name": "asset_type",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "contracts",
+              "type_schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             }
           ],
@@ -3364,6 +3412,13 @@
         "account_id"
       ],
       "name": "member_unfrozen"
+    },
+    {
+      "fields": [
+        "asset_type",
+        "contracts"
+      ],
+      "name": "asset_contracts_set"
     },
     {
       "fields": [

@@ -71,6 +71,8 @@ pub enum StorageKey {
     FtEscrows = b'z',
     /// D11 class A, multi-token (NEP-245): `GrantId -> MtEscrow` (CT-092).
     MtEscrows = b'y',
+    /// D10 side map (CT-096): `asset_type -> official contracts`.
+    AssetContracts = b'w',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).

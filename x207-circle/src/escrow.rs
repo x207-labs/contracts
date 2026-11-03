@@ -279,6 +279,7 @@ impl X207Circle {
         let grant = load_grant(grant_id);
         require!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        crate::asset_contracts::assert_official(&grant.asset_type, &nft_contract);
         // security review F1: only the NFT contract and the token that the grantor named in the scope may fill the escrow
         let target = crate::grant::class_a_target(&grant.limits.scope);
         require!(
@@ -477,6 +478,7 @@ impl X207Circle {
         };
         refuse_unless!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
         refuse_unless!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        refuse_unless!(crate::asset_contracts::is_official(&grant.asset_type, &mt_contract), format!("ERR_CONTRACT_NOT_OFFICIAL: {mt_contract} is not an official contract of {}", grant.asset_type));
         let want = crate::grant::class_a_asset(&grant.limits.scope);
         refuse_unless!(
             matches!(&want, Ok(crate::grant::ClassAAsset::Mt { mt_contract: c, token_id: t, .. }) if *c == mt_contract && *t == token_id),
@@ -501,6 +503,7 @@ impl X207Circle {
         let grant = load_grant(grant_id);
         require!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        crate::asset_contracts::assert_official(&grant.asset_type, &ft_contract);
         let want = crate::grant::class_a_asset(&grant.limits.scope);
         require!(
             matches!(&want, Ok(crate::grant::ClassAAsset::Ft { ft_contract: c, .. }) if *c == ft_contract),
@@ -1226,5 +1229,63 @@ mod tests {
         callback(&mut c, PromiseResult::Failed);
         assert_eq!(load_mt_escrow(GRANT).map(|e| e.state), Some(EscrowState::Stuck));
         assert!(holds_asset(GRANT) && !pair_locked(1, &acc("bob.near"), &acc("alice.near")));
+    }
+
+    // ---- CT-096: official contracts per asset type ----
+
+    fn set_list(asset_type: &str, contracts: &[&str]) {
+        let mut map = crate::asset_contracts::lists();
+        map.insert(asset_type.to_string(), contracts.iter().map(|c| acc(c)).collect());
+        map.flush();
+    }
+
+    // TC-CT-096-U03
+    #[test]
+    fn the_nft_receiver_refuses_a_contract_that_is_not_on_the_list_of_its_asset_type() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_offered());
+        set_list("nft:ticket", &["official-tickets.near"]);
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("nft.near")).block_timestamp(5_000).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "t1".into(), format!("{{\"grant_id\":{GRANT}}}"));
+        }));
+        let text = r.expect_err("refused").downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(text.contains("ERR_CONTRACT_NOT_OFFICIAL"), "{text}");
+        assert!(load_escrow(GRANT).is_none());
+        set_list("nft:ticket", &["official-tickets.near", "nft.near"]);
+        let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "t1".into(), format!("{{\"grant_id\":{GRANT}}}"));
+        assert_eq!(load_escrow(GRANT).map(|e| e.state), Some(EscrowState::Held));
+    }
+
+    // TC-CT-096-U04
+    #[test]
+    fn the_token_receivers_refuse_a_contract_that_is_not_on_the_list_the_multi_token_one_by_its_answer() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_ft());
+        set_list("ft:rwa", &["real-rwa.near"]);
+        assert_refused(deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()), "ERR_CONTRACT_NOT_OFFICIAL");
+        set_list("ft:rwa", &["real-rwa.near", "rwa.near"]);
+        assert_eq!(deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()), Ok(0));
+        // the multi-token escrow answers with the whole amount and says why (the storage of this thread still holds the escrow of the grant above)
+        let mut map = ft_escrows();
+        map.remove(&GRANT);
+        map.flush();
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_mt());
+        set_list("mt:usdc", &["intents.near"]);
+        refused_mt(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()), &[RWA_AMOUNT], "ERR_CONTRACT_NOT_OFFICIAL");
+        set_list("mt:usdc", &["intents.near", "mt.near"]);
+        assert_eq!(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()), Ok(vec![0]));
+    }
+
+    // TC-CT-096-U05: a list of one asset type does not touch another type, and an escrow that is held stays held when the list changes
+    #[test]
+    fn a_list_of_another_type_changes_nothing_and_a_held_escrow_stays() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_ft());
+        set_list("nft:ticket", &["official-tickets.near"]);
+        assert_eq!(deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()), Ok(0));
+        set_list("ft:rwa", &["real-rwa.near"]);
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Held), "the list does not reach back into a held escrow");
     }
 }

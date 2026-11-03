@@ -3,6 +3,7 @@
 //! The contract root lives in `state.rs` and every process has its own module with its own
 //! `#[near] impl X207Circle` block, so lanes working in parallel do not need to edit this file.
 
+pub mod asset_contracts;
 pub mod bundle;
 pub mod canonical;
 pub mod clearing;
