@@ -83,3 +83,63 @@ impl X207Circle {
         U128(read(CREDIT_KEY))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use near_sdk::json_types::U128;
+    use near_sdk::serde_json;
+    use near_sdk::test_utils::{get_logs, VMContextBuilder};
+    use near_sdk::{test_vm_config, testing_env, AccountId, PromiseResult, RuntimeFeesConfig};
+
+    use super::*;
+    use crate::params::Params;
+
+    const CREDIT: u128 = 1_000_000;
+
+    fn acc(s: &str) -> AccountId {
+        s.parse().unwrap()
+    }
+
+    /// A circle with `booked` at Intents and a withdrawal of that amount in flight, inside an environment where promise 0 answered `result`.
+    fn in_flight(booked: u128, result: PromiseResult) -> X207Circle {
+        testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
+        let c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), 1_000);
+        let ctx = VMContextBuilder::new().current_account_id(acc("circle.near")).predecessor_account_id(acc("circle.near")).build();
+        testing_env!(ctx, test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![result]);
+        write(CREDIT_KEY, 0);
+        add_credit(booked);
+        write(IN_FLIGHT_KEY, booked);
+        c
+    }
+
+    fn answer(text: &str) -> PromiseResult {
+        PromiseResult::Successful(text.as_bytes().to_vec())
+    }
+
+    fn events() -> Vec<String> {
+        get_logs().iter().filter_map(|l| l.strip_prefix("EVENT_JSON:")).map(|b| serde_json::from_str::<serde_json::Value>(b).unwrap()["event"].as_str().unwrap().to_string()).collect()
+    }
+
+    /// The three answers that must book nothing: the call failed, the answer is not a number, the answer is `0`.
+    #[test]
+    fn a_withdrawal_that_did_not_leave_books_nothing_and_can_be_called_again() {
+        let failures = [("failed", PromiseResult::Failed), ("not a number", answer("garbage")), ("empty", answer("")), ("a string that is not an amount", answer("\"abc\"")), ("zero", answer("\"0\""))];
+        for (name, result) in failures {
+            let mut c = in_flight(40 * CREDIT, result);
+            assert_eq!(c.on_intents_withdrawn(U128(40 * CREDIT)), U128(0), "{name}");
+            assert_eq!(c.intents_balance(), U128(40 * CREDIT), "{name}: the balance stays booked");
+            assert_eq!(read(IN_FLIGHT_KEY), 0, "{name}: the withdrawal is open for a new call");
+            assert!(events().is_empty(), "{name}: no intents_withdrawn event");
+        }
+    }
+
+    #[test]
+    fn what_ft_withdraw_answers_is_what_is_booked_out() {
+        for (reported, left) in [("\"40000000\"", 40 * CREDIT), ("\"15000000\"", 15 * CREDIT), ("\"99000000\"", 40 * CREDIT)] {
+            let mut c = in_flight(40 * CREDIT, answer(reported));
+            assert_eq!(c.on_intents_withdrawn(U128(40 * CREDIT)), U128(left), "{reported}");
+            assert_eq!(c.intents_balance(), U128(40 * CREDIT - left), "{reported}");
+            assert_eq!((read(IN_FLIGHT_KEY), events()), (0, vec!["intents_withdrawn".to_string()]), "{reported}");
+        }
+    }
+}
