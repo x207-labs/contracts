@@ -1,5 +1,5 @@
-# CT-044: a pushed tag v0.x.y builds the wasm and attaches it with abi.json to a GitHub release.
-# Pushing the tag is the human confirmation; nothing here runs on branches.
+# CT-044 and CT-087: a pushed tag v0.x.y builds the wasm twice in the pinned cargo-near container, stops if the two sha256 differ, and attaches the wasm
+# with abi.json and SHA256SUMS to a GitHub release. Pushing the tag is the human confirmation; nothing here runs on branches.
 name: Release
 
 on:
@@ -12,19 +12,25 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Toolchain
-        run: rustup toolchain install
-      - name: Install cargo-near
+      - name: Build 1 in the pinned container
+        run: scripts/repro-build.sh "${GITHUB_SHA}" build-1
+      - name: Build 2 in the pinned container, from a fresh extraction of the same commit
+        run: scripts/repro-build.sh "${GITHUB_SHA}" build-2
+      - name: The two builds must be the same bytes
         run: |
-          sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
-          cargo install cargo-near --version 0.22.0 --locked
+          a=$(sha256sum build-1/x207_circle.wasm | cut -d' ' -f1)
+          b=$(sha256sum build-2/x207_circle.wasm | cut -d' ' -f1)
+          echo "build 1: $a"
+          echo "build 2: $b"
+          [ "$a" = "$b" ] || { echo "the two builds differ, no release" >&2; exit 1; }
       - name: Package
-        run: scripts/package-release.sh "${GITHUB_REF_NAME}"
+        run: X207_WASM=build-1/x207_circle.wasm scripts/package-release.sh "${GITHUB_REF_NAME}"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --notes "x207-circle ${GITHUB_REF_NAME}: wasm and abi.json. Checksums in SHA256SUMS."
+          code_hash=$(sha256sum dist/x207-circle-${GITHUB_REF_NAME}.wasm | cut -d' ' -f1)
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --notes "x207-circle ${GITHUB_REF_NAME}: wasm and abi.json, built in the pinned container of Cargo.toml (reproducible: the sha256 below is what scripts/repro-build.sh gives for this tag). sha256 of the wasm: ${code_hash}. How to verify it against the account on chain: docs/verify-release.md."

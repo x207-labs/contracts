@@ -1,0 +1,35 @@
+# CT-087: the proof that the build is reproducible, without a release. Builds the same commit twice in the pinned container and compares the sha256.
+# Run by hand (workflow_dispatch) or on every change of the build files; it publishes nothing.
+name: Reproducible build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "scripts/repro-build.sh"
+      - ".github/workflows/reproducible.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  twice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build 1
+        run: scripts/repro-build.sh "${GITHUB_SHA}" build-1
+      - name: Build 2
+        run: scripts/repro-build.sh "${GITHUB_SHA}" build-2
+      - name: Compare
+        run: |
+          a=$(sha256sum build-1/x207_circle.wasm | cut -d' ' -f1)
+          b=$(sha256sum build-2/x207_circle.wasm | cut -d' ' -f1)
+          echo "build 1: $a"
+          echo "build 2: $b"
+          echo "sha256 of the wasm of ${GITHUB_SHA}: $a" >> "$GITHUB_STEP_SUMMARY"
+          [ "$a" = "$b" ] || { echo "the two builds differ" >&2; exit 1; }
