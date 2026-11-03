@@ -5,6 +5,9 @@ The wasm of a release is built in a pinned container (`[package.metadata.near.re
 ## What this proves and what it does not
 `cargo near build reproducible-wasm` (the standard tool, also used by SourceScan) clones the repository from its remote. The repository is private, so it cannot run here ("remote authentication required"). `scripts/repro-build.sh` runs the **same image and the same command** that `Cargo.toml` names, on the files of a git ref, without the clone. It proves that this pipeline is deterministic (two builds, same bytes; the workflow `reproducible.yml` checks it on a GitHub runner). It does **not** prove that the sha256 equals what SourceScan or another third-party verifier would compute from the same tag, because their build path differs. When the repository is public, run `cargo near build reproducible-wasm` and compare with the number of the release; until then the check in this file is the one that holds.
 
+## In one command
+`scripts/verify-release.sh v0.0.9 [account] [rpc-url]` does steps 1 and 2 below (download into a new folder, `shasum -c`, sha256 in hex and base58), compares with the `code_hash` of `account` when one is given, and with `REBUILD=1` also rebuilds the tag in the container (step 3) and compares. It exits with 1 when something does not match. The negative path was tried: the testnet circle `x207-circle-v10.testnet`, which runs a local build, does **not** match the wasm of v0.0.8 (`NO MATCH`).
+
 ## 1. Take the wasm of the release and check it against the published sums
 ```bash
 mkdir release-check && cd release-check
