@@ -165,7 +165,7 @@ mod tests {
         (pairs, totals, bundle_rows, counters)
     }
 
-    // TC-CT-079-01 (ADR-31 c): only a finalized epoch is pruned
+    // TC-CT-085-01 (ADR-31 c): only a finalized epoch is pruned
     #[test]
     fn an_epoch_that_is_not_finalized_is_refused() {
         for phase in [EpochPhase::Open, EpochPhase::Clearing, EpochPhase::PaymentWindow] {
@@ -183,7 +183,7 @@ mod tests {
         .contains("ERR_UNKNOWN_EPOCH"));
     }
 
-    // TC-CT-079-02: max_items bounds one call; calls add up to everything; the last call returns 0
+    // TC-CT-085-02: max_items bounds one call; calls add up to everything; the last call returns 0
     #[test]
     fn max_items_bounds_a_call_and_repeated_calls_clear_the_epoch() {
         let mut c = finalized();
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(c.prune_epoch(1, 50), 0, "nothing left");
     }
 
-    // TC-CT-079-03 (required): a claim that was not taken stays possible. Positions, their index and the epoch figures `claim` reads are untouched.
+    // TC-CT-085-03 (required): a claim that was not taken stays possible. Positions, their index and the epoch figures `claim` reads are untouched.
     #[test]
     fn positions_and_the_claim_inputs_survive_a_full_prune() {
         let mut c = finalized();
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(c.net_position(1, acc("a.near")).map(|p| p.amount.0), Some(7 * CREDIT));
     }
 
-    // TC-CT-079-04: another epoch keeps all its entries
+    // TC-CT-085-04: another epoch keeps all its entries
     #[test]
     fn other_epochs_are_not_touched() {
         let mut c = finalized();
@@ -237,7 +237,7 @@ mod tests {
         assert!(c.totals.get(&(2, acc("a.near"))).is_some());
     }
 
-    // TC-CT-079-05: anybody may call it
+    // TC-CT-085-05: anybody may call it
     #[test]
     fn anybody_can_prune() {
         let mut c = finalized();

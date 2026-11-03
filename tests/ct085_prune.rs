@@ -1,4 +1,4 @@
-//! CT-079 in near-sandbox: `prune_epoch` on a real circle. The claim that was not taken must survive the prune. Needs
+//! CT-085 in near-sandbox: `prune_epoch` on a real circle. The claim that was not taken must survive the prune. Needs
 //! `cargo near build non-reproducible-wasm` first.
 
 mod common;
@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 const GPU_START: u128 = 900 * CREDIT; // 1000 minted, 100 staked
 
-// TC-CT-079-06: only a finalized epoch; anybody may call; the creditor that had not claimed yet still claims in full afterwards
+// TC-CT-085-06: only a finalized epoch; anybody may call; the creditor that had not claimed yet still claims in full afterwards
 #[tokio::test]
 async fn an_unclaimed_position_can_still_be_claimed_after_the_epoch_is_pruned() -> anyhow::Result<()> {
     let f = s1_committed().await?; // payment window of epoch 1: scraper owes, gpu is the creditor

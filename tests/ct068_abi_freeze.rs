@@ -33,7 +33,7 @@ const CHANGE_METHODS: [&str; 34] = [
     "revoke_grant",
     // 0.0.7: CT-075 (class A escrow)
     "nft_on_transfer", "complete_escrow", "cancel_escrow", "on_escrow_resolved",
-    // 0.0.8: security review F2 and CT-079 (prune_epoch)
+    // 0.0.8: security review F2 and CT-085 (prune_epoch)
     "remove_intent", "prune_epoch",
 ];
 
