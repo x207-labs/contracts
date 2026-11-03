@@ -64,3 +64,20 @@ Not tested in this part: a bundle whose payee is pruned from the circle by `exit
 - Economic attacks with bundles (wash trading through legs), interplay with clearing under many bundles.
 - Fuzzing, and any attack through the SDK or the broker beyond `backend/docs/security-review-2.md`.
 - Gas of `grants_of` for a grantee with more than 80 grants (extrapolated), and of `prune_epoch` at the 200-item cap.
+
+## Escrow of a NEP-141 token (CT-090, CT-091), checked 2026-11-03
+The class A escrow takes an exact amount of a fungible token as well as an NFT. The grantor names `{"ft_contract": ..., "amount": "..."}` in the scope, sends exactly that amount with `ft_transfer_call` and `msg` `{"action":"escrow","grant_id":N}`, and `complete_escrow` pays the buyer with `ft_transfer`. Every refusal at the receiver is a panic, so the token returns the whole amount to the sender; the tests check the balances, not only the error.
+
+| Attack or failure | Result | Test |
+| --- | --- | --- |
+| Another account puts the right amount against the grant of the grantor | `ERR_ESCROW_DEPOSITOR`, tokens back | `ct090_ft_escrow` |
+| Amount below or above the scope | `ERR_ESCROW_FT_AMOUNT`, tokens back | unit + `ct090_ft_escrow` |
+| A token contract other than the one in the scope | `ERR_ESCROW_FT_MISMATCH`, tokens back | unit + `ct090_ft_escrow` |
+| A second deposit for the same grant | `ERR_ESCROW_EXISTS`, the first escrow is untouched | unit + `ct090_ft_escrow` |
+| `stake` or `settle` sent through a token that is not the USDT | `ERR_WRONG_TOKEN`, no stake, no pool change | `ct090_ft_escrow` |
+| The USDT of the circle as the escrow asset | `ERR_ESCROW_USDT` (it would mix with stakes and the pool) | unit + `ct090_ft_escrow` |
+| Buyer not whitelisted, frozen, or not registered at the token | `ft_transfer` fails, the voucher is taken back exactly, escrow `held`, grant `offered`, no debt | `ct091_restricted_token` |
+| Circle not whitelisted, or grantor frozen, at deposit time | the token refuses the transfer, no escrow, grantor keeps the tokens | `ct091_restricted_token` |
+| Token that burns a fee on every transfer | the circle holds `amount - fee` and cannot send `amount`: a sale fails and is taken back, and so does `cancel_escrow`; the escrow stays `held`. The shortfall is the fee. | `ct091_restricted_token` |
+
+Limits that stay: a token that freezes the circle or the grantor after the deposit can keep the tokens in the circle for good, and `complete_escrow` / `cancel_escrow` then fail and are retried; a token with a transfer fee is a bad asset for this escrow, and the grantor should check the balance (`ft_balance_of` of the circle) before offering it. The scope says which contract and which amount, but not whether that token is worth anything: the buyer judges that, as with an NFT.
