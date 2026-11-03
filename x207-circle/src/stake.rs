@@ -133,7 +133,7 @@ impl X207Circle {
         // CT-092: the `escrow` action fills the escrow of a class A grant with a multi-token from any NEP-245 contract; settle stays Intents and USDT only
         let escrow = serde_json::from_str::<serde_json::Value>(&msg).ok().filter(|v| v.get("action").and_then(|a| a.as_str()) == Some("escrow"));
         if let Some(escrow) = escrow {
-            let grant_id = escrow.get("grant_id").and_then(|g| g.as_u64()).unwrap_or_else(|| env::panic_str("ERR_BAD_MSG: msg must be {\"action\":\"escrow\",\"grant_id\":N}"));
+            let grant_id = escrow.get("grant_id").and_then(|g| g.as_u64());
             let _ = sender_id;
             return self.escrow_mt_from_transfer(caller, previous_owner_ids, token_ids, amounts, grant_id);
         }

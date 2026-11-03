@@ -160,6 +160,10 @@ fn grant_counts() -> LookupMap<AccountId, u32> {
     LookupMap::new(StorageKey::GrantCounts)
 }
 
+pub fn try_load_grant(grant_id: GrantId) -> Option<AccessGrant> {
+    grants().get(&grant_id).cloned()
+}
+
 pub fn load_grant(grant_id: GrantId) -> AccessGrant {
     grants().get(&grant_id).cloned().unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_GRANT: {grant_id}")))
 }

@@ -85,7 +85,7 @@ A fee token cannot be refused at `ft_on_transfer`: the NEP-141 callback carries 
 Limits that stay: a token that freezes the circle or the grantor after the deposit can keep the tokens in the circle for good, and `complete_escrow` / `cancel_escrow` then fail and are retried; a token with a transfer fee is a bad asset for this escrow, and the grantor should check the balance (`ft_balance_of` of the circle) before offering it. The scope says which contract and which amount, but not whether that token is worth anything: the buyer judges that, as with an NFT.
 
 ## Escrow of an NEP-245 multi-token (CT-092), checked 2026-11-03
-`mt_on_transfer` takes the action `{"action":"escrow","grant_id":N}` from any multi-token contract; the scope is `{"mt_contract","token_id","amount"}` (exactly one token, exactly that amount) and `complete_escrow` pays the buyer with `mt_transfer`. The settle action keeps its own checks (caller is `intents_id`, token `nep141:<usdt>`); the escrow branch is taken only when the message says `escrow`, so a stake or settle through another contract is still `ERR_WRONG_TOKEN`. Same take-back and cancel path as the NFT and NEP-141 escrow.
+`mt_on_transfer` takes the action `{"action":"escrow","grant_id":N}` from any multi-token contract; the scope is `{"mt_contract","token_id","amount"}` (exactly one token, exactly that amount) and `complete_escrow` pays the buyer with `mt_transfer`. The settle action keeps its own checks (caller is `intents_id`, token `nep141:<usdt>`); the escrow branch is taken only when the message says `escrow`, so a stake or settle through another contract is still `ERR_WRONG_TOKEN`. Same take-back and cancel path as the NFT and NEP-141 escrow. **A refusal is not a panic:** `mt_on_transfer` logs `x207 mt escrow refused: ERR_…` and returns every amount as unused, so that `mt_resolve_transfer` hands everything back to the sender whatever the multi-token contract does with a failed receipt. (The NEP-141 escrow of CT-090 still panics, which a NEP-141 contract turns into the same refund.) A settle and an escrow through `intents_id`, one after the other, do not disturb each other (`ct092_intents_sequence`).
 
 | Attack or failure | Result | Test |
 | --- | --- | --- |
@@ -94,6 +94,7 @@ Limits that stay: a token that freezes the circle or the grantor after the depos
 | Another contract, or another token of the right contract | `ERR_ESCROW_MT_MISMATCH`, tokens back | unit + `ct092_mt_escrow` |
 | A batch of two tokens, or two owners | `ERR_ESCROW_MT_BATCH`, everything back | unit + `ct092_mt_escrow` |
 | A second deposit for the same grant | `ERR_ESCROW_EXISTS`, the first escrow is untouched | unit + `ct092_mt_escrow` |
+| A contract that is not the `mt_contract` of the scope calls `mt_on_transfer` itself (a fake contract, any account) | `ERR_ESCROW_MT_MISMATCH`, whole amount handed back | unit + `ct092_mt_escrow` |
 | `nep141:<usdt>` held at Intents as the asset | `ERR_ESCROW_USDT` | unit |
 | `stake` or `settle` through a multi-token contract that is not Intents | `ERR_WRONG_TOKEN`, no stake | unit + `ct092_mt_escrow` |
 | Buyer blocked or frozen at the token | `mt_transfer` fails, voucher taken back, escrow `held`, grant `offered`, no debt | `ct092_mt_escrow` |

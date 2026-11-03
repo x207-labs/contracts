@@ -123,3 +123,31 @@ async fn a_buyer_the_token_refuses_pays_nothing_and_the_grantor_can_take_the_tok
     assert_eq!(w.f.circle.view("get_grant", json!({"grant_id": id})).await?["status"], "revoked");
     Ok(())
 }
+
+// TC-CT-092-15: a contract that is not the multi-token of the scope calls mt_on_transfer itself (a fake contract, or any account): the answer hands everything back
+#[tokio::test]
+async fn a_fake_contract_calling_the_receiver_directly_gets_everything_back() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let id = w.offer(3_600_000_000_000).await?;
+    let fake = w.f.account("mallory").await?;
+    let msg = json!({"action": "escrow", "grant_id": id}).to_string();
+    // the owner it names is the grantor, the token is the right one, the amount is right: only the caller is wrong
+    let called = fake
+        .call(w.f.circle.contract.id(), "mt_on_transfer")
+        .args_json(json!({"sender_id": w.alice.id(), "previous_owner_ids": [w.alice.id()], "token_ids": [TOKEN], "amounts": [AMOUNT.to_string()], "msg": msg}))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(called.is_success(), "a refusal is an answer, not a failure: {:?}", failure_text(&called));
+    assert_eq!(called.clone().json::<Vec<String>>()?, vec![AMOUNT.to_string()], "the whole amount is handed back");
+    assert!(called.logs().iter().any(|l| l.contains("ERR_ESCROW_MT_MISMATCH")), "{:?}", called.logs());
+    assert_eq!(w.f.circle.view("get_mt_escrow", json!({"grant_id": id})).await?, Value::Null);
+    // a second fake multi-token contract that names the grantor as owner but is not the contract of the scope
+    let other = deploy_mt(&w.f).await?;
+    other.call("mint").args_json(json!({"account_id": w.alice.id(), "token_id": TOKEN, "amount": AMOUNT.to_string()})).transact().await?.into_result()?;
+    let alice = w.alice.clone();
+    let _ = w.deposit_with(&other, &alice, TOKEN, AMOUNT, &msg).await?;
+    assert_eq!(w.balance(&other, alice.id().as_str(), TOKEN).await?, AMOUNT, "the tokens came back through the resolve of the fake contract");
+    assert_eq!(w.f.circle.view("get_mt_escrow", json!({"grant_id": id})).await?, Value::Null);
+    Ok(())
+}

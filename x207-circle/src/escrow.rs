@@ -443,29 +443,50 @@ impl X207Circle {
     }
 
     /// The `escrow` action of `mt_on_transfer` (CT-092): exactly one multi-token, exactly the amount of the scope `{"mt_contract","token_id","amount"}`, put
-    /// by the grantor itself (`previous_owner_ids` is the grantor alone). The USDT of the circle held at Intents (`nep141:<usdt>`) is not an escrow asset.
-    /// Every refusal is a panic, so that the multi-token contract gives everything back. Returns `[0]`: all of it stays.
+    /// by the grantor itself (`previous_owner_ids` is the grantor alone), and the caller is the `mt_contract` of the scope. The USDT of the circle held at
+    /// Intents (`nep141:<usdt>`) is not an escrow asset. A refusal does **not** panic: it logs the reason (`x207 mt escrow refused: ERR_…`) and returns
+    /// every amount as unused, so that `mt_resolve_transfer` of the multi-token contract hands everything back to the sender, whatever that contract does
+    /// with a failed receipt. Returns `[0]` when the deposit is kept.
     pub(crate) fn escrow_mt_from_transfer(
-        &mut self, mt_contract: AccountId, previous_owner_ids: Vec<AccountId>, token_ids: Vec<String>, amounts: Vec<U128>, grant_id: GrantId,
+        &mut self, mt_contract: AccountId, previous_owner_ids: Vec<AccountId>, token_ids: Vec<String>, amounts: Vec<U128>, grant_id: Option<GrantId>,
     ) -> PromiseOrValue<Vec<U128>> {
-        require!(token_ids.len() == 1 && amounts.len() == 1 && previous_owner_ids.len() == 1, format!("ERR_ESCROW_MT_BATCH: one token, one amount and one owner per deposit, got {} tokens", token_ids.len()));
+        let refund = amounts.clone();
+        macro_rules! refuse_unless {
+            ($cond:expr, $msg:expr) => {
+                if !($cond) {
+                    env::log_str(&format!("x207 mt escrow refused: {}", $msg));
+                    return PromiseOrValue::Value(refund);
+                }
+            };
+        }
+        let Some(grant_id) = grant_id else {
+            refuse_unless!(false, "ERR_BAD_MSG: msg must be {\"action\":\"escrow\",\"grant_id\":N}");
+            unreachable!()
+        };
+        refuse_unless!(
+            token_ids.len() == 1 && amounts.len() == 1 && previous_owner_ids.len() == 1,
+            format!("ERR_ESCROW_MT_BATCH: one token, one amount and one owner per deposit, got {} tokens", token_ids.len())
+        );
         let (token_id, amount, owner) = (token_ids[0].clone(), amounts[0].0, previous_owner_ids[0].clone());
-        require!(amount > 0, "ERR_ZERO_AMOUNT");
-        require!(!(mt_contract == self.intents_id && token_id == format!("nep141:{}", self.usdt_token_id)), "ERR_ESCROW_USDT: the USDT of the circle is not an escrow asset");
-        let grant = load_grant(grant_id);
-        require!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
-        require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        refuse_unless!(amount > 0, "ERR_ZERO_AMOUNT");
+        refuse_unless!(!(mt_contract == self.intents_id && token_id == format!("nep141:{}", self.usdt_token_id)), "ERR_ESCROW_USDT: the USDT of the circle is not an escrow asset");
+        let Some(grant) = crate::grant::try_load_grant(grant_id) else {
+            refuse_unless!(false, format!("ERR_UNKNOWN_GRANT: {grant_id}"));
+            unreachable!()
+        };
+        refuse_unless!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
+        refuse_unless!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
         let want = crate::grant::class_a_asset(&grant.limits.scope);
-        require!(
+        refuse_unless!(
             matches!(&want, Ok(crate::grant::ClassAAsset::Mt { mt_contract: c, token_id: t, .. }) if *c == mt_contract && *t == token_id),
             format!("ERR_ESCROW_MT_MISMATCH: grant {grant_id} takes {want:?}, got {mt_contract} {token_id}")
         );
         if let Ok(crate::grant::ClassAAsset::Mt { amount: expected, .. }) = want {
-            require!(amount == expected, format!("ERR_ESCROW_MT_AMOUNT: grant {grant_id} takes {expected}, got {amount}"));
+            refuse_unless!(amount == expected, format!("ERR_ESCROW_MT_AMOUNT: grant {grant_id} takes {expected}, got {amount}"));
         }
-        require!(owner == grant.grantor, format!("ERR_ESCROW_DEPOSITOR: only {} may put the asset of grant {grant_id}", grant.grantor));
-        require!(Held::load(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
-        require!(env::block_timestamp() < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
+        refuse_unless!(owner == grant.grantor, format!("ERR_ESCROW_DEPOSITOR: only {} may put the asset of grant {grant_id}", grant.grantor));
+        refuse_unless!(Held::load(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
+        refuse_unless!(env::block_timestamp() < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
         Held::Mt(MtEscrow { mt_contract: mt_contract.clone(), token_id: token_id.clone(), amount, state: EscrowState::Held, buyer: None, snapshot: None }).save(grant_id);
         MtEscrowHeld { grant_id, mt_contract, token_id, amount: U128(amount) }.emit();
         PromiseOrValue::Value(vec![U128(0)])
@@ -1054,9 +1075,11 @@ mod tests {
             .map_err(|e| e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default())
     }
 
-    fn refused_mt(r: Result<Vec<u128>, String>, code: &str) {
-        let err = r.expect_err(&format!("expected {code}"));
-        assert!(err.contains(code), "expected {code}, got {err}");
+    /// A refusal of the multi-token escrow is a return value, not a panic: every amount comes back as unused and the reason is in the log.
+    fn refused_mt(r: Result<Vec<u128>, String>, amounts: &[u128], code: &str) {
+        let unused = r.expect("a refusal is a return value, not a panic");
+        assert_eq!(unused, amounts, "{code}: everything must be handed back");
+        assert!(get_logs().iter().any(|l| l.contains("x207 mt escrow refused") && l.contains(code)), "{code}: no reason in {:?}", get_logs());
         assert!(load_mt_escrow(GRANT).is_none() && load_ft_escrow(GRANT).is_none() && load_escrow(GRANT).is_none(), "{code}: a refused deposit must leave no escrow");
     }
 
@@ -1094,7 +1117,7 @@ mod tests {
         for (caller, owners, tokens, amounts, code) in cases {
             let mut c = circle();
             crate::grant::store_grant_for_test(&grant_mt());
-            refused_mt(deposit_mt(&mut c, caller, owners, tokens, amounts, &escrow_msg()), code);
+            refused_mt(deposit_mt(&mut c, caller, owners, tokens, amounts, &escrow_msg()), amounts, code);
         }
     }
 
@@ -1104,9 +1127,10 @@ mod tests {
         let mut c = circle();
         crate::grant::store_grant_for_test(&grant_mt());
         deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()).expect("first");
-        let again = deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()).expect_err("second");
-        assert!(again.contains("ERR_ESCROW_EXISTS"), "{again}");
-        assert_eq!(load_mt_escrow(GRANT).map(|e| e.amount), Some(RWA_AMOUNT));
+        let again = deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg());
+        assert_eq!(again, Ok(vec![RWA_AMOUNT]), "the second deposit comes back");
+        assert!(get_logs().iter().any(|l| l.contains("ERR_ESCROW_EXISTS")));
+        assert_eq!(load_mt_escrow(GRANT).map(|e| e.amount), Some(RWA_AMOUNT), "the first escrow is untouched");
         // an NFT grant and a NEP-141 grant take no multi-token
         for g in [grant_offered(), grant_ft()] {
             let mut c = circle();
@@ -1114,8 +1138,12 @@ mod tests {
             map.remove(&GRANT);
             map.flush();
             crate::grant::store_grant_for_test(&g);
-            refused_mt(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()), "ERR_ESCROW_MT_MISMATCH");
+            refused_mt(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], &escrow_msg()), &[RWA_AMOUNT], "ERR_ESCROW_MT_MISMATCH");
         }
+        // a message with no grant, and a grant that does not exist
+        let mut c = circle();
+        refused_mt(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], "{\"action\":\"escrow\"}"), &[RWA_AMOUNT], "ERR_BAD_MSG");
+        refused_mt(deposit_mt(&mut c, "mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], "{\"action\":\"escrow\",\"grant_id\":99}"), &[RWA_AMOUNT], "ERR_UNKNOWN_GRANT");
     }
 
     // TC-CT-092-S03: the USDT of the circle held at Intents is not an escrow asset; a settle through mt_on_transfer is not changed
@@ -1125,7 +1153,7 @@ mod tests {
         let mut g = grant_mt();
         g.limits.scope = format!("{{\"mt_contract\":\"intents.near\",\"token_id\":\"nep141:usdt.near\",\"amount\":\"{RWA_AMOUNT}\"}}");
         crate::grant::store_grant_for_test(&g);
-        refused_mt(deposit_mt(&mut c, "intents.near", &["alice.near"], &["nep141:usdt.near"], &[RWA_AMOUNT], &escrow_msg()), "ERR_ESCROW_USDT");
+        refused_mt(deposit_mt(&mut c, "intents.near", &["alice.near"], &["nep141:usdt.near"], &[RWA_AMOUNT], &escrow_msg()), &[RWA_AMOUNT], "ERR_ESCROW_USDT");
         // another token at Intents can be the escrow asset
         let mut g2 = grant_mt();
         g2.limits.scope = format!("{{\"mt_contract\":\"intents.near\",\"token_id\":\"{MT_TOKEN}\",\"amount\":\"{RWA_AMOUNT}\"}}");
