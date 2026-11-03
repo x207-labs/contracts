@@ -3236,10 +3236,10 @@
       "name": "intent_removed"
     }
   ],
-  "interface_version": "0.0.10",
+  "interface_version": "0.0.11",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.10"
+    "version": "0.0.11"
   },
   "schema_version": "0.4.0"
 }
