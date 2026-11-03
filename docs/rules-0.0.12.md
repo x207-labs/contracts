@@ -47,7 +47,7 @@ settle_deal(any)  : window over / arbiter silent    -> remaining bonds RELEASED 
 - `dispute_deal(bundle_id, evidence_hash)`: caller is a party, before `confirm_by`, only while the bond of the other party is still locked (a party that confirmed cannot dispute afterwards). One dispute per deal. `evidence_hash` is 64 hex, stored, never read.
 - `rule_deal(bundle_id, verdict)`: caller is the arbiter, only when the deal is disputed and before `disputed_at + 7 days` (*proposal*). `verdict`:
   - `accused_guilty`: the bond of the accused goes to the **stake** of the complainant; the bond of the complainant is released.
-  - `complaint_false`: the bond of the complainant goes to the stake of the accused; the bond of the accused is released.
+  - `complaint_false`: **half** of the bond of the complainant goes to the stake of the accused (the coordinator's decision, 2026-11-03); the rest of it is released to the complainant; the bond of the accused is released.
   - `no_fault`: both bonds are released.
 - `settle_deal(bundle_id)`: anybody. If the deal is open and `now >= confirm_by`: the remaining bonds are released (nobody complained in time: deemed done). If the deal is disputed and `now >= disputed_at + 7 days`: both bonds are released (**the arbiter was silent: nobody is punished without a ruling**). Otherwise `ERR_DEAL_NOT_DUE`.
 - A bond that is slashed moves between two stakes of the same circle: `total_stake` and the pool accounting do not change; the loser's limit is lowered to the new stake if needed (`limits_updated`), the winner's limit is unchanged.
@@ -116,12 +116,16 @@ A frozen member cannot start anything new. It can still pay what it owes, leave,
 `FREEZE_TIMELOCK_NS = 24 hours` (*proposal*, the same as `UPGRADE_TIMELOCK_NS`). The wait is the warning: the member sees `freeze_proposed` and can settle its debts, finish its deals, or leave before the freeze applies.
 
 ### 2.2 What a frozen member cannot and can do
-Cannot (`ERR_FROZEN`, when the frozen account is the caller, the payer, the payee, the grantor, the grantee or a participant): `register_cumulative`, `register_voucher`, `register_in_bundle`, `commit_bundle` (any participant frozen), `post_intent`, `offer_grant`, `accept_grant`, `complete_escrow`, and a new deal.
+Cannot (`ERR_FROZEN`, when the frozen account is the caller, the payer, the payee, the grantor, the grantee or a participant): `register_cumulative`, `register_voucher`, `register_in_bundle` (these three only for a voucher of an epoch **after** the epoch in which the freeze took effect, so a seller that already delivered can register until the cutoff, also in a bundle that was committed before), `commit_bundle` (any participant frozen), `post_intent`, `offer_grant`, `accept_grant`, `complete_escrow`, and a new deal.
 
 Can: pay a residual (`ft_on_transfer` and `mt_on_transfer` `settle`), `claim`, add stake, `request_exit`, `withdraw_stake`, `cancel_escrow`, `revoke_grant`, `remove_intent`, `confirm_deal`, `dispute_deal`, `settle_deal`. Open obligations stay in clearing as they are. A frozen member keeps its stake and its right to claim; the DAO cannot reach either (ADR-20).
 
 ### 2.3 Storage
 A raw key `x207_freeze:<account>` -> `{state, eta, reason_hash}` (absent = not frozen). `Member` is unchanged.
+
+### 2.4 Review notes (BE-064 part 1, 2026-11-03)
+- **C2, as designed.** A freeze applied while epoch E is clearing is recorded with `from_epoch` = the epoch that is open then (E+1). A voucher of E+1 therefore still registers; only vouchers of epochs after `from_epoch` are refused. This is the rule "vouchers of the epoch in which the freeze took effect stay registrable". `ct095_freeze` locks it.
+- **C3, as designed.** A freeze record is **not** deleted when the member exits, so that leaving and joining again does not undo a freeze. The owner can still call `unfreeze_member`.
 
 ## 3. CT-096: official contracts per asset type
 
@@ -145,6 +149,11 @@ For an `asset_type` of class A, the DAO can set a list of the token contracts th
 ### 3.4 Limits
 The list is the circle's opinion of which contract is the "real" one; the contract cannot tell. A list changed by the DAO does not affect an escrow that is already held. A grant offered before the list was set is not re-checked at the offer, but its deposit is checked.
 
+### 3.5 Review notes (BE-064 part 1, 2026-11-03)
+- **C1, fixed.** `complete_escrow` checks `is_official` for all three forms (NFT, NEP-141, NEP-245), so a token put in escrow before the owner set the list cannot be bought after it (`ERR_CONTRACT_NOT_OFFICIAL`). `cancel_escrow` is not checked: the grantor takes the token back. `ct096_asset_contracts` has the test.
+- **C4.** The list is read at offer, deposit and completion; a held escrow is not touched by a change of the list, but it cannot be completed once its contract is off the list.
+- **C5.** Clearing the list (an empty vector) switches the protection off at once, without a timelock; the owner (the DAO) decides this by a proposal.
+
 ## 4. Effects on the rest
 
 ### 4.1 `JOIN_STORAGE_DEPOSIT` (ADR-41, 0.32 NEAR today)
@@ -152,14 +161,17 @@ The deposit covers the worst case of what one member makes the contract store (3
 - up to 8 open deals (a deal record is about 350 to 400 bytes with two account ids, the arbiter, two hashes, the times and the flags; counted in full for each of its two members, which is cautious): about 3,200 bytes;
 - the locked-bond number and the deal counter (raw keys, about 140 bytes together) and one freeze record (about 180 bytes).
 
-That is about **3,500 bytes more, 0.035 NEAR**, so the deposit would become about **0.36 NEAR**. This is an estimate: `ct062` must be extended with the three new items and the deposit set from its measurement (the SDK constant `JOIN_STORAGE_DEPOSIT` and the onboarding code follow, as they did for 0.32 NEAR). Existing members joined with 0.32 and are not asked for more; the extra storage of an old member is paid by the circle account, which has to keep a balance (the same risk as for the other pay-by-the-contract items).
+**Measured** by the extended `ct062_storage_per_member` (`what_bonds_and_a_freeze_add_to_the_worst_case_of_one_member`, names of 64 characters): an open deal adds **344 bytes** (8 deals: 2,752), a freeze record **202 bytes**, so 0.0.12 adds **2,954 bytes, 0.0295 NEAR** for one member, and the worst case becomes 31,282 + 2,954 = **34,236 bytes = 0.3424 NEAR**. The estimate above (0.36 NEAR) was too high; a deposit of **0.35 NEAR** covers the measurement. The coordinator approved **0.35 NEAR** (ADR-41); `JOIN_STORAGE_DEPOSIT` is 350 mNEAR in the CT-094 commit. Existing members joined with 0.32 and are not asked for more; the extra storage of an old member is paid by the circle account, which has to keep a balance.
 
 ### 4.2 Interface and tests
 - ABI: 7 changed or new methods for bonds, 4 for freeze, 1 for contracts, 5 views, 11 events, about 25 error codes. `ct068_abi_freeze` and `abi.json` are regenerated; the interface is 0.0.12.
 - Tests planned: unit tests for each transition and each error; near-sandbox for the four paths of CT-094 (two confirmations, the buyer wins, the seller wins, a silent arbiter), the freeze (a frozen member is refused for new things and leaves with its whole stake), the contract list (a fake token is refused, an empty list keeps the old behaviour), the upgrade from 0.0.11 with a `Params` migration, an extended `ct062`, and a stateful property test that `limit <= stake - bond_locked` and `total_stake` constant hold through any sequence.
 - Backend (BE-053 and later): the events above enter the read model; listings and offers of a frozen member are refused (the indexer sees `member_frozen`).
 
-## 5. Open questions (for the coordinator and the owner)
+## 5. Decisions (coordinator, 2026-11-03) and what remains open
+Decided: (1) rings of three or more have **no bond in 0.0.12**: this is a limit, written here and in the CHANGELOG; (2) `complaint_false` costs **half** of the complainant's bond; (3) a silent arbiter releases all bonds and `bond_released {reason}` says `arbiter_silent`; (4) open deals of a frozen member continue; (5) deposit measured (section 4.1); (6) a frozen arbiter can still rule. The text below is the original question list, kept for the record.
+
+### Original questions
 1. **Rings of three or more.** Bonds are required only for two-party swaps in this design. A ring above the threshold goes without a bond. The alternatives are to refuse it (it stops the clearing of rings, the core of the product) or to bond every payer against one arbiter (a dispute is then between pairs, and the rulings multiply). *Recommended: two-party only in 0.0.12, and write the gap.*
 2. **Who loses a dismissed dispute.** `complaint_false` makes the complainant pay its bond to the accused. This discourages false complaints but also makes an honest mistake costly; `no_fault` is the arbiter's way out. Do you want `complaint_false` to cost the whole bond or only half?
 3. **A silent arbiter.** Releasing both bonds is safe but gives a cheater an easy road if the victim accepted a weak arbiter. Alternative: the arbiter's own stake or a fee (not in this design, the arbiter may be outside the circle).

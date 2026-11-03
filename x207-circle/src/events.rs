@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 40] = [
+pub const EVENT_SCHEMAS: [EventSchema; 46] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -120,6 +120,12 @@ pub const EVENT_SCHEMAS: [EventSchema; 40] = [
     schema("freeze_cancelled", &["account_id"]),
     schema("member_unfrozen", &["account_id"]),
     schema("asset_contracts_set", &["asset_type", "contracts"]),
+    schema("bond_locked", &["bundle_id", "account_id", "amount"]),
+    schema("deal_confirmed", &["bundle_id", "account_id", "of"]),
+    schema("deal_disputed", &["bundle_id", "complainant", "accused", "evidence_hash", "disputed_at"]),
+    schema("deal_ruled", &["bundle_id", "arbiter", "verdict"]),
+    schema("bond_slashed", &["bundle_id", "from", "to", "amount", "from_stake", "to_stake"]),
+    schema("bond_released", &["bundle_id", "account_id", "amount", "reason"]),
     schema("mt_escrow_held", &["grant_id", "mt_contract", "token_id", "amount"]),
     schema("escrow_failed", &["grant_id", "step", "epoch", "payer", "payee", "delta", "reverted"]),
     EventSchema {
@@ -347,6 +353,12 @@ event!("member_frozen", MemberFrozen { account_id: AccountId, from_epoch: EpochI
 event!("freeze_cancelled", FreezeCancelled { account_id: AccountId });
 event!("member_unfrozen", MemberUnfrozen { account_id: AccountId });
 event!("asset_contracts_set", AssetContractsSet { asset_type: String, contracts: Vec<AccountId> });
+event!("bond_locked", BondLocked { bundle_id: u64, account_id: AccountId, amount: U128 });
+event!("deal_confirmed", DealConfirmed { bundle_id: u64, account_id: AccountId, of: AccountId });
+event!("deal_disputed", DealDisputed { bundle_id: u64, complainant: AccountId, accused: AccountId, evidence_hash: String, disputed_at: U64 });
+event!("deal_ruled", DealRuled { bundle_id: u64, arbiter: AccountId, verdict: crate::deal::Verdict });
+event!("bond_slashed", BondSlashed { bundle_id: u64, from: AccountId, to: AccountId, amount: U128, from_stake: U128, to_stake: U128 });
+event!("bond_released", BondReleased { bundle_id: u64, account_id: AccountId, amount: U128, reason: crate::deal::ReleaseReason });
 event!("escrow_failed", EscrowFailed { grant_id: u64, step: crate::escrow::EscrowStep, epoch: EpochId, payer: AccountId, payee: AccountId, delta: U128, reverted: bool });
 event!("bundle_committed", BundleCommitted { bundle_id: u64, terms_hash: String, epoch: EpochId, legs: Vec<crate::bundle::BundleLeg>, solver: AccountId });
 event!("upgrade_proposed", UpgradeProposed { code_hash: near_sdk::json_types::Base58CryptoHash, eta: U64 });
@@ -474,6 +486,12 @@ mod tests {
             (FreezeCancelled::NAME, FreezeCancelled { account_id: a.clone() }.to_log()),
             (MemberUnfrozen::NAME, MemberUnfrozen { account_id: a.clone() }.to_log()),
             (AssetContractsSet::NAME, AssetContractsSet { asset_type: "token:nep141".into(), contracts: vec![a.clone()] }.to_log()),
+            (BondLocked::NAME, BondLocked { bundle_id: 1, account_id: a.clone(), amount: U128(20) }.to_log()),
+            (DealConfirmed::NAME, DealConfirmed { bundle_id: 1, account_id: a.clone(), of: b.clone() }.to_log()),
+            (DealDisputed::NAME, DealDisputed { bundle_id: 1, complainant: a.clone(), accused: b.clone(), evidence_hash: "ab".repeat(32), disputed_at: t }.to_log()),
+            (DealRuled::NAME, DealRuled { bundle_id: 1, arbiter: acc("arb.near"), verdict: crate::deal::Verdict::AccusedGuilty }.to_log()),
+            (BondSlashed::NAME, BondSlashed { bundle_id: 1, from: b.clone(), to: a.clone(), amount: U128(20), from_stake: U128(80), to_stake: U128(120) }.to_log()),
+            (BondReleased::NAME, BondReleased { bundle_id: 1, account_id: a.clone(), amount: U128(20), reason: crate::deal::ReleaseReason::Confirmed }.to_log()),
             (MtEscrowHeld::NAME, MtEscrowHeld { grant_id: 1, mt_contract: b.clone(), token_id: "nep141:x.near".into(), amount: U128(5) }.to_log()),
             (FtEscrowHeld::NAME, FtEscrowHeld { grant_id: 1, ft_contract: b.clone(), amount: U128(5) }.to_log()),
             (EscrowFailed::NAME, EscrowFailed { grant_id: 1, step: crate::escrow::EscrowStep::Complete, epoch: 42, payer: a.clone(), payee: b.clone(), delta: U128(5), reverted: true }.to_log()),
@@ -721,7 +739,7 @@ mod tests {
                 "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested",
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
-                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "mt_escrow_held", "escrow_failed", "bundle_committed",
+                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "bond_locked", "deal_confirmed", "deal_disputed", "deal_ruled", "bond_slashed", "bond_released", "mt_escrow_held", "escrow_failed", "bundle_committed",
                 "intents_withdrawn", "intent_removed",
             ]
         );

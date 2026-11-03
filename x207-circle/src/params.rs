@@ -21,6 +21,11 @@ pub const LIMIT_DECAY_MAX: u16 = 5_000;
 pub const CLEARING_FEE_BPS_MAX: u16 = 100;
 pub const SOLVER_FEE_BPS_MAX: u16 = 100;
 pub const MAX_SEARCH_SHARE_BPS_MAX: u16 = 10_000;
+/// CT-094: the value of a barter from which a bond is required, in the smallest unit of credit (10 credit to 1,000,000 credit), and the bond in bps of that value.
+pub const BOND_THRESHOLD_MIN: u128 = 10_000_000;
+pub const BOND_THRESHOLD_MAX: u128 = 1_000_000_000_000;
+pub const BOND_BPS_MIN: u16 = 500;
+pub const BOND_BPS_MAX: u16 = 5_000;
 
 // Defaults (ADR-25 and spec 3.4).
 pub const DEFAULT_EPOCH_LENGTH: u64 = 3_600;
@@ -33,8 +38,20 @@ pub const DEFAULT_LIMIT_DECAY: u16 = 0;
 /// F9 (CT-082): a declared seeker leg may take at most 5% of the sum of all legs of a bundle.
 pub const DEFAULT_MAX_SEARCH_SHARE_BPS: u16 = 500;
 
+/// CT-094: 100 credit, and 20% of the value of the barter.
+pub const DEFAULT_BOND_THRESHOLD: u128 = 100_000_000;
+pub const DEFAULT_BOND_BPS: u16 = 2_000;
+
 fn default_max_search_share_bps() -> u16 {
     DEFAULT_MAX_SEARCH_SHARE_BPS
+}
+
+fn default_bond_threshold() -> U128 {
+    U128(DEFAULT_BOND_THRESHOLD)
+}
+
+fn default_bond_bps() -> u16 {
+    DEFAULT_BOND_BPS
 }
 
 #[near(serializers = [borsh, json])]
@@ -70,6 +87,14 @@ pub struct Params {
     /// F9 (CT-082): cap of the seeker leg of a bundle in bps of the sum of its legs. Absent in JSON means the default.
     #[serde(default = "default_max_search_share_bps")]
     pub max_search_share_bps: u16,
+    /// CT-094. NOT in the Borsh of `Params`: every `Epoch` already stores a `Params`, and those records cannot be rewritten. The two values live in their own keys
+    /// (`x207_rules`, `x207_rules_pending`) and are laid over the stored `Params` by `get_params`, `get_pending_params` and `set_params`.
+    #[borsh(skip)]
+    #[serde(default = "default_bond_threshold")]
+    pub bond_threshold: U128,
+    #[borsh(skip)]
+    #[serde(default = "default_bond_bps")]
+    pub bond_bps: u16,
 }
 
 impl Default for Params {
@@ -85,6 +110,8 @@ impl Default for Params {
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
             max_search_share_bps: DEFAULT_MAX_SEARCH_SHARE_BPS,
+            bond_threshold: U128(DEFAULT_BOND_THRESHOLD),
+            bond_bps: DEFAULT_BOND_BPS,
         }
     }
 }
@@ -108,6 +135,46 @@ pub fn validate_params(p: &Params) {
     require_range(p.fees.clearing_fee_bps, 0, CLEARING_FEE_BPS_MAX, "fees.clearing_fee_bps");
     require_range(p.fees.solver_fee_bps, 0, SOLVER_FEE_BPS_MAX, "fees.solver_fee_bps");
     require_range(p.max_search_share_bps, 0, MAX_SEARCH_SHARE_BPS_MAX, "max_search_share_bps");
+    require_range(p.bond_threshold.0, BOND_THRESHOLD_MIN, BOND_THRESHOLD_MAX, "bond_threshold");
+    require_range(p.bond_bps, BOND_BPS_MIN, BOND_BPS_MAX, "bond_bps");
+}
+
+const RULES_KEY: &[u8] = b"x207_rules";
+const PENDING_RULES_KEY: &[u8] = b"x207_rules_pending";
+
+/// `(bond_threshold, bond_bps)` in force now: the stored value, or the defaults for a circle that never set them (also a circle upgraded from 0.0.11).
+pub fn current_rules() -> (u128, u16) {
+    env::storage_read(RULES_KEY).map_or((DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS), |b| {
+        let (t, bps): (u128, u16) = near_sdk::borsh::from_slice(&b).expect("rules are valid borsh");
+        (t, bps)
+    })
+}
+
+pub(crate) fn write_rules(threshold: u128, bps: u16) {
+    if (threshold, bps) == (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS) {
+        env::storage_remove(RULES_KEY);
+    } else {
+        env::storage_write(RULES_KEY, &near_sdk::borsh::to_vec(&(threshold, bps)).expect("borsh"));
+    }
+}
+
+/// `Params` as stored, with the bond rules in force laid over it.
+pub fn with_rules(mut p: Params) -> Params {
+    let (threshold, bps) = current_rules();
+    p.bond_threshold = U128(threshold);
+    p.bond_bps = bps;
+    p
+}
+
+/// Called when a pending `Params` becomes the params of the next epoch: the pending bond rules come with it.
+pub(crate) fn apply_pending_rules(effective_epoch: u64) {
+    if let Some(bytes) = env::storage_read(PENDING_RULES_KEY) {
+        let (t, bps, epoch): (u128, u16, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending rules are valid borsh");
+        if epoch == effective_epoch {
+            write_rules(t, bps);
+        }
+        env::storage_remove(PENDING_RULES_KEY);
+    }
 }
 
 impl Params {
@@ -125,6 +192,8 @@ impl Params {
             ("fees.solver_fee_bps", self.fees.solver_fee_bps != other.fees.solver_fee_bps),
             ("admission", self.admission != other.admission),
             ("max_search_share_bps", self.max_search_share_bps != other.max_search_share_bps),
+            ("bond_threshold", self.bond_threshold != other.bond_threshold),
+            ("bond_bps", self.bond_bps != other.bond_bps),
         ];
         checks.into_iter().filter(|(_, differs)| *differs).map(|(name, _)| name.to_string()).collect()
     }
@@ -138,20 +207,32 @@ impl X207Circle {
     pub fn set_params(&mut self, params: Params) {
         self.assert_owner();
         validate_params(&params);
-        let old = self.epoch_or_panic(self.current_epoch).params.clone();
+        let old = with_rules(self.epoch_or_panic(self.current_epoch).params.clone());
         let effective_epoch = self.current_epoch + 1;
+        env::storage_write(PENDING_RULES_KEY, &near_sdk::borsh::to_vec(&(params.bond_threshold.0, params.bond_bps, effective_epoch)).expect("borsh"));
         let changed = old.changed_fields(&params);
         self.pending_params = Some(PendingParams { params: params.clone(), effective_epoch });
         ParamsUpdated { old, new: params, changed, effective_epoch }.emit();
     }
 
     pub fn get_pending_params(&self) -> Option<PendingParams> {
-        self.pending_params.clone()
+        self.pending_params.clone().map(|mut pending| {
+            if let Some(bytes) = env::storage_read(PENDING_RULES_KEY) {
+                let (t, bps, _): (u128, u16, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending rules are valid borsh");
+                pending.params.bond_threshold = U128(t);
+                pending.params.bond_bps = bps;
+            } else {
+                let (t, bps) = current_rules();
+                pending.params.bond_threshold = U128(t);
+                pending.params.bond_bps = bps;
+            }
+            pending
+        })
     }
 
     /// Params active in the running epoch: the snapshot of `current_epoch` (spec section 5).
     pub fn get_params(&self) -> Params {
-        self.epoch_or_panic(self.current_epoch).params.clone()
+        with_rules(self.epoch_or_panic(self.current_epoch).params.clone())
     }
 }
 
@@ -188,7 +269,8 @@ mod tests {
                 "base_limit_ratio": 8000, "limit_growth": 1000, "limit_cap": "1000000000",
                 "limit_decay": 0,
                 "fees": {"clearing_fee_bps": 0, "solver_fee_bps": 0},
-                "admission": "open", "max_search_share_bps": 500
+                "admission": "open", "max_search_share_bps": 500,
+                "bond_threshold": "100000000", "bond_bps": 2000
             })
         );
         validate_params(&Params::default());
@@ -198,7 +280,7 @@ mod tests {
     #[test]
     fn tc_ct_007_02_all_fields_present() {
         let json = serde_json::to_value(Params::default()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 10);
+        assert_eq!(json.as_object().unwrap().len(), 12);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 
@@ -308,7 +390,7 @@ mod tests {
         let c = circle(Params::default());
         assert_eq!(c.get_params(), Params::default());
         let json = serde_json::to_value(c.get_params()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 10);
+        assert_eq!(json.as_object().unwrap().len(), 12);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 
@@ -451,5 +533,68 @@ mod tests {
     #[test]
     fn no_pending_params_after_init() {
         assert!(circle(Params::default()).get_pending_params().is_none());
+    }
+
+    // ---- CT-094: the bond rules ride next to Params, not inside its Borsh ----
+
+    fn as_owner() {
+        testing_env!(VMContextBuilder::new().predecessor_account_id("dao.near".parse().unwrap()).block_timestamp(2_000).build());
+    }
+
+    // TC-CT-094-P01
+    #[test]
+    fn the_bond_rules_have_defaults_ranges_and_a_json_that_older_clients_may_leave_out() {
+        let c = circle(Params::default());
+        assert_eq!(current_rules(), (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS));
+        assert_eq!((c.get_params().bond_threshold, c.get_params().bond_bps), (U128(100_000_000), 2_000));
+        // a set_params call that does not know the two fields
+        let old_client = r#"{"epoch_length":3600,"payment_window":1800,"proposal_window":600,"base_limit_ratio":8000,"limit_growth":1000,"limit_cap":"1000000000","limit_decay":0,"fees":{"clearing_fee_bps":0,"solver_fee_bps":0},"admission":"open"}"#;
+        let parsed: Params = serde_json::from_str(old_client).unwrap();
+        assert_eq!((parsed.bond_threshold, parsed.bond_bps, parsed.max_search_share_bps), (U128(100_000_000), 2_000, 500));
+        validate_params(&parsed);
+        for (name, p) in [
+            ("bond_threshold", with(|p| p.bond_threshold = U128(BOND_THRESHOLD_MIN - 1))),
+            ("bond_threshold", with(|p| p.bond_threshold = U128(BOND_THRESHOLD_MAX + 1))),
+            ("bond_bps", with(|p| p.bond_bps = BOND_BPS_MIN - 1)),
+            ("bond_bps", with(|p| p.bond_bps = BOND_BPS_MAX + 1)),
+        ] {
+            let msg = panic_text(std::panic::AssertUnwindSafe(|| validate_params(&p)));
+            assert!(msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {name}")), "{msg}");
+        }
+        validate_params(&with(|p| (p.bond_threshold, p.bond_bps) = (U128(BOND_THRESHOLD_MIN), BOND_BPS_MIN)));
+        validate_params(&with(|p| (p.bond_threshold, p.bond_bps) = (U128(BOND_THRESHOLD_MAX), BOND_BPS_MAX)));
+    }
+
+    // TC-CT-094-P02: pending until the next epoch, then in force; the event says what changed
+    #[test]
+    fn new_bond_rules_wait_for_the_next_epoch_and_the_event_lists_them() {
+        let mut c = circle(Params::default());
+        as_owner();
+        let new = with(|p| (p.bond_threshold, p.bond_bps) = (U128(50_000_000), 1_000));
+        c.set_params(new.clone());
+        assert!(near_sdk::test_utils::get_logs().iter().any(|l| l.contains("params_updated") && l.contains("\"bond_threshold\"") && l.contains("bond_bps")));
+        assert_eq!(current_rules(), (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS), "not in force yet");
+        assert_eq!(c.get_params().bond_bps, 2_000);
+        let pending = c.get_pending_params().unwrap();
+        assert_eq!((pending.params.bond_threshold, pending.params.bond_bps, pending.effective_epoch), (U128(50_000_000), 1_000, 2));
+        // the epoch turns: the pending params and the rules come in together
+        apply_pending_rules(2);
+        assert_eq!(current_rules(), (50_000_000, 1_000));
+        assert_eq!((c.get_params().bond_threshold, c.get_params().bond_bps), (U128(50_000_000), 1_000));
+        // back to the defaults removes the key
+        c.set_params(Params::default());
+        apply_pending_rules(2);
+        assert_eq!(current_rules(), (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS));
+        assert!(!env::storage_has_key(RULES_KEY));
+    }
+
+    // TC-CT-094-P03: the Borsh of Params is the one of 0.0.11, so the stored epochs still read
+    #[test]
+    fn the_borsh_of_params_does_not_carry_the_bond_rules() {
+        let a = near_sdk::borsh::to_vec(&Params::default()).unwrap();
+        let b = near_sdk::borsh::to_vec(&with(|p| (p.bond_threshold, p.bond_bps) = (U128(50_000_000), 1_000))).unwrap();
+        assert_eq!(a, b, "the two fields are skipped");
+        let back: Params = near_sdk::borsh::from_slice(&b).unwrap();
+        assert_eq!(back.epoch_length, 3_600);
     }
 }

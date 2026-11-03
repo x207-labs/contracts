@@ -9,6 +9,7 @@ pub mod canonical;
 pub mod clearing;
 pub mod commit;
 pub mod config;
+pub mod deal;
 pub mod escrow;
 pub mod events;
 pub mod freeze;

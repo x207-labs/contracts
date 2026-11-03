@@ -260,7 +260,7 @@ impl X207Circle {
                 continue;
             }
             let new_limit = decay_limit(
-                compute_limit(member.stake, member.settled_history, &params),
+                crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account),
                 member.last_active_epoch,
                 epoch,
                 params.limit_decay,

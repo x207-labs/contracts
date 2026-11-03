@@ -237,7 +237,10 @@ impl X207Circle {
 
         let next = epoch + 1;
         let params = match self.pending_params.take() {
-            Some(pending) if pending.effective_epoch <= next => pending.params,
+            Some(pending) if pending.effective_epoch <= next => {
+                crate::params::apply_pending_rules(pending.effective_epoch);
+                pending.params
+            }
             keep => {
                 self.pending_params = keep;
                 closing_params
@@ -337,6 +340,8 @@ mod tests {
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
             max_search_share_bps: 500,
+            bond_threshold: near_sdk::json_types::U128(100_000_000),
+            bond_bps: 2000,
         }
     }
 
@@ -714,6 +719,8 @@ mod submit_tests {
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
             max_search_share_bps: 500,
+            bond_threshold: near_sdk::json_types::U128(100_000_000),
+            bond_bps: 2000,
         };
         let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), params, 0);
         for (d, k, v) in [("x", "y", 10), ("y", "z", 10), ("z", "x", 10), ("p", "q", 20), ("q", "p", 20)] {

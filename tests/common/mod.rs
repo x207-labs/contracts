@@ -254,6 +254,31 @@ pub mod circle {
             self.call_keeper("commit_bundle", json!({"bundle": bundle, "signatures": signatures})).await
         }
 
+        /// CT-094: like `commit_bundle` for a swap whose signed terms name an arbiter: `deal` = `(arbiter account id, agreement_hash, confirm_by in ns)`. The three keys come
+        /// after the legs, in this order, as in `terms_message` of the contract.
+        pub async fn commit_bundle_with_deal(
+            &self,
+            epoch: u64,
+            legs: &[(&str, &str, u128)],
+            deal: (&str, Option<&str>, u64),
+            signers: &[&str],
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            let (plain, _) = self.bundle_terms(epoch, legs);
+            let cut = plain.len() - 1;
+            let agreement = deal.1.map(|h| format!(r#","agreement_hash":"{h}""#)).unwrap_or_default();
+            let message = format!(r#"{},"arbiter":"{}"{agreement},"confirm_by":"{}"}}"#, &plain[..cut], deal.0, deal.2);
+            let hash: [u8; 32] = Sha256::digest(message.as_bytes()).into();
+            let signatures: Vec<serde_json::Value> =
+                signers.iter().map(|s| json!({"account_id": account_of(s), "signature": self.sign_terms(s, &message, hash)})).collect();
+            let legs_json: Vec<serde_json::Value> =
+                legs.iter().map(|(a, b, m)| json!({"payer": account_of(a), "payee": account_of(b), "max_amount": m.to_string()})).collect();
+            let mut bundle = json!({"epoch": epoch, "legs": legs_json, "arbiter": deal.0, "confirm_by": deal.2.to_string()});
+            if let Some(h) = deal.1 {
+                bundle["agreement_hash"] = json!(h);
+            }
+            self.call_keeper("commit_bundle", json!({"bundle": bundle, "signatures": signatures})).await
+        }
+
         pub fn sign_terms(&self, signer: &str, message: &str, terms_hash: [u8; 32]) -> String {
             let circle = self.contract.id().to_string();
             let mut payload = Vec::new();
@@ -445,7 +470,7 @@ pub mod funded {
         }
 
         pub fn join_deposit() -> NearToken {
-            NearToken::from_millinear(320)
+            NearToken::from_millinear(350)
         }
 
         /// `token.ft_transfer_call(contract, amount, msg)` from `who`; the result value is the used amount.

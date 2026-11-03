@@ -9,8 +9,9 @@ use crate::types::EpochId;
 
 /// Minimum attached deposit of `join` (spec 9.3). Not refunded on exit.
 /// Covers the storage that one member can make the contract hold (security review 3, I-3, measured in `tests/ct062_storage_per_member.rs`): the worst case is 31282 bytes =
-/// 0.3128 NEAR (64 intents 6594 bytes, 16 open grants with a scope of 1024 bytes 24288 bytes, the member row). 0.32 NEAR is that rounded up.
-pub const JOIN_STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(320);
+/// 0.3128 NEAR (64 intents 6594 bytes, 16 open grants with a scope of 1024 bytes 24288 bytes, the member row) plus, since 0.0.12, 8 open deals and a freeze record (2954 bytes):
+/// 34236 bytes = 0.3424 NEAR. 0.35 NEAR is that rounded up.
+pub const JOIN_STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(350);
 /// Most registered members, including `exited` ones (spec 9.3, tuned in the gas item).
 pub const MAX_MEMBERS: u32 = 64;
 
@@ -63,7 +64,7 @@ impl Member {
         if self.effective_status(current_epoch) == MemberStatus::Active && self.status != MemberStatus::Active {
             self.status = MemberStatus::Active;
             self.reactivate_epoch = None;
-            self.limit = crate::risk::compute_limit(self.stake, self.settled_history, params);
+            self.limit = crate::deal::bound_limit(crate::risk::compute_limit(self.stake, self.settled_history, params), self.stake, &self.account_id);
         }
     }
 
@@ -222,6 +223,8 @@ mod tests {
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
             max_search_share_bps: 500,
+            bond_threshold: near_sdk::json_types::U128(100_000_000),
+            bond_bps: 2000,
         };
         X207Circle::with_config(
             acc("dao.near"),

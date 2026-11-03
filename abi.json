@@ -68,6 +68,27 @@
         }
       },
       {
+        "kind": "view",
+        "name": "bond_locked",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
         "kind": "call",
         "name": "cancel_escrow",
         "params": {
@@ -253,6 +274,46 @@
       },
       {
         "kind": "call",
+        "name": "confirm_deal",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "dispute_deal",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "evidence_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "finalize_epoch",
         "params": {
           "args": [
@@ -415,6 +476,36 @@
             "anyOf": [
               {
                 "$ref": "#/definitions/ClearingProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_deal",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/DealView"
               },
               {
                 "type": "null"
@@ -1727,6 +1818,29 @@
       },
       {
         "kind": "call",
+        "name": "rule_deal",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "verdict",
+              "type_schema": {
+                "$ref": "#/definitions/Verdict"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "set_asset_class",
         "params": {
           "args": [
@@ -1779,6 +1893,23 @@
               "name": "params",
               "type_schema": {
                 "$ref": "#/definitions/Params"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "settle_deal",
+        "params": {
+          "args": [
+            {
+              "name": "bundle_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
               }
             }
           ],
@@ -2035,6 +2166,27 @@
         },
         "BundleInput": {
           "properties": {
+            "agreement_hash": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "arbiter": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "confirm_by": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "epoch": {
               "format": "uint64",
               "minimum": 0.0,
@@ -2273,6 +2425,86 @@
             "epoch",
             "solver",
             "submitted_at"
+          ],
+          "type": "object"
+        },
+        "DealState": {
+          "enum": [
+            "open",
+            "disputed"
+          ],
+          "type": "string"
+        },
+        "DealView": {
+          "properties": {
+            "accused": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "agreement_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "arbiter": {
+              "type": "string"
+            },
+            "bond_each": {
+              "type": "string"
+            },
+            "bundle_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "complainant": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "confirm_by": {
+              "type": "string"
+            },
+            "disputed_at": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "evidence_hash": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "locked": {
+              "items": {
+                "type": "boolean"
+              },
+              "type": "array"
+            },
+            "parties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "state": {
+              "$ref": "#/definitions/DealState"
+            }
+          },
+          "required": [
+            "arbiter",
+            "bond_each",
+            "bundle_id",
+            "confirm_by",
+            "locked",
+            "parties",
+            "state"
           ],
           "type": "object"
         },
@@ -2787,6 +3019,16 @@
               "minimum": 0.0,
               "type": "integer"
             },
+            "bond_bps": {
+              "default": 2000,
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "bond_threshold": {
+              "default": "100000000",
+              "type": "string"
+            },
             "epoch_length": {
               "format": "uint64",
               "minimum": 0.0,
@@ -3033,6 +3275,28 @@
             "eta"
           ],
           "type": "object"
+        },
+        "Verdict": {
+          "oneOf": [
+            {
+              "enum": [
+                "accused_guilty"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "complaint_false"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "no_fault"
+              ],
+              "type": "string"
+            }
+          ]
         },
         "Voucher": {
           "properties": {
@@ -3419,6 +3683,60 @@
         "contracts"
       ],
       "name": "asset_contracts_set"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "account_id",
+        "amount"
+      ],
+      "name": "bond_locked"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "account_id",
+        "of"
+      ],
+      "name": "deal_confirmed"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "complainant",
+        "accused",
+        "evidence_hash",
+        "disputed_at"
+      ],
+      "name": "deal_disputed"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "arbiter",
+        "verdict"
+      ],
+      "name": "deal_ruled"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "from",
+        "to",
+        "amount",
+        "from_stake",
+        "to_stake"
+      ],
+      "name": "bond_slashed"
+    },
+    {
+      "fields": [
+        "bundle_id",
+        "account_id",
+        "amount",
+        "reason"
+      ],
+      "name": "bond_released"
     },
     {
       "fields": [

@@ -53,7 +53,7 @@ impl X207Circle {
         }
         let mut reactivated = None;
         if member.status == MemberStatus::Active {
-            member.limit = compute_limit(member.stake, member.settled_history, &params);
+            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account);
         } else if member.status == MemberStatus::Suspended {
             // ADR-30 (CT-079): a stake top-up reactivates from the next epoch. The join condition is a positive stake,
             // which this transfer gives (`ERR_ZERO_AMOUNT` is checked before). `settled_history` before the default
@@ -199,6 +199,7 @@ impl X207Circle {
         assert_one_yocto();
         let account = env::predecessor_account_id();
         let epoch = self.current_epoch;
+        crate::deal::assert_no_bond(&account);
         let Some(member) = self.members.get_mut(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
         if !matches!(member.status, MemberStatus::Active | MemberStatus::Suspended) || member.exit_requested_epoch.is_some() {
             env::panic_str(&format!("ERR_WRONG_STATUS: {account} is {}", status_wire(member.status)));
@@ -214,6 +215,7 @@ impl X207Circle {
     pub fn withdraw_stake(&mut self) -> PromiseOrValue<bool> {
         assert_one_yocto();
         let account = env::predecessor_account_id();
+        crate::deal::assert_no_bond(&account);
         let Some(member) = self.members.get(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
         if member.status == MemberStatus::Exited {
             env::panic_str(&format!("ERR_MEMBER_EXITED: {account}"));
@@ -275,7 +277,7 @@ impl X207Circle {
         }
         member.stake = sent;
         if let (MemberStatus::Active, Some(params)) = (member.status, epoch_params) {
-            member.limit = compute_limit(member.stake, member.settled_history, &params);
+            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account_id);
         }
         self.d6_in_flight_to_stake(sent);
         StakeWithdrawFailed { account_id, amount }.emit();

@@ -115,3 +115,53 @@ async fn what_one_member_can_make_the_contract_store() -> anyhow::Result<()> {
     println!("STORAGE worst case of one member: 64 intents {intents} + 16 grants {worst_grants} + member row 400 = {total} bytes = {}", near(total));
     Ok(())
 }
+
+// TC-CT-094-STORAGE-01 (0.0.12): what the bonds and a freeze add to the worst case of one member. Eight open deals (the limit), each between accounts and an arbiter with names of
+// 64 characters, against eight bundles of the same legs without a deal (the bundle record was in the contract before); and one freeze record with a reason hash.
+#[tokio::test]
+async fn what_bonds_and_a_freeze_add_to_the_worst_case_of_one_member() -> anyhow::Result<()> {
+    const HOUR: u64 = 3600 * 1_000_000_000;
+    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    // names of 64 characters: 50 + ".test.near" + padding to 64 in total
+    let long = |tag: &str| format!("{}{}", tag, "x".repeat(64 - ".test.near".len() - tag.len()));
+    let (pa, pb, parb) = (long("a"), long("b"), long("c"));
+    assert_eq!(format!("{pa}.test.near").len(), 64);
+    let a = f.account(&pa).await?;
+    let b = f.account(&pb).await?;
+    let arb = f.account(&parb).await?;
+    for (name, account) in [(&pa, &a), (&pb, &b)] {
+        assert!(f.join(name, Funded::join_deposit()).await?.is_success());
+        assert!(f.stake(account, 800 * CREDIT).await?.is_success());
+    }
+    let dao = f.account("dao").await?;
+    // eight bundles of the same legs, each with a different amount so that the terms differ; first without a deal
+    let legs = |n: u128| [(pa.as_str(), pb.as_str(), (10 + n) * CREDIT), (pb.as_str(), pa.as_str(), (9 + n) * CREDIT)];
+    let plain_from = usage(&f).await?;
+    for n in 0..8u128 {
+        let r = f.circle.commit_bundle(1, &legs(n), &[pa.as_str(), pb.as_str()]).await?;
+        assert!(r.is_success(), "{:?}", r.failures().iter().map(|f| format!("{f:?}")).collect::<Vec<_>>());
+    }
+    let plain = usage(&f).await? - plain_from;
+    let now = f.circle.now_ns().await?;
+    let deal_from = usage(&f).await?;
+    for n in 8..16u128 {
+        let hash = "ab".repeat(32);
+        let r = f.circle.commit_bundle_with_deal(1, &legs(n), (arb.id().as_str(), Some(hash.as_str()), now + 24 * HOUR), &[pa.as_str(), pb.as_str()]).await?;
+        assert!(r.is_success(), "{:?}", r.failures().iter().map(|f| format!("{f:?}")).collect::<Vec<_>>());
+    }
+    let with_deal = usage(&f).await? - deal_from;
+    let per_deal = (with_deal.saturating_sub(plain)) / 8;
+    println!("STORAGE 8 bundles without a deal: {plain} bytes; with a deal (arbiter and parties of 64 characters, agreement hash): {with_deal} bytes; extra per open deal: {per_deal} bytes");
+
+    let freeze_from = usage(&f).await?;
+    let r = f.circle.call_as(&dao, "propose_freeze", json!({"account_id": format!("{pa}.test.near"), "reason_hash": "cd".repeat(32)})).await?;
+    assert!(r.is_success());
+    let freeze = usage(&f).await? - freeze_from;
+    println!("STORAGE one freeze record of an account with a 64 character name and a reason hash: {freeze} bytes");
+    let extra = 8 * per_deal + freeze;
+    println!("STORAGE extra of 0.0.12 for one member: 8 deals {} + freeze {freeze} = {extra} bytes = {}", 8 * per_deal, near(extra));
+    println!("STORAGE worst case with 0.0.12: 31282 + {extra} = {} bytes = {}", 31_282 + extra, near(31_282 + extra));
+    assert!((31_282 + extra) as u128 * BYTE_COST <= x207_circle::member::JOIN_STORAGE_DEPOSIT.as_yoctonear(), "the join deposit does not cover the worst case of 0.0.12");
+    assert!(extra < 6_000, "the extra storage of 0.0.12 is larger than the estimate of docs/rules-0.0.12.md by a wide margin: {extra} bytes");
+    Ok(())
+}

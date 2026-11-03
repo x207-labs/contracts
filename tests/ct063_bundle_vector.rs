@@ -28,7 +28,7 @@ fn contract_matches_the_sdk_bundle_vector() {
             max_amount: near_sdk::json_types::U128(l["max_amount"].as_str().unwrap().parse().unwrap()),
         })
         .collect();
-    let message = terms_message(&circle, v["terms"]["epoch"].as_u64().unwrap(), &legs, None);
+    let message = terms_message(&circle, v["terms"]["epoch"].as_u64().unwrap(), &legs, None, None);
     assert_eq!(message, v["message"].as_str().unwrap(), "canonical message, legs sorted by (payer, payee)");
     let terms_hash = near_sdk::env::sha256_array(message.as_bytes());
     assert_eq!(hex(&terms_hash), v["termsHash"].as_str().unwrap());

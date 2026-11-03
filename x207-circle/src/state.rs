@@ -73,6 +73,8 @@ pub enum StorageKey {
     MtEscrows = b'y',
     /// D10 side map (CT-096): `asset_type -> official contracts`.
     AssetContracts = b'w',
+    /// D8 side map (CT-094): `bundle_id -> Deal`.
+    Deals = b'd',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).
@@ -142,6 +144,7 @@ impl X207Circle {
         now_ns: u64,
     ) -> Self {
         let mut epochs = LookupMap::new(StorageKey::Epochs);
+        crate::params::write_rules(params.bond_threshold.0, params.bond_bps);
         let cutoff_at = now_ns + params.epoch_length * 1_000_000_000;
         epochs.insert(1, Epoch::open(1, now_ns, cutoff_at, params));
         Self {
@@ -228,6 +231,8 @@ mod tests {
             fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
             admission: Admission::Open,
             max_search_share_bps: 500,
+            bond_threshold: near_sdk::json_types::U128(100_000_000),
+            bond_bps: 2000,
         }
     }
 

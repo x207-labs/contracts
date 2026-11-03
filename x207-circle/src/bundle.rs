@@ -45,6 +45,15 @@ pub struct BundleInput {
     /// agrees to it. Absent: no leg is a seeker share and `max_search_share_bps` does not apply.
     #[serde(default)]
     pub search_leg: Option<SearchLeg>,
+    /// CT-094 (interface 0.0.12): the arbiter that both parties of a swap chose. Part of the signed terms, and the sign that the swap carries a bond. Only for two participants.
+    #[serde(default)]
+    pub arbiter: Option<AccountId>,
+    /// CT-094: sha256 (hex) of the document of the agreement, kept off-chain. Needs `arbiter`.
+    #[serde(default)]
+    pub agreement_hash: Option<String>,
+    /// CT-094: nanoseconds; the end of the window in which a party can confirm or dispute. Needed with `arbiter`.
+    #[serde(default)]
+    pub confirm_by: Option<U64>,
 }
 
 /// Names the seeker leg by its pair; the pair is unique inside a bundle.
@@ -171,7 +180,7 @@ pub(crate) fn hash_key(terms_hash: &[u8; 32]) -> Vec<u8> {
 }
 
 /// Canonical JSON of the terms (legs sorted by `(payer, payee)`), spec `sdk/spec/barter-format.md`.
-pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg], search_leg: Option<&SearchLeg>) -> String {
+pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg], search_leg: Option<&SearchLeg>, deal: Option<(&AccountId, Option<&str>, u64)>) -> String {
     let mut sorted: Vec<&BundleLeg> = legs.iter().collect();
     sorted.sort_by(|a, b| (a.payer.as_str(), a.payee.as_str()).cmp(&(b.payer.as_str(), b.payee.as_str())));
     let legs: Vec<String> = sorted
@@ -179,7 +188,15 @@ pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg], sea
         .map(|l| format!(r#"{{"payer":"{}","payee":"{}","max_amount":"{}"}}"#, l.payer, l.payee, l.max_amount.0))
         .collect();
     let search = search_leg.map(|l| format!(r#","search_leg":{{"payer":"{}","payee":"{}"}}"#, l.payer, l.payee)).unwrap_or_default();
-    format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]{search}}}"#, legs.join(","))
+    // CT-094: the three keys come after `search_leg`, only when the swap names an arbiter, so that every bundle without one keeps its `terms_hash`; `confirm_by` is a
+    // string because nanoseconds do not fit a JavaScript number
+    let deal = deal
+        .map(|(arbiter, agreement, confirm_by)| {
+            let agreement = agreement.map(|h| format!(r#","agreement_hash":"{h}""#)).unwrap_or_default();
+            format!(r#","arbiter":"{arbiter}"{agreement},"confirm_by":"{confirm_by}""#)
+        })
+        .unwrap_or_default();
+    format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]{search}{deal}}}"#, legs.join(","))
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
@@ -322,8 +339,22 @@ impl X207Circle {
             crate::freeze::assert_not_frozen(who, "take part in a new bundle");
         }
 
+        // CT-094: the optional deal terms. An arbiter makes the swap a deal with a bond; the bond is required from `bond_threshold` of value on.
+        let (threshold, bond_bps) = crate::params::current_rules();
+        let value = owed.values().copied().max().unwrap_or(0);
+        let deal_terms = match (&bundle.arbiter, &bundle.agreement_hash, &bundle.confirm_by) {
+            (None, None, None) => {
+                require!(!(participants.len() == 2 && value >= threshold), format!("ERR_BOND_REQUIRED: a swap worth {value} (threshold {threshold}) needs an arbiter, agreement_hash optional and confirm_by in its signed terms"));
+                None
+            }
+            (Some(arbiter), agreement, Some(confirm_by)) => {
+                require!(participants.len() == 2, "ERR_BAD_BUNDLE: an arbiter is only for a swap of two participants");
+                Some((arbiter, agreement.as_deref(), confirm_by.0))
+            }
+            _ => env::panic_str("ERR_BAD_BUNDLE: arbiter and confirm_by come together; agreement_hash needs them"),
+        };
         let circle = env::current_account_id();
-        let message = terms_message(&circle, epoch_id, &bundle.legs, bundle.search_leg.as_ref());
+        let message = terms_message(&circle, epoch_id, &bundle.legs, bundle.search_leg.as_ref(), deal_terms);
         let terms_hash = env::sha256_array(message.as_bytes());
         require!(!env::storage_has_key(&hash_key(&terms_hash)), format!("ERR_BUNDLE_EXISTS: {}", hex(&terms_hash)));
 
@@ -378,6 +409,11 @@ impl X207Circle {
         }
         counts.flush();
         BundleCommitted { bundle_id, terms_hash: hex(&terms_hash), epoch: epoch_id, legs: bundle.legs, solver }.emit();
+        if let Some((arbiter, agreement, confirm_by)) = deal_terms {
+            let bond = value.checked_mul(bond_bps as u128).map_or(value / 10_000 * bond_bps as u128, |v| v / 10_000);
+            require!(bond > 0, "ERR_BAD_BUNDLE: the bond of this swap rounds to 0");
+            self.open_deal(bundle_id, [participants[0].clone(), participants[1].clone()], arbiter.clone(), agreement.map(str::to_string), confirm_by, bond);
+        }
         bundle_id
     }
 
@@ -451,7 +487,7 @@ mod security_tests {
         let legs = |n: usize| -> Vec<BundleLeg> {
             (0..n).map(|i| BundleLeg { payer: acc("gina.near"), payee: acc(&format!("p{i}.near")), max_amount: U128(1) }).collect()
         };
-        let input = |n: usize| BundleInput { epoch: 1, legs: legs(n), search_leg: None };
+        let input = |n: usize| BundleInput { epoch: 1, legs: legs(n), search_leg: None, arbiter: None, agreement_hash: None, confirm_by: None };
         let msg = panics_with(std::panic::AssertUnwindSafe(|| {
             c.commit_bundle(input(MAX_BUNDLE_LEGS + 1), vec![]);
         }));
