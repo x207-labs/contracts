@@ -63,4 +63,4 @@ This is the check of steps 1 and 2 on a circle that was deployed from the downlo
 - **What ran on that code:** one epoch with five members (join, stake), two bundles (a ring and a quick barter), clearing, residual payment, finalize, claims, `prune_epoch` and the claim after it, in one uninterrupted run of 2001 seconds. Two earlier runs stopped before the epoch, both on faults of the test (a name that shadowed a function; members funded with 0.25 NEAR while the join deposit is 0.32 NEAR), not of the contract.
 - **Not covered:** a circle on mainnet, real Intents (`intents.testnet` has no code), and the token and multi-token escrows (they are in 0.0.11, not in this release).
 
-The same check for any circle, in one command: `scripts/verify-release.sh v0.0.9 x207-circle-v11.testnet https://rpc.testnet.fastnear.com`.
+Run on 2026-11-03 after the epoch, the same check for this circle answers `MATCH: the account runs the wasm of v0.0.9`. In one command: `scripts/verify-release.sh v0.0.9 x207-circle-v11.testnet https://rpc.testnet.fastnear.com`.
