@@ -481,3 +481,101 @@ mod security_tests {
         post(&mut c, "gina.near", 1_000);
     }
 }
+
+/// Property test of the bookkeeping of partly registered legs (security review, "Not checked"): whatever is registered through the legs of several bundles, in any order and
+/// in parts, the headroom reserved for a payer is exactly what its legs have not registered yet, a registration moves value from the reservation to the debt and never creates
+/// or loses any, and no leg registers more than its maximum.
+#[cfg(test)]
+mod leg_properties {
+    use near_sdk::test_utils::VMContextBuilder;
+    use near_sdk::{MockedBlockchain, RuntimeFeesConfig};
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn acc(i: usize) -> AccountId {
+        format!("m{i}.near").parse().unwrap()
+    }
+
+    /// Fresh storage for every case.
+    fn fresh() {
+        near_sdk::env::set_blockchain_interface(MockedBlockchain::new(
+            VMContextBuilder::new().block_timestamp(1_000).build(),
+            near_sdk::test_vm_config(),
+            RuntimeFeesConfig::test(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            None,
+        ));
+    }
+
+    fn legs() -> impl Strategy<Value = Vec<(usize, usize, u128)>> {
+        proptest::collection::vec((0usize..6, 0usize..6, 1u128..=1_000), 2..=8).prop_map(|raw| {
+            let mut seen = std::collections::BTreeSet::new();
+            raw.into_iter().filter(|(a, b, _)| a != b && seen.insert((*a, *b))).collect::<Vec<_>>()
+        })
+    }
+
+    fn commit(id: u64, legs: &[(usize, usize, u128)]) {
+        let record = Bundle {
+            terms_hash: [id as u8; 32],
+            epoch: 1,
+            registered: vec![0; legs.len()],
+            legs: legs.iter().map(|&(a, b, m)| BundleLeg { payer: acc(a), payee: acc(b), max_amount: U128(m) }).collect(),
+            solver: acc(9),
+            status: BundleStatus::Active,
+        };
+        let mut map = bundles();
+        map.insert(id, record);
+        map.flush();
+        for &(a, _, m) in legs {
+            set_reserved(1, &acc(a), reserved(1, &acc(a)) + m);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        #[test]
+        fn reservation_equals_what_the_legs_have_not_registered(
+            first in legs(), second in legs(),
+            steps in proptest::collection::vec((any::<bool>(), any::<prop::sample::Index>(), 0u128..=1_200), 0..=60),
+        ) {
+            prop_assume!(first.len() >= 2 && second.len() >= 2);
+            fresh();
+            let mut debt: std::collections::BTreeMap<usize, u128> = std::collections::BTreeMap::new();
+            commit(1, &first);
+            commit(2, &second);
+            let initial: std::collections::BTreeMap<usize, u128> = (0..6).map(|i| (i, reserved(1, &acc(i)))).collect();
+            for (use_second, pick, raw) in steps {
+                let (id, set) = if use_second { (2u64, &second) } else { (1u64, &first) };
+                let index = pick.index(set.len());
+                let bundle = load_bundle(id);
+                let payer = acc(set[index].0);
+                let (_, remaining) = leg_remaining(&bundle, &payer, &acc(set[index].1)).expect("a leg of the bundle");
+                // the contract refuses a delta above the remaining part of the leg (ERR_BUNDLE_LEG_EXCEEDED); a registration is never above it
+                let delta = raw.min(remaining);
+                consume_leg(id, index, &payer, delta);
+                *debt.entry(set[index].0).or_default() += delta;
+            }
+            for i in 0..6usize {
+                let open: u128 = [(1u64, &first), (2u64, &second)]
+                    .iter()
+                    .map(|(id, set)| {
+                        let bundle = load_bundle(*id);
+                        set.iter().enumerate().filter(|(_, l)| l.0 == i).map(|(k, l)| l.2 - bundle.registered[k]).sum::<u128>()
+                    })
+                    .sum();
+                prop_assert_eq!(reserved(1, &acc(i)), open, "reservation of member {}", i);
+                prop_assert_eq!(reserved(1, &acc(i)) + debt.get(&i).copied().unwrap_or(0), initial[&i], "value of member {} is neither created nor lost", i);
+            }
+            for (id, set) in [(1u64, &first), (2u64, &second)] {
+                let bundle = load_bundle(id);
+                for (k, l) in set.iter().enumerate() {
+                    prop_assert!(bundle.registered[k] <= l.2);
+                }
+            }
+        }
+    }
+}

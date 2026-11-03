@@ -32,7 +32,16 @@ struct Graph {
 }
 
 fn graph() -> impl Strategy<Value = Graph> {
-    (3usize..=20).prop_flat_map(|n| {
+    graph_between(3, 20)
+}
+
+/// 2 to 30 members, as in the review of the verifier (security review, "Not checked").
+fn wide() -> impl Strategy<Value = Graph> {
+    graph_between(2, 30)
+}
+
+fn graph_between(low: usize, high: usize) -> impl Strategy<Value = Graph> {
+    (low..=high).prop_flat_map(|n| {
         let cycle = (proptest::collection::vec(0..n, 2..=6), 1u128..=1_000, 0u128..=100);
         let extra = (0..n, 0..n, 1u128..=1_000);
         (
@@ -281,6 +290,246 @@ proptest! {
         e[i].cleared = U128(0);
         let c = circle(&g);
         prop_assert!(reason(&c, e).starts_with("ERR_ZERO_CLEARED"));
+    }
+}
+
+// ---- the verifier against an independent statement of its rules, mutated and random proposals, and the order of submissions ----
+
+type Proposal = Vec<(usize, usize, u128)>;
+
+/// The rules of spec 4.7 written again from the text, without the code of the contract: the first failing rule in the order of the spec, or the total.
+fn oracle(g: &Graph, proposal: &Proposal) -> Result<u128, &'static str> {
+    if proposal.is_empty() {
+        return Err("ERR_EMPTY_PROPOSAL");
+    }
+    if proposal.len() > 300 {
+        return Err("ERR_TOO_MANY_EDGES");
+    }
+    let mut seen = std::collections::HashSet::new();
+    let (mut credit, mut debit) = (BTreeMap::<usize, u128>::new(), BTreeMap::<usize, u128>::new());
+    let mut total = 0u128;
+    for &(d, k, cleared) in proposal {
+        if cleared == 0 {
+            return Err("ERR_ZERO_CLEARED");
+        }
+        if !seen.insert((d, k)) {
+            return Err("ERR_DUPLICATE_EDGE");
+        }
+        let Some(&obligation) = g.obligations.get(&(d, k)) else { return Err("ERR_EDGE_NOT_IN_SNAPSHOT") };
+        if cleared > obligation {
+            return Err("ERR_CLEARED_EXCEEDS_OBLIGATION");
+        }
+        total += cleared;
+        *credit.entry(k).or_default() += cleared;
+        *debit.entry(d).or_default() += cleared;
+    }
+    let members: std::collections::BTreeSet<usize> = credit.keys().chain(debit.keys()).copied().collect();
+    if members.iter().any(|m| credit.get(m).copied().unwrap_or(0) != debit.get(m).copied().unwrap_or(0)) {
+        return Err("ERR_UNBALANCED_MEMBER");
+    }
+    Ok(total)
+}
+
+fn wire(proposal: &Proposal) -> Vec<ClearingEdge> {
+    proposal.iter().map(|&(d, k, cleared)| ClearingEdge { debtor: acc(d), creditor: acc(k), cleared: U128(cleared) }).collect()
+}
+
+#[derive(Debug, Clone)]
+enum Mutation {
+    Bump(usize, u128),
+    Exceed(usize),
+    Drop(usize),
+    Duplicate(usize),
+    Zero(usize),
+    Reverse(usize),
+    Add(usize, usize, u128),
+}
+
+fn mutation() -> impl Strategy<Value = Mutation> {
+    prop_oneof![
+        (any::<usize>(), 1u128..=3).prop_map(|(i, d)| Mutation::Bump(i, d)),
+        any::<usize>().prop_map(Mutation::Exceed),
+        any::<usize>().prop_map(Mutation::Drop),
+        any::<usize>().prop_map(Mutation::Duplicate),
+        any::<usize>().prop_map(Mutation::Zero),
+        any::<usize>().prop_map(Mutation::Reverse),
+        (0usize..30, 0usize..30, 0u128..=50).prop_map(|(a, b, c)| Mutation::Add(a, b, c)),
+    ]
+}
+
+fn mutate(mut p: Proposal, g: &Graph, m: &Mutation) -> Proposal {
+    if p.is_empty() {
+        return p;
+    }
+    match *m {
+        Mutation::Bump(i, d) => {
+            let i = i % p.len();
+            p[i].2 += d;
+        }
+        Mutation::Exceed(i) => {
+            let i = i % p.len();
+            p[i].2 = g.obligations.get(&(p[i].0, p[i].1)).copied().unwrap_or(0) + 1;
+        }
+        Mutation::Drop(i) => {
+            p.remove(i % p.len());
+        }
+        Mutation::Duplicate(i) => p.push(p[i % p.len()]),
+        Mutation::Zero(i) => {
+            let i = i % p.len();
+            p[i].2 = 0;
+        }
+        Mutation::Reverse(i) => {
+            let i = i % p.len();
+            p[i] = (p[i].1, p[i].0, p[i].2);
+        }
+        Mutation::Add(a, b, c) => p.push((a % g.n, b % g.n, c)),
+    }
+    p
+}
+
+/// A proposal for `g`: its valid one, or a random one, and then up to three mutations.
+fn candidate(g: &Graph, use_raw: bool, raw: &Proposal, muts: &[Mutation]) -> Proposal {
+    let mut p: Proposal = if use_raw { raw.iter().map(|&(a, b, c)| (a % g.n, b % g.n, c)).collect() } else { g.proposal.iter().map(|(&(d, k), &c)| (d, k, c)).collect() };
+    for m in muts {
+        p = mutate(p, g, m);
+    }
+    p
+}
+
+fn code(reason: &str) -> &str {
+    reason.split(':').next().unwrap_or(reason)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(CASES))]
+
+    // TC-CT-030-09: the verifier accepts exactly what the rules of the spec accept, and says the same first failure, for 2 to 30 members, valid, mutated and random proposals.
+    #[test]
+    fn the_verifier_agrees_with_an_independent_oracle(
+        g in wide(), muts in proptest::collection::vec(mutation(), 0..=3),
+        raw in proptest::collection::vec((0usize..30, 0usize..30, 0u128..=2_000), 0..=40), use_raw in any::<bool>(),
+    ) {
+        let proposal = candidate(&g, use_raw, &raw, &muts);
+        let c = circle(&g);
+        let got = c.simulate_clearing(1, wire(&proposal));
+        match oracle(&g, &proposal) {
+            Ok(total) => {
+                prop_assert!(got.valid, "the oracle accepts, the verifier says {:?}", got.reason);
+                prop_assert_eq!(got.cleared_total.0, total);
+            }
+            Err(expected) => {
+                prop_assert!(!got.valid, "the oracle says {}, the verifier accepted {:?}", expected, proposal);
+                prop_assert_eq!(code(got.reason.as_deref().unwrap_or("")), expected);
+            }
+        }
+    }
+
+    // TC-CT-030-10: whatever proposal is accepted, through the real close, submit and commit: no obligation goes up, nothing is cleared beyond its edge, every net position is the
+    // sum of the vouchers whatever the solver sent, and what is due is what is claimable.
+    #[test]
+    fn an_accepted_proposal_never_raises_an_obligation_or_moves_a_net_position(
+        g in wide(), muts in proptest::collection::vec(mutation(), 0..=3),
+        raw in proptest::collection::vec((0usize..30, 0usize..30, 0u128..=2_000), 0..=40), use_raw in any::<bool>(),
+    ) {
+        let proposal = candidate(&g, use_raw, &raw, &muts);
+        // a proposal that the rules refuse is the other test's business; no assume here, so that the many refusals do not abort the run
+        if oracle(&g, &proposal).is_err() {
+            return Ok(());
+        }
+        let mut c = circle_with_totals(&g);
+        let cutoff = c.get_epoch(Some(1)).unwrap().cutoff_at.0;
+        at(cutoff, "keeper.near");
+        c.close_epoch(1);
+        let deadline = c.get_epoch(Some(1)).unwrap().proposal_deadline.unwrap().0;
+        at(cutoff + 1, "solver1.near");
+        c.submit_clearing(1, wire(&proposal));
+        at(deadline, "keeper.near");
+        c.commit_epoch(1);
+        let cleared: BTreeMap<(usize, usize), u128> = proposal.iter().map(|&(d, k, x)| ((d, k), x)).collect();
+        let (mut after, mut due, mut claimable) = (BTreeMap::new(), 0i128, 0i128);
+        for (&(d, k), &o) in &g.obligations {
+            let now = c.obligation(1, acc(d), acc(k)).unwrap().obligation.0;
+            prop_assert!(now <= o, "the obligation of {}->{} went up", d, k);
+            prop_assert_eq!(now, o - cleared.get(&(d, k)).copied().unwrap_or(0));
+            after.insert((d, k), now);
+        }
+        let positions = c.list_positions(1, 0, 100);
+        for (i, expected) in net(g.n, &g.obligations).iter().enumerate() {
+            let got = positions.iter().find(|p| p.account_id == acc(i)).map_or(0, |p| p.net.0);
+            prop_assert_eq!(got, *expected, "member {}", i);
+            if got < 0 { due -= got } else { claimable += got }
+        }
+        prop_assert_eq!(net(g.n, &after), net(g.n, &g.obligations));
+        prop_assert_eq!(due, claimable);
+    }
+}
+
+/// Cycles and several proposals made of shares of the same cycles: all valid, and of different size.
+fn rounds() -> impl Strategy<Value = (Graph, Vec<Proposal>)> {
+    (2usize..=30).prop_flat_map(|n| {
+        let cycle = (proptest::collection::vec(0..n, 2..=6), 2u128..=1_000).prop_flat_map(|(nodes, amount)| (Just(nodes), Just(amount), proptest::collection::vec(0..=amount, 5)));
+        proptest::collection::vec(cycle, 1..=6).prop_map(move |cycles| {
+            let mut obligations: BTreeMap<(usize, usize), u128> = BTreeMap::new();
+            let mut proposals: Vec<BTreeMap<(usize, usize), u128>> = vec![BTreeMap::new(); 5];
+            for (nodes, amount, shares) in cycles {
+                let mut seen = Vec::new();
+                for v in nodes {
+                    if !seen.contains(&v) {
+                        seen.push(v);
+                    }
+                }
+                if seen.len() < 2 {
+                    continue;
+                }
+                for i in 0..seen.len() {
+                    let key = (seen[i], seen[(i + 1) % seen.len()]);
+                    *obligations.entry(key).or_default() += amount;
+                    for (round, share) in shares.iter().enumerate() {
+                        if *share > 0 {
+                            *proposals[round].entry(key).or_default() += share;
+                        }
+                    }
+                }
+            }
+            let rounds = proposals.into_iter().filter(|p| !p.is_empty()).map(|p| p.into_iter().map(|((d, k), x)| (d, k, x)).collect()).collect();
+            (Graph { n, obligations, proposal: BTreeMap::new() }, rounds)
+        })
+    })
+}
+
+fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
+    std::panic::catch_unwind(f).err().map(|e| e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(CASES))]
+
+    // TC-CT-030-11 (spec 4.3): of valid proposals sent one after another, only a larger cleared_total, or the same total with fewer edges, replaces the stored one; the stored total never goes down.
+    #[test]
+    fn only_a_better_valid_proposal_replaces_the_stored_one((g, proposals) in rounds()) {
+        prop_assume!(!proposals.is_empty());
+        let mut c = circle(&g);
+        let cutoff = c.get_epoch(Some(1)).unwrap().cutoff_at.0;
+        c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Open;
+        at(cutoff, "keeper.near");
+        c.close_epoch(1);
+        let mut stored: Option<(u128, usize)> = None;
+        for (i, proposal) in proposals.iter().enumerate() {
+            at(cutoff + 1 + i as u64, "solver1.near");
+            let total: u128 = proposal.iter().map(|e| e.2).sum();
+            let better = stored.map_or(true, |(t, n)| total > t || (total == t && proposal.len() < n));
+            let outcome = panic_text(std::panic::AssertUnwindSafe(|| {
+                c.submit_clearing(1, wire(proposal));
+            }));
+            if better {
+                prop_assert!(outcome.is_none(), "a better proposal was refused: {:?}", outcome);
+                stored = Some((total, proposal.len()));
+            } else {
+                prop_assert!(outcome.is_some_and(|m| m.contains("ERR_PROPOSAL_NOT_BETTER")), "a proposal that is not better was taken");
+            }
+            let now = c.get_clearing_proposal(1).unwrap();
+            prop_assert_eq!((now.cleared_total.0, now.edge_count as usize), stored.unwrap());
+        }
     }
 }
 
