@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 31] = [
+pub const EVENT_SCHEMAS: [EventSchema; 32] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -120,6 +120,7 @@ pub const EVENT_SCHEMAS: [EventSchema; 31] = [
         fields: &["bundle_id", "terms_hash", "epoch", "legs", "solver"],
         items: &["payer", "payee", "max_amount"],
     },
+    schema("intents_withdrawn", &["amount"]),
 ];
 
 pub trait X207Event: Serialize {
@@ -294,6 +295,10 @@ event!("residual_claimed", ResidualClaimed {
     status: String,
 });
 
+event!("intents_withdrawn", IntentsWithdrawn {
+    amount: U128,
+});
+
 event!("residual_claim_failed", ResidualClaimFailed {
     epoch: EpochId,
     account_id: AccountId,
@@ -430,6 +435,7 @@ mod tests {
             (LimitsUpdated::NAME, LimitsUpdated { epoch: 42, changes: vec![change(a.clone())], chunk: 0, chunks: 1 }.to_log()),
             (EpochFinalized::NAME, EpochFinalized { epoch: 42, finalized_at: t, defaulted_count: 1, total_defaulted: U128(35), pool: U128(35), shortfall: U128(0) }.to_log()),
             (ResidualClaimed::NAME, ResidualClaimed { epoch: 42, account_id: a.clone(), amount: U128(35), destination: "near".into(), status: "claimed".into() }.to_log()),
+            (IntentsWithdrawn::NAME, IntentsWithdrawn { amount: U128(35) }.to_log()),
             (ResidualClaimFailed::NAME, ResidualClaimFailed { epoch: 42, account_id: a.clone(), amount: U128(35), destination: "intents".into(), status: "claimable".into() }.to_log()),
             ("params_updated", ParamsUpdated { old: json!({"epoch_length": 3600}), new: json!({"epoch_length": 7200}), changed: vec!["epoch_length".to_string()], effective_epoch: 43 }.to_log()),
             (ExitRequested::NAME, ExitRequested { account_id: a.clone(), epoch: 42 }.to_log()),
@@ -692,6 +698,7 @@ mod tests {
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
                 "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "escrow_failed", "bundle_committed",
+                "intents_withdrawn",
             ]
         );
     }

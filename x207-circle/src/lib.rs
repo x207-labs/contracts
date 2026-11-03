@@ -11,6 +11,7 @@ pub mod config;
 pub mod escrow;
 pub mod events;
 pub mod grant;
+pub mod intents_withdraw;
 pub mod member;
 pub mod params;
 pub mod pool;

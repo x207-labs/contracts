@@ -623,6 +623,16 @@
       },
       {
         "kind": "view",
+        "name": "intents_balance",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "interface_version",
         "result": {
           "serialization_type": "json",
@@ -1231,6 +1241,30 @@
         "modifiers": [
           "private"
         ],
+        "name": "on_intents_withdrawn",
+        "params": {
+          "args": [
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
         "name": "on_solver_fee_resolved",
         "params": {
           "args": [
@@ -1622,6 +1656,16 @@
           "serialization_type": "json",
           "type_schema": {
             "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "withdraw_intents_balance",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
           }
         }
       },
@@ -3034,6 +3078,12 @@
         "max_amount"
       ],
       "name": "bundle_committed"
+    },
+    {
+      "fields": [
+        "amount"
+      ],
+      "name": "intents_withdrawn"
     }
   ],
   "interface_version": "0.0.9",

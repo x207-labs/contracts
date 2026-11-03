@@ -51,6 +51,14 @@ impl MockFt {
         self.total_supply += amount.0;
     }
 
+    /// Test only: takes `amount` away from `account_id` (and from the supply), to play a contract whose NEP-141 balance is short.
+    pub fn burn(&mut self, account_id: AccountId, amount: U128) {
+        let balance = self.balance(&account_id);
+        require!(balance >= amount.0, "burn above balance");
+        self.balances.insert(account_id, balance - amount.0);
+        self.total_supply -= amount.0;
+    }
+
     #[payable]
     pub fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>) -> near_sdk::serde_json::Value {
         let _ = registration_only;

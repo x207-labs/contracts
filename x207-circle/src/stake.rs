@@ -141,7 +141,11 @@ impl X207Circle {
         };
         let _ = sender_id;
         match self.settle_transfer(previous_owner_ids[0].clone(), amount, epoch, member_id) {
-            PromiseOrValue::Value(refund) => PromiseOrValue::Value(vec![refund]),
+            PromiseOrValue::Value(refund) => {
+                // the part that was kept stays a multi-token balance at Intents until `withdraw_intents_balance` brings it to the NEP-141 account
+                crate::intents_withdraw::add_credit(amount.0 - refund.0);
+                PromiseOrValue::Value(vec![refund])
+            }
             PromiseOrValue::Promise(_) => env::panic_str("ERR_D2_ACCOUNTING: settle_transfer returned a promise"),
         }
     }
