@@ -3084,6 +3084,13 @@
         "amount"
       ],
       "name": "intents_withdrawn"
+    },
+    {
+      "fields": [
+        "intent_hash",
+        "account_id"
+      ],
+      "name": "intent_removed"
     }
   ],
   "interface_version": "0.0.9",

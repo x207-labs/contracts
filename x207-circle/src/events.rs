@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 32] = [
+pub const EVENT_SCHEMAS: [EventSchema; 33] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -121,6 +121,7 @@ pub const EVENT_SCHEMAS: [EventSchema; 32] = [
         items: &["payer", "payee", "max_amount"],
     },
     schema("intents_withdrawn", &["amount"]),
+    schema("intent_removed", &["intent_hash", "account_id"]),
 ];
 
 pub trait X207Event: Serialize {
@@ -326,6 +327,7 @@ event!("stake_withdrawn", StakeWithdrawn { account_id: AccountId, amount: U128 }
 event!("stake_withdraw_failed", StakeWithdrawFailed { account_id: AccountId, amount: U128 });
 event!("member_admitted", MemberAdmitted { account_id: AccountId, status: String });
 event!("intent_posted", IntentPosted { intent_hash: near_sdk::json_types::Base58CryptoHash, account_id: AccountId, posted_at: U64 });
+event!("intent_removed", IntentRemoved { intent_hash: near_sdk::json_types::Base58CryptoHash, account_id: AccountId });
 event!("asset_class_set", AssetClassSet { asset_type: String, class: crate::grant::AssetClass });
 event!("grant_offered", GrantOffered { grant_id: u64, asset_type: String, grantor: AccountId, class: crate::grant::AssetClass, unit: String, unit_price: U128, expires_at: U64 });
 event!("grant_activated", GrantActivated { grant_id: u64, grantee: AccountId, delivery_pubkey: Option<near_sdk::PublicKey> });
@@ -446,6 +448,7 @@ mod tests {
             (SolverFeeClaimed::NAME, SolverFeeClaimed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
             (SolverFeeClaimFailed::NAME, SolverFeeClaimFailed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
             (UpgradeProposed::NAME, UpgradeProposed { code_hash: [7u8; 32].into(), eta: t }.to_log()),
+            (IntentRemoved::NAME, IntentRemoved { intent_hash: [3u8; 32].into(), account_id: a.clone() }.to_log()),
             (IntentPosted::NAME, IntentPosted { intent_hash: [3u8; 32].into(), account_id: a.clone(), posted_at: t }.to_log()),
             (AssetClassSet::NAME, AssetClassSet { asset_type: "x:y".into(), class: crate::grant::AssetClass::B }.to_log()),
             (GrantOffered::NAME, GrantOffered { grant_id: 1, asset_type: "x:y".into(), grantor: a.clone(), class: crate::grant::AssetClass::B, unit: "call".into(), unit_price: U128(1), expires_at: t }.to_log()),
@@ -698,7 +701,7 @@ mod tests {
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
                 "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "escrow_failed", "bundle_committed",
-                "intents_withdrawn",
+                "intents_withdrawn", "intent_removed",
             ]
         );
     }

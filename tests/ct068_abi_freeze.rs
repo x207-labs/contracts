@@ -120,12 +120,12 @@ const SIGNATURES: [&str; 66] = [
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
 ];
 
-const EVENTS: [&str; 32] = [
+const EVENTS: [&str; 33] = [
     "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied",
     "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed",
     "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed",
     "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed",
-    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn",
+    "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
 ];
 
 fn strip_descriptions(value: &mut Value) {

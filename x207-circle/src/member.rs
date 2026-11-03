@@ -7,8 +7,10 @@ use crate::events::{MemberJoined, X207Event};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::EpochId;
 
-/// Minimum attached deposit of `join`: 0.01 NEAR for the D1 entry (spec 9.3). Not refunded on exit.
-pub const JOIN_STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(10);
+/// Minimum attached deposit of `join` (spec 9.3). Not refunded on exit.
+/// Covers the storage that one member can make the contract hold (security review 3, I-3, measured in `tests/ct062_storage_per_member.rs`): the worst case is 31282 bytes =
+/// 0.3128 NEAR (64 intents 6594 bytes, 16 open grants with a scope of 1024 bytes 24288 bytes, the member row). 0.32 NEAR is that rounded up.
+pub const JOIN_STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(320);
 /// Most registered members, including `exited` ones (spec 9.3, tuned in the gas item).
 pub const MAX_MEMBERS: u32 = 64;
 

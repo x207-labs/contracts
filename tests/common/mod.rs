@@ -440,7 +440,7 @@ pub mod funded {
         }
 
         pub fn join_deposit() -> NearToken {
-            NearToken::from_millinear(10)
+            NearToken::from_millinear(320)
         }
 
         /// `token.ft_transfer_call(contract, amount, msg)` from `who`; the result value is the used amount.
