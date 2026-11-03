@@ -1,0 +1,12 @@
+# NEP-141 real-world-asset token mock with a whitelist, frozen accounts and a transfer fee, for sandbox tests of the class A token escrow (CT-091). Never deployed outside near-sandbox.
+[package]
+name = "mock-rwa"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.29.1"

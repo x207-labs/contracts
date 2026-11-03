@@ -92,6 +92,15 @@ impl X207Circle {
     /// Order of checks: `ERR_WRONG_TOKEN`, `ERR_BAD_MSG`, `ERR_ZERO_AMOUNT`, then the action.
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
         let token = env::predecessor_account_id();
+        // CT-090: the `escrow` action fills the escrow of a class A grant with a NEP-141 token; stake and settle stay USDT only
+        let escrow = serde_json::from_str::<serde_json::Value>(&msg).ok().filter(|v| v.get("action").and_then(|a| a.as_str()) == Some("escrow"));
+        if let Some(escrow) = escrow {
+            let grant_id = escrow.get("grant_id").and_then(|g| g.as_u64()).unwrap_or_else(|| env::panic_str("ERR_BAD_MSG: msg must be {\"action\":\"escrow\",\"grant_id\":N}"));
+            if amount.0 == 0 {
+                env::panic_str("ERR_ZERO_AMOUNT");
+            }
+            return self.escrow_ft_from_transfer(token, sender_id, amount.0, grant_id);
+        }
         if token != self.usdt_token_id {
             env::panic_str(&format!("ERR_WRONG_TOKEN: {token}"));
         }

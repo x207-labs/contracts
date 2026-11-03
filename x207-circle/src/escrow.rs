@@ -14,7 +14,7 @@ use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId, Gas, NearToken, Promise, PromiseError, PromiseOrValue};
 
 use crate::clearing::EpochPhase;
-use crate::events::{EscrowFailed, EscrowHeld, GrantActivated, GrantRevoked, X207Event};
+use crate::events::{EscrowFailed, EscrowHeld, FtEscrowHeld, GrantActivated, GrantRevoked, X207Event};
 use crate::grant::{load_grant, AssetClass, GrantId, GrantStatus, RevokeReason};
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::EpochId;
@@ -78,6 +78,28 @@ pub struct Escrow {
     pub snapshot: Option<Snapshot>,
 }
 
+/// Class A escrow of an exact amount of a NEP-141 token (CT-090). Same life cycle and same take-back as the NFT escrow; kept apart so that the
+/// stored `Escrow` of 0.0.9 reads unchanged after an upgrade.
+#[near(serializers = [borsh])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FtEscrow {
+    pub ft_contract: AccountId,
+    pub amount: u128,
+    pub state: EscrowState,
+    pub buyer: Option<AccountId>,
+    pub snapshot: Option<Snapshot>,
+}
+
+#[near(serializers = [json])]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FtEscrowView {
+    pub grant_id: GrantId,
+    pub ft_contract: AccountId,
+    pub amount: U128,
+    pub state: EscrowState,
+    pub buyer: Option<AccountId>,
+}
+
 #[near(serializers = [json])]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EscrowView {
@@ -102,6 +124,89 @@ fn save(grant_id: GrantId, escrow: Escrow) {
     map.flush();
 }
 
+fn ft_escrows() -> LookupMap<GrantId, FtEscrow> {
+    LookupMap::new(StorageKey::FtEscrows)
+}
+
+pub fn load_ft_escrow(grant_id: GrantId) -> Option<FtEscrow> {
+    ft_escrows().get(&grant_id).cloned()
+}
+
+/// The escrow of a grant, whichever asset it holds. A grant has at most one.
+#[derive(Clone, Debug)]
+enum Held {
+    Nft(Escrow),
+    Ft(FtEscrow),
+}
+
+impl Held {
+    fn load(grant_id: GrantId) -> Option<Held> {
+        load_escrow(grant_id).map(Held::Nft).or_else(|| load_ft_escrow(grant_id).map(Held::Ft))
+    }
+
+    fn save(self, grant_id: GrantId) {
+        match self {
+            Held::Nft(e) => save(grant_id, e),
+            Held::Ft(e) => {
+                let mut map = ft_escrows();
+                map.insert(grant_id, e);
+                map.flush();
+            }
+        }
+    }
+
+    fn state(&self) -> EscrowState {
+        match self {
+            Held::Nft(e) => e.state,
+            Held::Ft(e) => e.state,
+        }
+    }
+
+    fn set_state(&mut self, state: EscrowState) {
+        match self {
+            Held::Nft(e) => e.state = state,
+            Held::Ft(e) => e.state = state,
+        }
+    }
+
+    fn set_buyer(&mut self, buyer: Option<AccountId>) {
+        match self {
+            Held::Nft(e) => e.buyer = buyer,
+            Held::Ft(e) => e.buyer = buyer,
+        }
+    }
+
+    fn buyer(&self) -> Option<AccountId> {
+        match self {
+            Held::Nft(e) => e.buyer.clone(),
+            Held::Ft(e) => e.buyer.clone(),
+        }
+    }
+
+    fn set_snapshot(&mut self, snapshot: Option<Snapshot>) {
+        match self {
+            Held::Nft(e) => e.snapshot = snapshot,
+            Held::Ft(e) => e.snapshot = snapshot,
+        }
+    }
+
+    fn take_snapshot(&mut self) -> Snapshot {
+        match self {
+            Held::Nft(e) => e.snapshot.take(),
+            Held::Ft(e) => e.snapshot.take(),
+        }
+        .expect("snapshot of a completing escrow")
+    }
+
+    /// The transfer that hands the asset to `receiver`, followed by `on_escrow_resolved`.
+    fn send(&self, circle: &X207Circle, receiver: AccountId, grant_id: GrantId, step: EscrowStep) -> Promise {
+        match self {
+            Held::Nft(e) => circle.send_and_resolve(e.nft_contract.clone(), e.token_id.clone(), receiver, grant_id, step),
+            Held::Ft(e) => circle.send_ft_and_resolve(e.ft_contract.clone(), e.amount, receiver, grant_id, step),
+        }
+    }
+}
+
 fn lock_key(epoch: EpochId, payer: &AccountId, payee: &AccountId) -> Vec<u8> {
     [LOCK_PREFIX, epoch.to_le_bytes().as_slice(), payer.as_bytes(), b">", payee.as_bytes()].concat()
 }
@@ -113,7 +218,7 @@ pub fn pair_locked(epoch: EpochId, payer: &AccountId, payee: &AccountId) -> bool
 
 /// An escrow that holds an asset keeps its grant from being revoked: `cancel_escrow` is the way out.
 pub fn holds_asset(grant_id: GrantId) -> bool {
-    load_escrow(grant_id).is_some_and(|e| matches!(e.state, EscrowState::Held | EscrowState::Completing | EscrowState::Cancelling | EscrowState::Stuck))
+    Held::load(grant_id).is_some_and(|e| matches!(e.state(), EscrowState::Held | EscrowState::Completing | EscrowState::Cancelling | EscrowState::Stuck))
 }
 
 #[near]
@@ -137,7 +242,7 @@ impl X207Circle {
             format!("ERR_ESCROW_NFT_MISMATCH: grant {grant_id} takes {:?}, got {nft_contract} {token_id}", target.as_ref().ok())
         );
         require!(previous_owner_id == grant.grantor, format!("ERR_ESCROW_DEPOSITOR: only {} may put the asset of grant {grant_id}", grant.grantor));
-        require!(load_escrow(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
+        require!(Held::load(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
         require!(env::block_timestamp() < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
         save(grant_id, Escrow { nft_contract: nft_contract.clone(), token_id: token_id.clone(), state: EscrowState::Held, buyer: None, snapshot: None });
         EscrowHeld { grant_id, nft_contract, token_id }.emit();
@@ -146,6 +251,10 @@ impl X207Circle {
 
     pub fn get_escrow(&self, grant_id: GrantId) -> Option<EscrowView> {
         load_escrow(grant_id).map(|e| EscrowView { grant_id, nft_contract: e.nft_contract, token_id: e.token_id, state: e.state, buyer: e.buyer })
+    }
+
+    pub fn get_ft_escrow(&self, grant_id: GrantId) -> Option<FtEscrowView> {
+        load_ft_escrow(grant_id).map(|e| FtEscrowView { grant_id, ft_contract: e.ft_contract, amount: U128(e.amount), state: e.state, buyer: e.buyer })
     }
 
     /// The buyer pays and receives the asset. The caller is the payer of `voucher`, the payee is the grantor, and the voucher raises the
@@ -159,8 +268,8 @@ impl X207Circle {
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
         let now = env::block_timestamp();
         require!(now < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
-        let mut escrow = load_escrow(grant_id).unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
-        require!(escrow.state == EscrowState::Held, format!("ERR_ESCROW_NOT_HELD: {:?}", escrow.state));
+        let mut escrow = Held::load(grant_id).unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
+        require!(escrow.state() == EscrowState::Held, format!("ERR_ESCROW_NOT_HELD: {:?}", escrow.state()));
         let buyer = env::predecessor_account_id();
         require!(buyer != grant.grantor, format!("ERR_GRANT_SELF: {buyer}"));
         require!(voucher.payer == buyer && voucher.payee == grant.grantor, "ERR_ESCROW_VOUCHER: the caller pays the grantor");
@@ -181,26 +290,26 @@ impl X207Circle {
         self.register_with(voucher.clone(), signature, RegisterMode::Cumulative, None);
 
         env::storage_write(&lock_key(epoch_id, &voucher.payer, &voucher.payee), &[1]);
-        escrow.state = EscrowState::Completing;
-        escrow.buyer = Some(buyer.clone());
-        escrow.snapshot = Some(Snapshot { epoch: epoch_id, payer: voucher.payer, payee: voucher.payee, pair_before, delta, payer_new, payee_new, seq, cumulative });
-        let (nft, token) = (escrow.nft_contract.clone(), escrow.token_id.clone());
-        save(grant_id, escrow);
-        self.send_and_resolve(nft, token, buyer, grant_id, EscrowStep::Complete)
+        escrow.set_state(EscrowState::Completing);
+        escrow.set_buyer(Some(buyer.clone()));
+        escrow.set_snapshot(Some(Snapshot { epoch: epoch_id, payer: voucher.payer, payee: voucher.payee, pair_before, delta, payer_new, payee_new, seq, cumulative }));
+        let call = escrow.send(self, buyer, grant_id, EscrowStep::Complete);
+        escrow.save(grant_id);
+        call
     }
 
     /// The grantor takes the asset back after `expires_at` of the grant, when nobody bought it.
     pub fn cancel_escrow(&mut self, grant_id: GrantId) -> Promise {
         let grant = load_grant(grant_id);
         require!(env::predecessor_account_id() == grant.grantor, format!("ERR_ESCROW_NOT_GRANTOR: only {} cancels", grant.grantor));
-        let mut escrow = load_escrow(grant_id).unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
-        require!(escrow.state == EscrowState::Held, format!("ERR_ESCROW_NOT_HELD: {:?}", escrow.state));
+        let mut escrow = Held::load(grant_id).unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
+        require!(escrow.state() == EscrowState::Held, format!("ERR_ESCROW_NOT_HELD: {:?}", escrow.state()));
         require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
         require!(env::block_timestamp() >= grant.limits.expires_at.0, format!("ERR_ESCROW_NOT_EXPIRED: expires_at {}", grant.limits.expires_at.0));
-        escrow.state = EscrowState::Cancelling;
-        let (nft, token) = (escrow.nft_contract.clone(), escrow.token_id.clone());
-        save(grant_id, escrow);
-        self.send_and_resolve(nft, token, grant.grantor, grant_id, EscrowStep::Cancel)
+        escrow.set_state(EscrowState::Cancelling);
+        let call = escrow.send(self, grant.grantor, grant_id, EscrowStep::Cancel);
+        escrow.save(grant_id);
+        call
     }
 
     /// Callback of the `nft_transfer` of `complete_escrow` or `cancel_escrow`.
@@ -208,25 +317,25 @@ impl X207Circle {
     pub fn on_escrow_resolved(&mut self, grant_id: GrantId, step: EscrowStep) {
         // `TooLong` means the call succeeded and returned more than 64 bytes (a non-standard NFT contract); it is not a failure
         let ok = !matches!(env::promise_result_checked(0, 64), Err(PromiseError::Failed));
-        let mut escrow = load_escrow(grant_id).unwrap_or_else(|| env::panic_str("ERR_ESCROW_UNKNOWN"));
+        let mut escrow = Held::load(grant_id).unwrap_or_else(|| env::panic_str("ERR_ESCROW_UNKNOWN"));
         let mut grant = load_grant(grant_id);
         match (step, ok) {
             (EscrowStep::Complete, true) => {
-                let snapshot = escrow.snapshot.take().expect("snapshot of a completing escrow");
+                let snapshot = escrow.take_snapshot();
                 env::storage_remove(&lock_key(snapshot.epoch, &snapshot.payer, &snapshot.payee));
-                let buyer = escrow.buyer.clone().expect("buyer of a completing escrow");
-                escrow.state = EscrowState::Delivered;
+                let buyer = escrow.buyer().expect("buyer of a completing escrow");
+                escrow.set_state(EscrowState::Delivered);
                 crate::grant::activate(&mut grant, buyer.clone(), None);
-                save(grant_id, escrow);
+                escrow.save(grant_id);
                 GrantActivated { grant_id, grantee: buyer, delivery_pubkey: None }.emit();
             }
             (EscrowStep::Complete, false) => {
-                let snapshot = escrow.snapshot.take().expect("snapshot of a completing escrow");
+                let snapshot = escrow.take_snapshot();
                 env::storage_remove(&lock_key(snapshot.epoch, &snapshot.payer, &snapshot.payee));
                 let reverted = self.take_back(&snapshot);
-                escrow.buyer = None;
-                escrow.state = if reverted { EscrowState::Held } else { EscrowState::Stuck };
-                save(grant_id, escrow);
+                escrow.set_buyer(None);
+                escrow.set_state(if reverted { EscrowState::Held } else { EscrowState::Stuck });
+                escrow.save(grant_id);
                 EscrowFailed {
                     grant_id, step: EscrowStep::Complete, epoch: snapshot.epoch, payer: snapshot.payer, payee: snapshot.payee,
                     delta: U128(if reverted { snapshot.delta } else { 0 }), reverted,
@@ -234,15 +343,15 @@ impl X207Circle {
                 .emit();
             }
             (EscrowStep::Cancel, true) => {
-                escrow.state = EscrowState::Cancelled;
-                save(grant_id, escrow);
+                escrow.set_state(EscrowState::Cancelled);
+                escrow.save(grant_id);
                 crate::grant::close(&mut grant, GrantStatus::Revoked);
                 GrantRevoked { grant_id, reason: RevokeReason::Grantor }.emit();
             }
             (EscrowStep::Cancel, false) => {
-                escrow.state = EscrowState::Held;
+                escrow.set_state(EscrowState::Held);
                 let grantor = grant.grantor.clone();
-                save(grant_id, escrow);
+                escrow.save(grant_id);
                 EscrowFailed { grant_id, step: EscrowStep::Cancel, epoch: 0, payer: grantor.clone(), payee: grantor, delta: U128(0), reverted: false }.emit();
             }
         }
@@ -259,6 +368,41 @@ impl X207Circle {
                 NFT_TRANSFER_GAS,
             )
             .then(Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).on_escrow_resolved(grant_id, step))
+    }
+
+    fn send_ft_and_resolve(&self, ft: AccountId, amount: u128, receiver: AccountId, grant_id: GrantId, step: EscrowStep) -> Promise {
+        Promise::new(ft)
+            .function_call(
+                "ft_transfer".to_string(),
+                json!({"receiver_id": receiver, "amount": U128(amount), "memo": format!("x207 escrow grant {grant_id}")}).to_string().into_bytes(),
+                NearToken::from_yoctonear(1),
+                NFT_TRANSFER_GAS,
+            )
+            .then(Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).on_escrow_resolved(grant_id, step))
+    }
+
+    /// The `escrow` action of `ft_on_transfer` (CT-090) for a token that is not the USDT of the circle. `msg` is `{"action":"escrow","grant_id":N}`.
+    /// Only a class A grant that is `offered`, whose scope names this token contract and exactly this amount, that the grantor funds itself and
+    /// that has no escrow yet. Every refusal is a panic, so that the token gives everything back to the sender. Returns `0`: all of it stays.
+    pub(crate) fn escrow_ft_from_transfer(&mut self, ft_contract: AccountId, sender_id: AccountId, amount: u128, grant_id: GrantId) -> PromiseOrValue<U128> {
+        require!(ft_contract != self.usdt_token_id, "ERR_ESCROW_USDT: the USDT of the circle is not an escrow asset");
+        let grant = load_grant(grant_id);
+        require!(grant.class == AssetClass::A, format!("ERR_ESCROW_NOT_CLASS_A: grant {grant_id} is class {:?}", grant.class));
+        require!(grant.status == GrantStatus::Offered, format!("ERR_GRANT_NOT_OFFERED: {:?}", grant.status));
+        let want = crate::grant::class_a_asset(&grant.limits.scope);
+        require!(
+            matches!(&want, Ok(crate::grant::ClassAAsset::Ft { ft_contract: c, .. }) if *c == ft_contract),
+            format!("ERR_ESCROW_FT_MISMATCH: grant {grant_id} takes {want:?}, got {ft_contract}")
+        );
+        if let Ok(crate::grant::ClassAAsset::Ft { amount: expected, .. }) = want {
+            require!(amount == expected, format!("ERR_ESCROW_FT_AMOUNT: grant {grant_id} takes {expected}, got {amount}"));
+        }
+        require!(sender_id == grant.grantor, format!("ERR_ESCROW_DEPOSITOR: only {} may put the asset of grant {grant_id}", grant.grantor));
+        require!(Held::load(grant_id).is_none(), format!("ERR_ESCROW_EXISTS: grant {grant_id}"));
+        require!(env::block_timestamp() < grant.limits.expires_at.0, "ERR_GRANT_EXPIRED: the grant ran out");
+        Held::Ft(FtEscrow { ft_contract: ft_contract.clone(), amount, state: EscrowState::Held, buyer: None, snapshot: None }).save(grant_id);
+        FtEscrowHeld { grant_id, ft_contract, amount: U128(amount) }.emit();
+        PromiseOrValue::Value(U128(0))
     }
 
     /// Takes back exactly what `complete_escrow` registered. Only when the epoch is still `open` and the pair is as the voucher left it.
@@ -580,5 +724,218 @@ mod tests {
         testing_env!(VMContextBuilder::new().predecessor_account_id(acc("nft.near")).block_timestamp(5_000).build());
         let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "t1".into(), format!("{{\"grant_id\":{GRANT}}}"));
         assert_eq!(load_escrow(GRANT).map(|e| e.state), Some(EscrowState::Held));
+    }
+
+    // ---- CT-090: escrow of an exact amount of a NEP-141 token ----
+
+    const RWA_AMOUNT: u128 = 1_000;
+
+    fn grant_ft() -> AccessGrant {
+        let mut g = grant_offered();
+        g.asset_type = "ft:rwa".into();
+        g.limits.scope = format!("{{\"ft_contract\":\"rwa.near\",\"amount\":\"{RWA_AMOUNT}\"}}");
+        g
+    }
+
+    fn deposit(c: &mut X207Circle, token: &str, sender: &str, amount: u128, msg: &str) -> Result<u128, String> {
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(token)).block_timestamp(5_000).build());
+        let (sender, msg) = (acc(sender), msg.to_string());
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.ft_on_transfer(sender, U128(amount), msg)))
+            .map(|r| match r { PromiseOrValue::Value(v) => v.0, PromiseOrValue::Promise(_) => u128::MAX })
+            .map_err(|e| e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default())
+    }
+
+    fn escrow_msg() -> String {
+        format!("{{\"action\":\"escrow\",\"grant_id\":{GRANT}}}")
+    }
+
+    fn assert_refused(r: Result<u128, String>, code: &str) {
+        let err = r.expect_err(&format!("expected {code}"));
+        assert!(err.contains(code), "expected {code}, got {err}");
+        assert!(load_ft_escrow(GRANT).is_none() && load_escrow(GRANT).is_none(), "{code}: a refused deposit must leave no escrow");
+    }
+
+    // TC-CT-090-U01
+    #[test]
+    fn the_named_token_contract_and_amount_fill_the_ft_escrow() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_ft());
+        let unused = deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()).expect("accepted");
+        assert_eq!(unused, 0, "all of it stays in the circle");
+        let e = load_ft_escrow(GRANT).expect("escrow");
+        assert_eq!((e.ft_contract, e.amount, e.state, e.buyer), (acc("rwa.near"), RWA_AMOUNT, EscrowState::Held, None));
+        assert_eq!(c.get_ft_escrow(GRANT).map(|v| v.amount), Some(U128(RWA_AMOUNT)));
+        assert!(c.get_escrow(GRANT).is_none(), "the NFT view does not show it");
+        assert!(holds_asset(GRANT));
+        let log = get_logs().into_iter().find(|l| l.contains("ft_escrow_held")).expect("ft_escrow_held");
+        let data = serde_json::from_str::<Value>(log.strip_prefix("EVENT_JSON:").unwrap()).unwrap()["data"][0].clone();
+        assert_eq!((data["ft_contract"].as_str(), data["amount"].as_str()), (Some("rwa.near"), Some("1000")));
+    }
+
+    // TC-CT-090-S01: attacks on the receiver; each one is a panic, so the token returns everything to the sender
+    #[test]
+    fn a_deposit_that_does_not_match_the_grant_is_refused() {
+        let msg = escrow_msg();
+        for (token, sender, amount, code) in [
+            ("fake.near", "alice.near", RWA_AMOUNT, "ERR_ESCROW_FT_MISMATCH"),
+            ("rwa.near", "alice.near", RWA_AMOUNT - 1, "ERR_ESCROW_FT_AMOUNT"),
+            ("rwa.near", "alice.near", RWA_AMOUNT + 1, "ERR_ESCROW_FT_AMOUNT"),
+            ("rwa.near", "mallory.near", RWA_AMOUNT, "ERR_ESCROW_DEPOSITOR"),
+            ("rwa.near", "alice.near", 0, "ERR_ZERO_AMOUNT"),
+        ] {
+            let mut c = circle();
+            crate::grant::store_grant_for_test(&grant_ft());
+            assert_refused(deposit(&mut c, token, sender, amount, &msg), code);
+        }
+    }
+
+    // TC-CT-090-S02
+    #[test]
+    fn a_second_deposit_and_a_deposit_for_the_wrong_kind_of_grant_are_refused() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_ft());
+        deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()).expect("first");
+        let again = deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()).expect_err("second");
+        assert!(again.contains("ERR_ESCROW_EXISTS"), "{again}");
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.amount), Some(RWA_AMOUNT), "the first escrow is untouched");
+
+        // a grant for an NFT takes no token, and a grant for a token takes no NFT
+        let mut c = circle();
+        let mut map = ft_escrows();
+        map.remove(&GRANT);
+        map.flush();
+        crate::grant::store_grant_for_test(&grant_offered());
+        assert_refused(deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()), "ERR_ESCROW_FT_MISMATCH");
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_ft());
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("rwa.near")).block_timestamp(5_000).build());
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = c.nft_on_transfer(acc("alice.near"), acc("alice.near"), "t1".into(), format!("{{\"grant_id\":{GRANT}}}"));
+        }));
+        assert!(r.is_err() && load_escrow(GRANT).is_none() && load_ft_escrow(GRANT).is_none());
+    }
+
+    // TC-CT-090-S03: not class A, not offered, expired, unknown grant
+    #[test]
+    fn a_deposit_for_a_grant_that_cannot_take_it_is_refused() {
+        for (name, code) in [("class", "ERR_ESCROW_NOT_CLASS_A"), ("status", "ERR_GRANT_NOT_OFFERED"), ("expired", "ERR_GRANT_EXPIRED")] {
+            let mut c = circle();
+            let mut g = grant_ft();
+            match name {
+                "class" => g.class = AssetClass::B,
+                "status" => g.status = GrantStatus::Active,
+                _ => g.limits.expires_at = U64(4_000),
+            }
+            crate::grant::store_grant_for_test(&g);
+            assert_refused(deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()), code);
+        }
+        let mut c = circle();
+        assert_refused(deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, "{\"action\":\"escrow\",\"grant_id\":99}"), "ERR_UNKNOWN_GRANT");
+    }
+
+    // TC-CT-090-S04: the USDT of the circle is not an escrow asset, and no other token can stake or settle
+    #[test]
+    fn usdt_is_not_an_escrow_asset_and_other_tokens_cannot_stake_or_settle() {
+        let mut c = circle();
+        let mut g = grant_ft();
+        g.limits.scope = format!("{{\"ft_contract\":\"usdt.near\",\"amount\":\"{RWA_AMOUNT}\"}}");
+        crate::grant::store_grant_for_test(&g);
+        assert_refused(deposit(&mut c, "usdt.near", "alice.near", RWA_AMOUNT, &escrow_msg()), "ERR_ESCROW_USDT");
+        for msg in ["{\"action\":\"stake\",\"member_id\":null}", "{\"action\":\"settle\",\"epoch\":1,\"member_id\":null}", "not json", "{\"action\":\"escrow\"}"] {
+            let mut c = circle();
+            crate::grant::store_grant_for_test(&grant_ft());
+            let err = deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, msg).expect_err(msg);
+            assert!(err.contains("ERR_WRONG_TOKEN") || err.contains("ERR_BAD_MSG"), "{msg}: {err}");
+        }
+    }
+
+    // TC-CT-090-S05: the scope of a class A grant
+    #[test]
+    fn the_scope_of_a_class_a_grant_names_one_asset() {
+        use crate::grant::{class_a_asset, ClassAAsset};
+        assert_eq!(class_a_asset("{\"ft_contract\":\"rwa.near\",\"amount\":\"5\"}"), Ok(ClassAAsset::Ft { ft_contract: acc("rwa.near"), amount: 5 }));
+        assert_eq!(class_a_asset("{\"nft_contract\":\"n.near\",\"token_id\":\"a\"}"), Ok(ClassAAsset::Nft { nft_contract: acc("n.near"), token_id: "a".into() }));
+        for bad in [
+            "{\"ft_contract\":\"rwa.near\",\"amount\":\"0\"}", "{\"ft_contract\":\"rwa.near\",\"amount\":5}", "{\"ft_contract\":\"rwa.near\"}",
+            "{\"ft_contract\":\"Bad Name\",\"amount\":\"5\"}", "{\"ft_contract\":\"rwa.near\",\"amount\":\"-1\"}",
+            "{\"ft_contract\":\"rwa.near\",\"amount\":\"5\",\"nft_contract\":\"n.near\",\"token_id\":\"a\"}", "{\"amount\":\"5\"}",
+        ] {
+            assert!(class_a_asset(bad).is_err(), "{bad}");
+        }
+    }
+
+    fn completing_ft(c: &mut X207Circle) -> Snapshot {
+        let snapshot = registered(c, 10 * CREDIT);
+        crate::grant::store_grant_for_test(&grant_ft());
+        env::storage_write(&lock_key(1, &snapshot.payer, &snapshot.payee), &[1]);
+        Held::Ft(FtEscrow { ft_contract: acc("rwa.near"), amount: RWA_AMOUNT, state: EscrowState::Completing, buyer: Some(acc("bob.near")), snapshot: Some(snapshot.clone()) }).save(GRANT);
+        snapshot
+    }
+
+    // TC-CT-090-U02: a token that refuses the transfer (a whitelist, a frozen account) takes the voucher back exactly, as the NFT does
+    #[test]
+    fn a_failed_ft_transfer_takes_the_voucher_back_and_keeps_the_tokens_in_the_circle() {
+        let mut c = circle();
+        let empty = picture(&c);
+        completing_ft(&mut c);
+        callback(&mut c, PromiseResult::Failed);
+        let e = load_ft_escrow(GRANT).unwrap();
+        assert_eq!((e.state, e.buyer, e.amount), (EscrowState::Held, None, RWA_AMOUNT));
+        assert!(e.snapshot.is_none());
+        assert_eq!(picture(&c).0, empty.0, "the pair is gone");
+        assert_eq!(c.outstanding_debt.get(&acc("bob.near")), Some(&0));
+        assert!(!pair_locked(1, &acc("bob.near"), &acc("alice.near")));
+        assert_eq!(load_grant(GRANT).status, GrantStatus::Offered);
+        assert!(holds_asset(GRANT));
+        let event = failed_event();
+        assert_eq!((event["reverted"].clone(), event["delta"].as_str()), (Value::Bool(true), Some("10000000")));
+    }
+
+    // TC-CT-090-U03
+    #[test]
+    fn a_failed_ft_transfer_that_cannot_be_taken_back_leaves_the_escrow_stuck() {
+        let mut c = circle();
+        completing_ft(&mut c);
+        c.epochs.get_mut(&1).unwrap().start_clearing(3_600_000_001_000);
+        callback(&mut c, PromiseResult::Failed);
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Stuck));
+        assert!(holds_asset(GRANT) && !pair_locked(1, &acc("bob.near"), &acc("alice.near")));
+    }
+
+    // TC-CT-090-U04
+    #[test]
+    fn a_delivered_ft_activates_the_grant_for_the_buyer() {
+        let mut c = circle();
+        completing_ft(&mut c);
+        callback(&mut c, PromiseResult::Successful(vec![]));
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Delivered));
+        let grant = load_grant(GRANT);
+        assert_eq!((grant.status, grant.grantee), (GrantStatus::Active, Some(acc("bob.near"))));
+        assert!(!holds_asset(GRANT) && !pair_locked(1, &acc("bob.near"), &acc("alice.near")));
+        assert_eq!(c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).map(|p| p.cumulative), Some(10 * CREDIT));
+    }
+
+    // TC-CT-090-U05: the grantor takes the tokens back after expiry; a failed cancel leaves them `held`
+    #[test]
+    fn cancel_of_an_ft_escrow_returns_the_tokens_after_expiry() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_ft());
+        deposit(&mut c, "rwa.near", "alice.near", RWA_AMOUNT, &escrow_msg()).expect("held");
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("alice.near")).block_timestamp(9_000_000_000_001).build());
+        let _ = c.cancel_escrow(GRANT);
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Cancelling));
+        testing_env!(
+            VMContextBuilder::new().current_account_id(acc("circle.near")).predecessor_account_id(acc("circle.near")).block_timestamp(9_000_000_000_002).build(),
+            test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![PromiseResult::Failed]
+        );
+        c.on_escrow_resolved(GRANT, EscrowStep::Cancel);
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Held), "a failed return leaves the tokens held, not lost");
+        testing_env!(
+            VMContextBuilder::new().current_account_id(acc("circle.near")).predecessor_account_id(acc("circle.near")).block_timestamp(9_000_000_000_003).build(),
+            test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![PromiseResult::Successful(vec![])]
+        );
+        c.on_escrow_resolved(GRANT, EscrowStep::Cancel);
+        assert_eq!(load_ft_escrow(GRANT).map(|e| e.state), Some(EscrowState::Cancelled));
+        assert_eq!(load_grant(GRANT).status, GrantStatus::Revoked);
     }
 }

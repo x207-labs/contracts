@@ -434,6 +434,36 @@
       },
       {
         "kind": "view",
+        "name": "get_ft_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/FtEscrowView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_grant",
         "params": {
           "args": [
@@ -2245,6 +2275,37 @@
           ],
           "type": "object"
         },
+        "FtEscrowView": {
+          "properties": {
+            "amount": {
+              "type": "string"
+            },
+            "buyer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ft_contract": {
+              "type": "string"
+            },
+            "grant_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/definitions/EscrowState"
+            }
+          },
+          "required": [
+            "amount",
+            "ft_contract",
+            "grant_id",
+            "state"
+          ],
+          "type": "object"
+        },
         "GrantInput": {
           "properties": {
             "asset_type": {
@@ -3051,6 +3112,14 @@
         "token_id"
       ],
       "name": "escrow_held"
+    },
+    {
+      "fields": [
+        "grant_id",
+        "ft_contract",
+        "amount"
+      ],
+      "name": "ft_escrow_held"
     },
     {
       "fields": [

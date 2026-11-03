@@ -23,6 +23,9 @@ pub fn probe_wasm(dir: &str) -> String {
     wasm
 }
 
+#[allow(dead_code)]
+pub mod ft_escrow;
+
 // ---- Circle fixture for sandbox flows (F3 and later) ----------------------------------------
 
 #[allow(dead_code)]

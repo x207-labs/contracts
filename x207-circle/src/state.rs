@@ -67,6 +67,8 @@ pub enum StorageKey {
     IntentCounts = b'n',
     /// D8 `(EpochId, AccountId) -> bundles the account is in` (security review F2).
     BundleCounts = b'N',
+    /// D11 class A, fungible token: `GrantId -> FtEscrow` (CT-090).
+    FtEscrows = b'z',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).
