@@ -94,6 +94,15 @@ settle_deal(any)  : window over / arbiter silent    -> remaining bonds RELEASED 
 | A bundle signed long ago is committed later | Terms carry the epoch, and `confirm_by` is relative to the commit: a stale bundle is refused by the epoch check as today. |
 | The same person on both sides | Locks its own stake twice and gets it back: no gain. |
 
+### 1.9 Review notes (BE-064 part 2, 2026-11-03)
+- **C-6, fixed.** `charge_fees` bounds the limit with `bound_limit`, so a fee cannot leave `limit > stake - bond_locked`.
+- **C-7, fixed.** `default_debtor` takes at most `stake - bond_locked` for the pool, so a default cannot eat a bond; `slash_bond` moves at most what the stake still holds and never panics. A ruling after a default therefore works.
+- **C-8, fixed.** `dispute_deal` also needs the complainant's own bond to be locked (`ERR_DEAL_NO_STAKE_AT_RISK`): a party that confirmed cannot accuse without risk.
+- **C-9, fixed.** `rule_deal` emits `limits_updated` when a ruling lowers a limit.
+- **C-10, fixed.** `dispute_deal` needs `now < confirm_by`, `settle_deal` needs `now >= confirm_by`: no overlap.
+- **C-11 (limit).** The bond can be avoided by splitting a swap into parts below `bond_threshold` or by using a ring of three or more parties; both are written limits of 0.0.12, not bugs.
+- **C-12 (limit).** Nothing settles a deal by itself: `settle_deal` must be called by somebody (the parties, the arbiter or a keeper). Until then the bonds stay locked and `request_exit` and `withdraw_stake` are refused.
+
 ## 2. CT-095: `freeze_member`
 
 A frozen member cannot start anything new. It can still pay what it owes, leave, and take its stake. **No money moves.**

@@ -205,7 +205,8 @@ impl X207Circle {
     fn default_debtor(&mut self, epoch: EpochId, account: &AccountId, block: u64) -> MemberDefaulted {
         let key = (epoch, account.clone());
         let due = self.positions.get(&key).expect("defaulting position exists").amount;
-        let stake = self.members.get(account).map_or(0, |m| m.stake);
+        // review C-7: a bond is not for the pool; it stays for the deal it guards
+        let stake = self.members.get(account).map_or(0, |m| m.stake.saturating_sub(crate::deal::bond_locked_of(account)));
         let from_stake = due.min(stake);
         let from_reserve = (due - from_stake).min(self.reserve);
         let shortfall = due - from_stake - from_reserve;

@@ -13,7 +13,7 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId};
 
-use crate::events::{BondLocked, BondReleased, BondSlashed, DealConfirmed, DealDisputed, DealRuled, X207Event};
+use crate::events::{BondLocked, BondReleased, BondSlashed, DealConfirmed, DealDisputed, DealRuled, LimitChange, LimitsUpdated, X207Event};
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 
 pub const MAX_OPEN_DEALS_PER_MEMBER: u32 = 8;
@@ -98,7 +98,7 @@ fn save(bundle_id: u64, deal: &Deal) {
     map.flush();
 }
 
-fn locked_key(account: &AccountId) -> Vec<u8> {
+pub(crate) fn locked_key(account: &AccountId) -> Vec<u8> {
     [b"x207_bond_locked:".as_slice(), account.as_bytes()].concat()
 }
 
@@ -110,7 +110,7 @@ fn read_u128(key: &[u8]) -> u128 {
     env::storage_read(key).map_or(0, |b| u128::from_le_bytes(b.try_into().expect("16 bytes")))
 }
 
-fn write_u128(key: &[u8], value: u128) {
+pub(crate) fn write_u128(key: &[u8], value: u128) {
     if value == 0 {
         env::storage_remove(key);
     } else {
@@ -203,9 +203,12 @@ impl X207Circle {
 
     /// Moves `amount` of the bond of `from` to the stake of the other party. The lock itself is lifted by the caller.
     fn slash_bond(&mut self, bundle_id: u64, from_account: &AccountId, to_account: &AccountId, amount: u128) {
+        // review C-7: never panics; what the stake cannot cover (a default took it) is not moved
+        let from_stake_before = self.members.get(from_account).expect("party is a member").stake;
+        let amount = amount.min(from_stake_before);
         let from_stake = {
             let f = self.members.get_mut(from_account).expect("party is a member");
-            f.stake = f.stake.checked_sub(amount).expect("a bond is always inside the stake");
+            f.stake -= amount;
             f.stake
         };
         let to_stake = {
@@ -259,14 +262,17 @@ impl X207Circle {
     }
 
     /// A party says that the other party did not deliver, before `confirm_by`, while the bond of the other party is still locked. One dispute per deal.
-    /// `ERR_DEAL_UNKNOWN`, `ERR_DEAL_NOT_PARTY`, `ERR_DEAL_ALREADY_DISPUTED`, `ERR_DEAL_WINDOW_OVER`, `ERR_DEAL_CLOSED`, `ERR_BAD_HASH`.
+    /// `ERR_DEAL_UNKNOWN`, `ERR_DEAL_NOT_PARTY`, `ERR_DEAL_ALREADY_DISPUTED`, `ERR_DEAL_WINDOW_OVER`, `ERR_DEAL_CLOSED`, `ERR_DEAL_NO_STAKE_AT_RISK`, `ERR_BAD_HASH`.
     pub fn dispute_deal(&mut self, bundle_id: u64, evidence_hash: String) {
         let mut deal = load_deal(bundle_id).unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
         let me = self.party_index(&deal, bundle_id);
         require!(deal.state == DealState::Open, format!("ERR_DEAL_ALREADY_DISPUTED: deal {bundle_id}"));
         let now = env::block_timestamp();
-        require!(now <= deal.confirm_by, format!("ERR_DEAL_WINDOW_OVER: confirm_by {} now {now}", deal.confirm_by));
+        // `<`, not `<=`: at `confirm_by` the deal is due for `settle_deal` (`>=`), so the two never overlap (review C-10)
+        require!(now < deal.confirm_by, format!("ERR_DEAL_WINDOW_OVER: confirm_by {} now {now}", deal.confirm_by));
         require!(deal.locked[1 - me], format!("ERR_DEAL_CLOSED: {} has nothing locked any more, there is nothing to dispute", deal.parties[1 - me]));
+        // review C-8: a complainant whose own bond was released (it confirmed) risks nothing by accusing
+        require!(deal.locked[me], format!("ERR_DEAL_NO_STAKE_AT_RISK: the bond of {} is released, so {} cannot accuse the other party", deal.parties[me], deal.parties[me]));
         require!(is_hash(&evidence_hash), "ERR_BAD_HASH: evidence_hash is 64 lowercase hex");
         deal.state = DealState::Disputed;
         deal.complainant = Some(me as u8);
@@ -308,8 +314,18 @@ impl X207Circle {
                 self.release_bond(bundle_id, &mut deal, a, ReleaseReason::Ruling);
             }
         }
+        let mut changes = Vec::new();
         for who in deal.parties.clone() {
+            let old = self.members.get(&who).map_or(0, |m| m.limit);
             self.bound_member_limit(&who);
+            if let Some(m) = self.members.get(&who) {
+                if m.limit != old {
+                    changes.push(LimitChange { account_id: who.clone(), old_limit: U128(old), new_limit: U128(m.limit), status: "active".into() });
+                }
+            }
+        }
+        if !changes.is_empty() {
+            LimitsUpdated { epoch: self.current_epoch, changes, chunk: 0, chunks: 1 }.emit();
         }
         self.close_deal(bundle_id, &deal);
     }
@@ -590,6 +606,52 @@ mod tests {
         let bob = d.members.get(&acc("bob.near")).unwrap();
         assert_eq!(bob.stake, STAKE - 50);
         assert!(bob.limit <= bob.stake, "limit {} stake {}", bob.limit, bob.stake);
+    }
+
+    // TC-CT-094-U12 (review C-8, C-10): a party whose own bond is released cannot accuse; `confirm_by` belongs to `settle_deal`, not to `dispute_deal`
+    #[test]
+    fn a_party_that_confirmed_cannot_accuse_and_the_dispute_window_ends_before_settle_begins() {
+        let mut c = circle();
+        open(&mut c, 1);
+        at("alice.near", T0 + 5);
+        c.confirm_deal(1); // the bond of bob is released, the bond of alice is still locked
+        at("bob.near", T0 + 6);
+        let err = panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into())));
+        assert!(err.contains("ERR_DEAL_NO_STAKE_AT_RISK"), "{err}");
+        let mut d = circle();
+        open(&mut d, 1);
+        let confirm_by = d.get_deal(1).unwrap().confirm_by.0;
+        at("alice.near", confirm_by);
+        assert!(panic_text(std::panic::AssertUnwindSafe(|| d.dispute_deal(1, H.into()))).contains("ERR_DEAL_WINDOW_OVER"), "at confirm_by the window is over");
+        at("anybody.near", confirm_by);
+        d.settle_deal(1);
+    }
+
+    // TC-CT-094-U13 (review C-7): the accused defaulted and the pool took its free stake; the ruling does not panic and moves what is left of the stake
+    #[test]
+    fn a_ruling_after_a_default_moves_only_what_the_stake_still_holds() {
+        let mut c = circle();
+        disputed(&mut c, "alice.near");
+        // a default took everything above the bond of bob, and the fees took 30 of the bond itself
+        c.members.get_mut(&acc("bob.near")).unwrap().stake = BOND - 30;
+        c.members.get_mut(&acc("bob.near")).unwrap().limit = 0;
+        at("arb.near", T0 + 20);
+        c.rule_deal(1, Verdict::AccusedGuilty);
+        assert_eq!(stakes(&c), (STAKE + BOND - 30, 0));
+        assert_eq!(bond_locked_of(&acc("bob.near")), 0);
+        assert!(c.get_deal(1).is_none());
+    }
+
+    // TC-CT-094-U14 (review C-9): a ruling that lowers a limit says so with `limits_updated`
+    #[test]
+    fn a_ruling_that_lowers_a_limit_emits_limits_updated() {
+        let mut c = circle();
+        disputed(&mut c, "bob.near");
+        c.members.get_mut(&acc("bob.near")).unwrap().limit = 980;
+        at("arb.near", T0 + 20);
+        c.rule_deal(1, Verdict::ComplaintFalse); // bob loses 50 of his bond: stake 950
+        assert_eq!(c.members.get(&acc("bob.near")).unwrap().limit, 950);
+        assert!(events().contains(&"limits_updated".to_string()));
     }
 
     // TC-CT-094-U08
