@@ -2,12 +2,21 @@
 // here signs or sends a transaction.
 
 export const DEFAULT_FACTORY = 'sputnik-dao.near';
+/** The factory of each network. Testnet has its own (`sputnikv2.testnet`); the command used to name the mainnet one for both. */
+export const FACTORIES = { mainnet: 'sputnik-dao.near', testnet: 'sputnikv2.testnet' };
 /** ADR-25: the demo DAO votes for one hour. */
 export const PROPOSAL_PERIOD_SEC = 3600;
 export const NS_PER_SEC = 1_000_000_000n;
 const ONE_NEAR = 10n ** 24n;
-/** The factory `create` call needs about 6 NEAR for the new account; attach a margin. */
+/** Testnet: the factory deploys the whole DAO code into the new account, about 6 NEAR of storage; attach a margin (measured, x207v8). */
 export const FACTORY_DEPOSIT = '7 NEAR';
+/**
+ * Mainnet, read on 2026-11-04: new DAOs use the global DAO code and hold about 0.09 NEAR, so 1 NEAR is plenty. The limit of the factory cannot be read by a view; a `create`
+ * that is refused (`ERR_NOT_ENOUGH_DEPOSIT`) fails and returns the deposit, so raise it with `--deposit` only then.
+ */
+export const FACTORY_DEPOSIT_MAINNET = '1 NEAR';
+/** 100 Tgas ran out on testnet (CT-045 run); 300 is what one call can carry. */
+export const FACTORY_CREATE_GAS = '300 Tgas';
 
 const ACCOUNT_ID = /^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 
@@ -67,12 +76,14 @@ export function buildInitArgs({ daoAccount, circleId, usdtTokenId = 'usdt.tether
 const sh = (s) => `'${s.replaceAll("'", "'\\''")}'`;
 
 /** near-cli-rs command that creates the DAO through the factory. Printed, never run here. */
-export function createDaoCommand({ factory = DEFAULT_FACTORY, signer, network, createArgs }) {
+export function createDaoCommand({ factory, signer, network, createArgs, deposit }) {
   assertAccountId(signer);
+  factory ??= FACTORIES[network] ?? DEFAULT_FACTORY;
+  deposit ??= network === 'mainnet' ? FACTORY_DEPOSIT_MAINNET : FACTORY_DEPOSIT;
   return [
     'near contract call-function as-transaction', factory, 'create',
     'json-args', sh(JSON.stringify(createArgs)),
-    'prepaid-gas', sh('100 Tgas'), 'attached-deposit', sh(FACTORY_DEPOSIT),
+    'prepaid-gas', sh(FACTORY_CREATE_GAS), 'attached-deposit', sh(deposit),
     'sign-as', signer, 'network-config', network, 'sign-with-keychain', 'send',
   ].join(' ');
 }

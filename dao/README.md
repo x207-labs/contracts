@@ -3,7 +3,7 @@
 The scripts only print `near` (near-cli-rs) commands. They never sign or send. A human reads the
 command, runs it, and confirms any mainnet run.
 
-1. Create the DAO through the factory (council members vote, proposal period 1 hour, ADR-25):
+1. Create the DAO through the factory (council members vote, proposal period 1 hour, ADR-25). The factory, the deposit (testnet 7 NEAR, mainnet 1 NEAR) and 300 Tgas of gas follow `--network`; `--factory` and `--deposit` override:
 
    ```bash
    node dao/create-dao.mjs --name x207 --council a.testnet,b.testnet --signer a.testnet --network testnet

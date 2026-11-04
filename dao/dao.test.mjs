@@ -43,7 +43,10 @@ test('init args: owner is the DAO, params null, circle id validated', () => {
 test('commands name the factory, method, network and never carry a key', () => {
   const createArgs = buildCreateArgs({ name: 'x207', council });
   const create = createDaoCommand({ signer: 'alice.near', network: 'testnet', createArgs });
-  assert.match(create, /^near contract call-function as-transaction sputnik-dao\.near create json-args /);
+  assert.match(create, /^near contract call-function as-transaction sputnikv2\.testnet create json-args /);
+  assert.match(create, /prepaid-gas '300 Tgas' attached-deposit '7 NEAR' sign-as alice\.near/);
+  const main = createDaoCommand({ signer: 'alice.near', network: 'mainnet', createArgs });
+  assert.match(main, /as-transaction sputnik-dao\.near create .* attached-deposit '1 NEAR'/);
   assert.match(create, /network-config testnet sign-with-keychain send$/);
   const deploy = deployOwnedCommand({
     contract: 'x207-circle.near', wasm: 'target/near/x207_circle.wasm', network: 'testnet',
