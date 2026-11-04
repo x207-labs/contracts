@@ -107,6 +107,8 @@ pub struct ProposalView {
     /// `true` once `commit_epoch` applied it; its edges are then empty (read `list_obligations`).
     pub committed: bool,
     pub edge_count: u32,
+    /// CT-099 (B8-F3): sha256 of the compact JSON of the edges as submitted (the form of `edges_hash`); a reader that pages compares it between pages and starts again when it changed.
+    pub proposal_hash: String,
     pub edges: Vec<ClearingEdge>,
 }
 
@@ -121,7 +123,11 @@ impl X207Circle {
             solver: proposal.solver.clone(),
             cleared_total: proposal.cleared_total,
             committed: proposal.committed,
-            edge_count: proposal.edges.len() as u32,
+            edge_count: proposal.edge_count,
+            // a proposal stored by 0.0.12 has no raw key: its hash is computed from the edges while they are still there
+            proposal_hash: env::storage_read(&crate::clearing::proposal_hash_key(epoch))
+                .map(|b| String::from_utf8(b).expect("hash is ascii"))
+                .unwrap_or_else(|| if proposal.edges.is_empty() { String::new() } else { crate::events::edges_hash(&proposal.edges) }),
             edges: proposal.edges.iter().skip(from_index as usize).take(limit.min(300) as usize).cloned().collect(),
         })
     }
@@ -586,7 +592,7 @@ mod tests {
         assert_eq!(data["positions_hash"].as_str().map(str::len), Some(64));
     }
 
-    // CT-099: the view of the stored proposal, before and after the commit
+    // CT-099: the view of the stored proposal, before and after the commit (B8-F2, B8-F3)
     #[test]
     fn get_proposal_pages_the_edges_until_the_commit() {
         let mut c = closed(s1(), Some(p_s1()));
@@ -595,9 +601,18 @@ mod tests {
         assert_eq!(c.get_proposal(1, 2, 10).unwrap().edges.len(), 1);
         assert_eq!(c.get_proposal(1, 3, 10).unwrap().edges.len(), 0);
         assert!(c.get_proposal(2, 0, 10).is_none());
+        // B8-F3: every page carries the hash of the stored edges; it is the `edges_hash` that the commit logs
+        let hash = view.proposal_hash.clone();
+        assert_eq!(hash.len(), 64);
+        assert_eq!(c.get_proposal(1, 2, 10).unwrap().proposal_hash, hash);
+        let _ = get_logs();
         c.commit_epoch(1);
         let after = c.get_proposal(1, 0, 10).unwrap();
-        assert_eq!((after.committed, after.edges.len()), (true, 0));
+        // B8-F2: `edge_count` is the stored count, not the length of the (now empty) list
+        assert_eq!((after.committed, after.edges.len(), after.edge_count), (true, 0, 3));
+        assert_eq!(after.proposal_hash, hash, "the hash stays after the commit");
+        let applied = log_events().into_iter().find(|e| e["event"] == "clearing_applied").unwrap();
+        assert_eq!(applied["data"][0]["edges_hash"], hash);
     }
 
     // TC-CT-028-12
