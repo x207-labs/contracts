@@ -120,7 +120,7 @@ async fn solver_submits_and_beats_a_smaller_proposal() -> anyhow::Result<()> {
 
     let run = run_solver(&f, &read_api, &solver).await?;
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
-    assert!(run.stderr.contains("submit_clearing diterima"), "{}", run.stderr);
+    assert!(run.stderr.contains("submit_clearing accepted"), "{}", run.stderr);
     assert!(run.stderr.contains(&format!("{} 30000000", solver_a.id())), "the replaced proposal is logged: {}", run.stderr);
     let proposal = stored(c).await?;
     assert_eq!(proposal["solver"].as_str(), Some(solver.id().as_str()));
@@ -157,7 +157,7 @@ async fn solver_does_not_send_a_losing_proposal() -> anyhow::Result<()> {
 
     let run = run_solver(&f, &read_api, &solver).await?;
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
-    assert!(run.stderr.contains("tidak dikirim"), "{}", run.stderr);
+    assert!(run.stderr.contains("not sent"), "{}", run.stderr);
     assert_eq!(stored(c).await?["solver"].as_str(), Some(solver_a.id().as_str()));
     Ok(())
 }
@@ -176,7 +176,7 @@ async fn solver_sends_nothing_after_the_window_closes() -> anyhow::Result<()> {
 
     let run = run_solver(&f, &read_api, &solver).await?;
     assert_eq!(run.code, 0, "stderr: {}", run.stderr);
-    assert!(run.stderr.contains("jendela proposal tertutup"), "{}", run.stderr);
+    assert!(run.stderr.contains("proposal window closed"), "{}", run.stderr);
     assert_eq!(stored(c).await?, Value::Null);
     Ok(())
 }

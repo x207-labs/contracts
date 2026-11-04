@@ -77,6 +77,26 @@ for `clearing_applied` (see CT-004); both need a decision in the design notes.
 ## Gas and cost of the interface 0.0.13 (CT-102)
 A full epoch of 210 edges on 15 members burnt **0.1075 NEAR** on testnet (about 0.0005 NEAR per edge), of which 0.0109 NEAR for the four steps of the keeper and the solver; `commit_epoch` of 210 edges burnt 69.4 Tgas. A transaction reserves 0.001 NEAR per Tgas of prepaid gas, so a solver needs at least 0.07 NEAR and a keeper at least 0.16 NEAR (prepaid gas: `submit_clearing` 60, `commit_epoch` 150, `finalize_epoch` 100 Tgas). Every number with its transaction hash or test name is in [docs/gas-and-cost.md](docs/gas-and-cost.md); the gas of every method in near-sandbox is in [docs/gas.md](docs/gas.md).
 
+## Interface 0.0.13 and reproducible build
+
+The current interface is **0.0.13** (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`). It keeps every committed proposal inside the NEAR limit of 16,384 bytes of logs per receipt: `clearing_applied` carries a hash and a count of the edges, `epoch_committed` carries the positions in one log, and the edges are read in pages with the view `get_proposal(epoch, from_index, limit)`. The rules are in [`docs/rules-0.0.13.md`](docs/rules-0.0.13.md); gas, storage and the balance a solver or keeper needs are in [`docs/gas-and-cost.md`](docs/gas-and-cost.md).
+
+The wasm is built in a pinned container (`[package.metadata.near.reproducible_build]` in `Cargo.toml`, `Cargo.lock` committed), so two builds of one commit give the same bytes. Needs Docker.
+
+```bash
+scripts/repro-build.sh <git-ref> <outdir>   # prints the sha256 of x207_circle.wasm
+scripts/verify-release.sh v0.0.13 [account] [rpc-url]   # checks a release, and a deployed account when given
+```
+
+Release 0.0.13 built from commit `8799ebe`, twice, byte-identical:
+
+| | |
+| --- | --- |
+| sha256 | `b9327f2b5d64b1180ba76dd619c6091ae57b48964f520a784e366c131e787054` |
+| `code_hash` (base58) | `DTw5rUUdJSbWjD361MmBxKW4nm4ETnNkex63mfUCjsjh` |
+
+The steps and what the check proves are in [`docs/verify-release.md`](docs/verify-release.md).
+
 ## Environment variables
 
 The contract and its tests read no secrets. Two optional switches are read by tests:

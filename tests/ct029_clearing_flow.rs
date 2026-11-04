@@ -54,7 +54,7 @@ async fn to_proposal_deadline(c: &Circle) -> anyhow::Result<()> {
     c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await
 }
 
-/// State that "state tidak berubah" compares: proposal, obligations, epoch record.
+/// State that "state unchanged" compares: proposal, obligations, epoch record.
 async fn snapshot(c: &Circle) -> anyhow::Result<Value> {
     Ok(json!({
         "proposal": c.view("get_clearing_proposal", json!({"epoch": 1})).await?,

@@ -53,7 +53,7 @@ A transaction **reserves** its prepaid gas from the balance of the signer and gi
 
 ## 4. How to repeat it
 ```bash
-# testnet (one epoch of 210 edges, real time about 30 minutes): needs the accounts of x207-v013 and the keys in .secrets/
+# testnet (one epoch of 210 edges, real time about 30 minutes): needs the accounts of x207-v013 and the testnet deployer keys
 X207_TESTNET=1 X207_WASM=<wasm of scripts/repro-build.sh> X207_CT100_OUT=docs/testnet-0.0.13.json npx vitest run tests/testnet-0.0.13.live.test.ts
 # sandbox: the gas of every method
 cd contracts && cargo test --test ct098_gas_report -- --nocapture --test-threads=1 | grep 'GAS|'
