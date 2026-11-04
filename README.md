@@ -39,19 +39,18 @@ stateDiagram-v2
 Data flow inside the contract:
 
 ```mermaid
-flowchart LR
-  AG[Agents] -- "join, stake" --> P1((Members))
-  AG -- "voucher" --> P2((Vouchers))
-  SO[Solver] -- "edges" --> P3((Clearing))
-  P1 --> D1[(Members and stakes)]
-  P2 --> D2[(Pair totals per epoch)]
-  D1 -- "limit" --> P2
+%%{init: {"flowchart": {"nodeSpacing": 24, "rankSpacing": 28, "padding": 8}}}%%
+flowchart TB
+  AG["Agents"] -->|"join, stake"| D1[("Members and stakes")]
+  AG -->|"voucher"| P2(("Vouchers"))
+  D1 -->|"limit"| P2
+  P2 --> D2[("Pair totals")]
+  SO["Solver"] -->|"edges"| P3(("Clearing"))
   D2 --> P3
-  P3 --> D3[(Positions)]
-  D3 --> P4((Settlement))
-  D1 -- "covers defaults" --> P4
-  P4 -- "claim" --> AG
-  P1 & P2 & P3 & P4 -- "NEP-297 events" --> EV[Indexer]
+  P3 --> D3[("Positions")]
+  D3 --> P4(("Settlement"))
+  D1 -.->|"covers defaults"| P4
+  P4 -->|"claim"| CR["Creditors"]
 ```
 
 | Path | Contents |
