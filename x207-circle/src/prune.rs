@@ -17,10 +17,17 @@ pub const MAX_PRUNE_ITEMS_PER_CALL: u32 = 200;
 
 #[near]
 impl X207Circle {
-    /// Removes up to `max_items` entries of a `finalized` epoch (see the module doc) and returns how many it removed. `ERR_UNKNOWN_EPOCH`, `ERR_NOT_FINALIZED`.
+    /// Removes up to `max_items` entries of a `finalized` epoch (see the module doc) and returns how many it removed. `ERR_UNKNOWN_EPOCH`, `ERR_NOT_FINALIZED`,
+    /// `ERR_PRUNE_TOO_EARLY` (CT-099, B8-F1: the running epoch must be at least `prune_delay_epochs` (default 2) after `epoch`, so that a reader that is late can still take
+    /// the cleared edges from `list_obligations`).
     pub fn prune_epoch(&mut self, epoch: EpochId, max_items: u32) -> u32 {
         let e = self.epoch_or_panic(epoch);
         require!(e.phase == EpochPhase::Finalized, format!("ERR_NOT_FINALIZED: epoch {epoch}"));
+        let delay = u64::from(crate::params::current_prune_delay());
+        require!(
+            self.current_epoch >= epoch + delay,
+            format!("ERR_PRUNE_TOO_EARLY: epoch {epoch} can be pruned from epoch {}, the running epoch is {}", epoch + delay, self.current_epoch)
+        );
         let budget = max_items.min(MAX_PRUNE_ITEMS_PER_CALL);
         let mut removed = 0u32;
 
@@ -150,6 +157,8 @@ mod tests {
         reserved.flush();
         counts.flush();
         c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Finalized;
+        // CT-099: the running epoch is two epochs after the pruned one (`prune_delay_epochs` 2), the way it is when a late reader had its time
+        c.current_epoch = 3;
         c.epochs.flush();
         c.pairs.flush();
         c.totals.flush();
@@ -181,6 +190,20 @@ mod tests {
             c.prune_epoch(9, 10);
         }))
         .contains("ERR_UNKNOWN_EPOCH"));
+    }
+
+    // CT-099 (B8-F1): a finalized epoch is kept for `prune_delay_epochs` (2) epochs, so that the cleared edges stay readable from `list_obligations`
+    #[test]
+    fn an_epoch_is_kept_for_the_prune_delay() {
+        let mut c = finalized();
+        c.current_epoch = 2;
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.prune_epoch(1, 10);
+        }));
+        assert!(text.contains("ERR_PRUNE_TOO_EARLY") && text.contains("from epoch 3"), "{text}");
+        assert_eq!(c.list_obligations(1, 0, 10).len(), 3, "nothing was removed");
+        c.current_epoch = 3;
+        assert!(c.prune_epoch(1, 10) > 0);
     }
 
     // TC-CT-085-02: max_items bounds one call; calls add up to everything; the last call returns 0

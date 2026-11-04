@@ -457,8 +457,9 @@ fn run_inner(w: &mut World, op: &Op) -> Result<(), String> {
         }
         Op::Prune(n) => {
             let epoch = w.epoch().epoch;
+            // CT-099: an epoch is pruned from `prune_delay_epochs` (2) epochs after it
             w.call("anyone.near", none, vec![], |c| {
-                c.prune_epoch(epoch.saturating_sub(1).max(1), n);
+                c.prune_epoch(epoch.saturating_sub(2).max(1), n);
             })
         }
     }
@@ -631,6 +632,11 @@ fn the_harness_gets_a_real_epoch_through_the_whole_cycle() {
     w.call("keeper.near", NearToken::from_yoctonear(0), vec![], |c| c.finalize_epoch(1)).unwrap();
     run(&mut w, &Op::Claim(1, true)).unwrap();
     check(&mut w, &Op::Claim(1, true), true).unwrap();
+    // CT-099 (B8-F1): too early at once after the finalization; two epochs later it goes through
+    let early = run(&mut w, &Op::Prune(30)).unwrap_err();
+    assert!(early.contains("ERR_PRUNE_TOO_EARLY"), "{early}");
+    run(&mut w, &Op::Advance(0)).unwrap();
+    run(&mut w, &Op::CloseEpoch).unwrap();
     run(&mut w, &Op::Prune(30)).unwrap();
     check(&mut w, &Op::Prune(30), true).unwrap();
 }

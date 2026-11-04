@@ -277,6 +277,8 @@ impl X207Circle {
             self.beats_stored(epoch, cleared_total, edge_count),
             "ERR_PROPOSAL_NOT_BETTER: stored proposal is at least as good"
         );
+        // CT-099 (B8-F3): the hash of the stored edges, in a raw key so that the stored `ClearingProposal` keeps its layout; it is the `edges_hash` that `commit_epoch` will log
+        env::storage_write(&proposal_hash_key(epoch), crate::events::edges_hash(&edges).as_bytes());
         let solver = env::predecessor_account_id();
         let replaced = self.proposals.insert(
             epoch,
@@ -301,6 +303,11 @@ impl X207Circle {
         .emit();
         U128(cleared_total)
     }
+}
+
+/// Raw key of the hash of the proposal of `epoch` (CT-099).
+pub(crate) fn proposal_hash_key(epoch: EpochId) -> Vec<u8> {
+    [b"x207_proposal_hash:".as_slice(), epoch.to_string().as_bytes()].concat()
 }
 
 /// D4 proposal (spec 3.6, prefix `q`). `edges` is emptied by `commit_epoch`.
@@ -342,6 +349,7 @@ mod tests {
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
+            prune_delay_epochs: 2,
         }
     }
 
@@ -721,6 +729,7 @@ mod submit_tests {
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
+            prune_delay_epochs: 2,
         };
         let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), params, 0);
         for (d, k, v) in [("x", "y", 10), ("y", "z", 10), ("z", "x", 10), ("p", "q", 20), ("q", "p", 20)] {

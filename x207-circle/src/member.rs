@@ -225,6 +225,7 @@ mod tests {
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
+            prune_delay_epochs: 2,
         };
         X207Circle::with_config(
             acc("dao.near"),

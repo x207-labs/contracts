@@ -26,6 +26,10 @@ pub const BOND_THRESHOLD_MIN: u128 = 10_000_000;
 pub const BOND_THRESHOLD_MAX: u128 = 1_000_000_000_000;
 pub const BOND_BPS_MIN: u16 = 500;
 pub const BOND_BPS_MAX: u16 = 5_000;
+/// CT-099 (B8-F1): how many epochs a finalized epoch is kept before `prune_epoch` may remove its pairs, so that a late reader can still take the cleared edges from `list_obligations`.
+pub const PRUNE_DELAY_EPOCHS_MIN: u16 = 1;
+pub const PRUNE_DELAY_EPOCHS_MAX: u16 = 30;
+pub const DEFAULT_PRUNE_DELAY_EPOCHS: u16 = 2;
 
 // Defaults (ADR-25 and spec 3.4).
 pub const DEFAULT_EPOCH_LENGTH: u64 = 3_600;
@@ -44,6 +48,10 @@ pub const DEFAULT_BOND_BPS: u16 = 2_000;
 
 fn default_max_search_share_bps() -> u16 {
     DEFAULT_MAX_SEARCH_SHARE_BPS
+}
+
+fn default_prune_delay_epochs() -> u16 {
+    DEFAULT_PRUNE_DELAY_EPOCHS
 }
 
 fn default_bond_threshold() -> U128 {
@@ -95,6 +103,10 @@ pub struct Params {
     #[borsh(skip)]
     #[serde(default = "default_bond_bps")]
     pub bond_bps: u16,
+    /// CT-099: kept in its own raw key like the bond rules (`x207_prune_delay`); not in the Borsh of `Params`.
+    #[borsh(skip)]
+    #[serde(default = "default_prune_delay_epochs")]
+    pub prune_delay_epochs: u16,
 }
 
 impl Default for Params {
@@ -112,6 +124,7 @@ impl Default for Params {
             max_search_share_bps: DEFAULT_MAX_SEARCH_SHARE_BPS,
             bond_threshold: U128(DEFAULT_BOND_THRESHOLD),
             bond_bps: DEFAULT_BOND_BPS,
+            prune_delay_epochs: DEFAULT_PRUNE_DELAY_EPOCHS,
         }
     }
 }
@@ -137,10 +150,26 @@ pub fn validate_params(p: &Params) {
     require_range(p.max_search_share_bps, 0, MAX_SEARCH_SHARE_BPS_MAX, "max_search_share_bps");
     require_range(p.bond_threshold.0, BOND_THRESHOLD_MIN, BOND_THRESHOLD_MAX, "bond_threshold");
     require_range(p.bond_bps, BOND_BPS_MIN, BOND_BPS_MAX, "bond_bps");
+    require_range(p.prune_delay_epochs, PRUNE_DELAY_EPOCHS_MIN, PRUNE_DELAY_EPOCHS_MAX, "prune_delay_epochs");
 }
 
 const RULES_KEY: &[u8] = b"x207_rules";
 const PENDING_RULES_KEY: &[u8] = b"x207_rules_pending";
+const PRUNE_DELAY_KEY: &[u8] = b"x207_prune_delay";
+const PENDING_PRUNE_DELAY_KEY: &[u8] = b"x207_prune_delay_pending";
+
+/// `prune_delay_epochs` in force now: the stored value, or `DEFAULT_PRUNE_DELAY_EPOCHS` for a circle that never set it (also a circle upgraded from 0.0.12).
+pub fn current_prune_delay() -> u16 {
+    env::storage_read(PRUNE_DELAY_KEY).map_or(DEFAULT_PRUNE_DELAY_EPOCHS, |b| near_sdk::borsh::from_slice::<u16>(&b).expect("prune delay is valid borsh"))
+}
+
+pub(crate) fn write_prune_delay(delay: u16) {
+    if delay == DEFAULT_PRUNE_DELAY_EPOCHS {
+        env::storage_remove(PRUNE_DELAY_KEY);
+    } else {
+        env::storage_write(PRUNE_DELAY_KEY, &near_sdk::borsh::to_vec(&delay).expect("borsh"));
+    }
+}
 
 /// `(bond_threshold, bond_bps)` in force now: the stored value, or the defaults for a circle that never set them (also a circle upgraded from 0.0.11).
 pub fn current_rules() -> (u128, u16) {
@@ -163,6 +192,7 @@ pub fn with_rules(mut p: Params) -> Params {
     let (threshold, bps) = current_rules();
     p.bond_threshold = U128(threshold);
     p.bond_bps = bps;
+    p.prune_delay_epochs = current_prune_delay();
     p
 }
 
@@ -174,6 +204,13 @@ pub(crate) fn apply_pending_rules(effective_epoch: u64) {
             write_rules(t, bps);
         }
         env::storage_remove(PENDING_RULES_KEY);
+    }
+    if let Some(bytes) = env::storage_read(PENDING_PRUNE_DELAY_KEY) {
+        let (delay, epoch): (u16, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending prune delay is valid borsh");
+        if epoch == effective_epoch {
+            write_prune_delay(delay);
+        }
+        env::storage_remove(PENDING_PRUNE_DELAY_KEY);
     }
 }
 
@@ -194,6 +231,7 @@ impl Params {
             ("max_search_share_bps", self.max_search_share_bps != other.max_search_share_bps),
             ("bond_threshold", self.bond_threshold != other.bond_threshold),
             ("bond_bps", self.bond_bps != other.bond_bps),
+            ("prune_delay_epochs", self.prune_delay_epochs != other.prune_delay_epochs),
         ];
         checks.into_iter().filter(|(_, differs)| *differs).map(|(name, _)| name.to_string()).collect()
     }
@@ -210,6 +248,7 @@ impl X207Circle {
         let old = with_rules(self.epoch_or_panic(self.current_epoch).params.clone());
         let effective_epoch = self.current_epoch + 1;
         env::storage_write(PENDING_RULES_KEY, &near_sdk::borsh::to_vec(&(params.bond_threshold.0, params.bond_bps, effective_epoch)).expect("borsh"));
+        env::storage_write(PENDING_PRUNE_DELAY_KEY, &near_sdk::borsh::to_vec(&(params.prune_delay_epochs, effective_epoch)).expect("borsh"));
         let changed = old.changed_fields(&params);
         self.pending_params = Some(PendingParams { params: params.clone(), effective_epoch });
         ParamsUpdated { old, new: params, changed, effective_epoch }.emit();
@@ -226,6 +265,9 @@ impl X207Circle {
                 pending.params.bond_threshold = U128(t);
                 pending.params.bond_bps = bps;
             }
+            pending.params.prune_delay_epochs = env::storage_read(PENDING_PRUNE_DELAY_KEY).map_or_else(current_prune_delay, |bytes| {
+                near_sdk::borsh::from_slice::<(u16, u64)>(&bytes).expect("pending prune delay is valid borsh").0
+            });
             pending
         })
     }
@@ -270,7 +312,7 @@ mod tests {
                 "limit_decay": 0,
                 "fees": {"clearing_fee_bps": 0, "solver_fee_bps": 0},
                 "admission": "open", "max_search_share_bps": 500,
-                "bond_threshold": "100000000", "bond_bps": 2000
+                "bond_threshold": "100000000", "bond_bps": 2000, "prune_delay_epochs": 2
             })
         );
         validate_params(&Params::default());
@@ -280,7 +322,7 @@ mod tests {
     #[test]
     fn tc_ct_007_02_all_fields_present() {
         let json = serde_json::to_value(Params::default()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 12);
+        assert_eq!(json.as_object().unwrap().len(), 13);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 
@@ -390,7 +432,7 @@ mod tests {
         let c = circle(Params::default());
         assert_eq!(c.get_params(), Params::default());
         let json = serde_json::to_value(c.get_params()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 12);
+        assert_eq!(json.as_object().unwrap().len(), 13);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 
