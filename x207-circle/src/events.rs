@@ -702,14 +702,17 @@ mod tests {
         assert!(limits.len() <= LOG_LIMIT, "limits_updated {}", limits.len());
 
         // CT-099: the positions of the epoch in ONE log, up to MAX_MEMBERS, with account names of 64 characters and amounts of 13 digits (`limit_cap` is at most 1e11 and
-        // a sum over 64 members is below 1e13). The whole log of `commit_epoch` must keep a margin of 10 percent under the 16 KiB of a receipt.
+        // a sum over 64 members is below 1e13). The worst case is a creditor (the longest role and status: `creditor`, `claimable`) with a negative `net` of 13 digits
+        // (B8-F4). The whole log of `commit_epoch` must keep a margin of 10 percent under the 16 KiB of a receipt.
+        assert_eq!(crate::params::LIMIT_CAP_MAX.to_string().len(), 12, "limit_cap has at most 12 digits");
+        assert!(64 * crate::params::LIMIT_CAP_MAX < 10u128.pow(13), "a sum over 64 members has at most 13 digits");
         let bound = U128(9_999_999_999_999);
         let positions: Vec<PositionEntry> = (0..64)
             .map(|i| PositionEntry {
                 account_id: long(i),
                 net: I128(-(bound.0 as i128)),
-                role: "debtor".into(),
-                status: Some("due".into()),
+                role: "creditor".into(),
+                status: Some("claimable".into()),
                 amount: bound,
                 outstanding_debt: bound,
             })
