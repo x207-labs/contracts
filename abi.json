@@ -3111,6 +3111,12 @@
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
+            },
+            "prune_delay_epochs": {
+              "default": 2,
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
             }
           },
           "required": [
@@ -3275,6 +3281,9 @@
               "minimum": 0.0,
               "type": "integer"
             },
+            "proposal_hash": {
+              "type": "string"
+            },
             "solver": {
               "type": "string"
             }
@@ -3285,6 +3294,7 @@
             "edge_count",
             "edges",
             "epoch",
+            "proposal_hash",
             "solver"
           ],
           "type": "object"

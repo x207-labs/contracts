@@ -109,6 +109,7 @@ async fn gas_of_the_life_of_an_epoch() -> anyhow::Result<()> {
     let before = storage(&f).await?;
     let r = tx(&solver, f.circle.contract.id().as_str(), "claim_solver_fee", json!({}), 1, 300).transact().await?;
     line(&f, g, "claim_solver_fee (with on_solver_fee_resolved)", before, &r, "includes the transfer on the token and the callback").await?;
+    common::flow::pass_prune_delay(&f.circle).await?;
     let r = measure!(&f, g, "prune_epoch (max_items 1000)", "frees the entries of the epoch", f.circle.call_as(&scraper, "prune_epoch", json!({"epoch": 1, "max_items": 1000})));
     let _ = r;
     let before = storage(&f).await?;

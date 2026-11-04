@@ -60,6 +60,7 @@ async fn state_written_by_0_0_11_reads_the_same_and_the_bond_rules_start_from_th
     let mut expected = before["params"].clone();
     expected["bond_threshold"] = json!("100000000");
     expected["bond_bps"] = json!(2000);
+    expected["prune_delay_epochs"] = json!(2);
     assert_eq!(after_params, expected);
     for key in ["epoch", "bundle_1", "headroom", "pool", "owner"] {
         let now = match key {
@@ -75,6 +76,7 @@ async fn state_written_by_0_0_11_reads_the_same_and_the_bond_rules_start_from_th
             if let Some(p) = v.get_mut("params").and_then(Value::as_object_mut) {
                 p.remove("bond_threshold");
                 p.remove("bond_bps");
+                p.remove("prune_delay_epochs");
             }
         }
         assert_eq!(now, was, "{key} reads the same after the upgrade");

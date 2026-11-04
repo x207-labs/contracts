@@ -25,6 +25,12 @@ async fn an_unclaimed_position_can_still_be_claimed_after_the_epoch_is_pruned() 
     assert_eq!((gpu_before["status"].as_str(), scraper_before["status"].as_str()), (Some("claimable"), Some("defaulted")));
     let list_before = f.circle.view("list_positions", json!({"epoch": 1, "from_index": 0, "limit": 50})).await?;
 
+    // CT-099 (B8-F1): too early while the running epoch is not two epochs after epoch 1; the edges stay readable from `list_obligations`
+    let too_early = f.circle.call_as(&outsider, "prune_epoch", json!({"epoch": 1, "max_items": 10})).await?;
+    assert!(failure_text(&too_early).expect("refused").contains("ERR_PRUNE_TOO_EARLY"));
+    assert!(!f.circle.view("list_obligations", json!({"epoch": 1, "from_index": 0, "limit": 10})).await?.as_array().unwrap().is_empty());
+    common::flow::pass_prune_delay(&f.circle).await?;
+
     // 3 pairs and 3 participants: prune in small steps, a stranger pays the gas
     let mut removed = 0u64;
     loop {

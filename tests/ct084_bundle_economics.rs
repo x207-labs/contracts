@@ -134,7 +134,8 @@ async fn a_partly_registered_bundle_leaves_nothing_behind_after_prune() -> anyho
     let epoch = f.circle.view("get_epoch", json!({})).await?["epoch"].as_u64().unwrap();
     assert_eq!(epoch, 2);
 
-    // prune the old epoch: everything of the bundle goes, the position stays
+    // prune the old epoch: everything of the bundle goes, the position stays (after the prune delay of CT-099)
+    common::flow::pass_prune_delay(&f.circle).await?;
     let outsider = f.circle.worker.dev_create_account().await?;
     let mut removed = 0u64;
     loop {

@@ -592,6 +592,19 @@ pub mod flow {
             .await?)
     }
 
+    /// CT-099 (B8-F1): `prune_epoch` waits for `prune_delay_epochs` (2): closes the running epochs until epoch 3 runs, so that epoch 1 may be pruned.
+    pub async fn pass_prune_delay(c: &Circle) -> anyhow::Result<()> {
+        loop {
+            let running = c.view("get_epoch", json!({})).await?["epoch"].as_u64().unwrap();
+            if running >= 3 {
+                return Ok(());
+            }
+            c.advance_to(c.epoch_ts(running, "cutoff_at").await?).await?;
+            let close = c.call_keeper("close_epoch", json!({"epoch": running})).await?;
+            assert!(close.is_success(), "close_epoch {running}: {:?}", failure_text(&close));
+        }
+    }
+
     /// Epoch 1 of a circle with no vouchers: closed, committed, and finalized after its windows.
     pub async fn idle_epoch_finalized(f: &Funded) -> anyhow::Result<()> {
         let c = &f.circle;
