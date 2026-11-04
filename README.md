@@ -74,6 +74,9 @@ stops fitting at about 60 debtors. So the contract keeps `limits_updated` and `e
 readable with `list_positions`, and `epoch_finalized.defaulted_count` is always right. `commit_epoch` has the same limit
 for `clearing_applied` (see CT-004); both need a decision in the design notes.
 
+## Gas and cost of the interface 0.0.13 (CT-102)
+A full epoch of 210 edges on 15 members burnt **0.1075 NEAR** on testnet (about 0.0005 NEAR per edge), of which 0.0109 NEAR for the four steps of the keeper and the solver; `commit_epoch` of 210 edges burnt 69.4 Tgas. A transaction reserves 0.001 NEAR per Tgas of prepaid gas, so a solver needs at least 0.07 NEAR and a keeper at least 0.16 NEAR (prepaid gas: `submit_clearing` 60, `commit_epoch` 150, `finalize_epoch` 100 Tgas). Every number with its transaction hash or test name is in [docs/gas-and-cost.md](docs/gas-and-cost.md); the gas of every method in near-sandbox is in [docs/gas.md](docs/gas.md).
+
 ## Environment variables
 
 The contract and its tests read no secrets. Two optional switches are read by tests:
