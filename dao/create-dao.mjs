@@ -10,6 +10,11 @@ try {
   for (const required of ['name', 'council', 'signer']) {
     if (typeof args[required] !== 'string') throw new Error(`missing --${required}`);
   }
+  for (const flag of ['factory', 'deposit']) {
+    if (flag in args && (typeof args[flag] !== 'string' || args[flag].trim() === '')) throw new Error(`--${flag} needs a value`);
+  }
+  if ('deposit' in args && !/^\d+(\.\d+)? NEAR$/.test(args.deposit)) throw new Error(`--deposit must look like '1 NEAR', got '${args.deposit}'`);
+  if ('factory' in args && !/^[a-z\d._-]+$/.test(args.factory)) throw new Error(`--factory must be an account id, got '${args.factory}'`);
   const network = networkOf(args);
   const createArgs = buildCreateArgs({ name: args.name, council: args.council.split(',') });
   if (network === 'mainnet') console.error('MAINNET: review the command below and run it yourself; this script never sends it.');

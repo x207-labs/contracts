@@ -11,7 +11,7 @@ const ONE_NEAR = 10n ** 24n;
 /** Testnet: the factory deploys the whole DAO code into the new account, about 6 NEAR of storage; attach a margin (measured, x207v8). */
 export const FACTORY_DEPOSIT = '7 NEAR';
 /**
- * Mainnet, read on 2026-11-04: new DAOs use the global DAO code and hold about 0.09 NEAR, so 1 NEAR is plenty. The limit of the factory cannot be read by a view; a `create`
+ * Mainnet, read on 2026-11-04: new DAOs use the global DAO code and hold about 0.09 NEAR, so 1 NEAR is an ESTIMATE, not a measured minimum. The limit of the factory cannot be read by a view; a `create`
  * that is refused (`ERR_NOT_ENOUGH_DEPOSIT`) fails and returns the deposit, so raise it with `--deposit` only then.
  */
 export const FACTORY_DEPOSIT_MAINNET = '1 NEAR';

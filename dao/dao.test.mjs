@@ -201,3 +201,18 @@ test('propose-asset-class prints the add_proposal command and refuses a missing 
   assert.match(out, /set_asset_class|c2V0X2Fzc2V0X2NsYXNz|YXNzZXRfdHlwZ/);
   assert.notEqual(spawnSync('node', common).status, 0);
 });
+
+test('create-dao CLI: --factory and --deposit need a string value and take effect', () => {
+  const base = ['dao/create-dao.mjs', '--name', 'x207', '--council', 'alice.near', '--signer', 'alice.near', '--network', 'mainnet'];
+  const ok = execFileSync('node', [...base, '--factory', 'my-factory.near', '--deposit', '2 NEAR']).toString();
+  assert.match(ok, /as-transaction my-factory\.near create /);
+  assert.match(ok, /attached-deposit '2 NEAR'/);
+  for (const flag of ['--deposit', '--factory']) {
+    const bad = spawnSync('node', [...base, flag]);
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr.toString(), new RegExp(`${flag} needs a value`));
+  }
+  const odd = spawnSync('node', [...base, '--deposit', 'lots']);
+  assert.equal(odd.status, 1);
+  assert.match(odd.stderr.toString(), /--deposit must look like/);
+});
