@@ -160,9 +160,15 @@ async fn the_edges_are_read_from_the_views_and_match_the_hash_of_the_log() -> an
     use sha2::{Digest, Sha256};
     let hash: String = Sha256::digest(canonical.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(applied["edges_hash"], hash);
+    // B8-F3: the view gave that hash on every page before the commit, and keeps it after
+    assert_eq!(all["proposal_hash"], applied["edges_hash"]);
+    assert_eq!(page["proposal_hash"], all["proposal_hash"]);
     // after the commit: the proposal says committed and `list_obligations` has the cleared amounts
     let after = f.circle.view("get_proposal", json!({"epoch": 1, "from_index": 0, "limit": 300})).await?;
     assert_eq!((after["committed"].as_bool(), after["edges"].as_array().map(Vec::len)), (Some(true), Some(0)));
+    // B8-F2: the count of the committed edges is still there
+    assert_eq!(after["edge_count"], 60);
+    assert_eq!(after["proposal_hash"], applied["edges_hash"]);
     let obligations = f.circle.view("list_obligations", json!({"epoch": 1, "from_index": 0, "limit": 100})).await?;
     assert_eq!(obligations.as_array().unwrap().iter().filter(|o| o["cleared"] != "0").count(), 60);
     let committed = common::circle::events(&commit).into_iter().find(|(n, _)| n == "epoch_committed").expect("epoch_committed").1;
