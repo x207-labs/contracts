@@ -1,13 +1,21 @@
 # x207 contracts
 
-The `x207-circle` contract (module M1) and the Sputnik DAO scripts (module M9) of x207. Features F1–F7. Part of [x207](https://github.com/x207-labs/x207).
+The `x207-circle` smart contract (Rust, NEAR) and the Sputnik DAO scripts of [x207](https://github.com/x207-labs/x207): the mutual credit settlement layer for x402 agent payments.
 
-| Path | Contents | Module | Features |
-| --- | --- | --- | --- |
-| `x207-circle/src/` | Contract source: `member.rs`, `voucher.rs`, `clearing.rs`, `commit.rs`, `settlement.rs`, `bundle.rs`, `risk.rs`, `params.rs`, `events.rs`, and others | M1 | F1–F7 |
-| `tests/` | near-sandbox and unit tests | M1 | F1–F7 |
-| `dao/` | Scripts that print Sputnik DAO commands. See `dao/README.md`. | M9 | F7 |
-| `abi.json` | Frozen contract interface | M1 | F1–F7 |
+## Its role in x207
+
+The contract is the one place where the credit circle is true. It holds the members and their stakes, records the signed vouchers per pair, accepts a clearing proposal from any solver after checking it on chain, applies the best one, covers a default from the debtor's stake, and lets creditors claim USDT. Everything else in x207 (the [SDK](https://github.com/x207-labs/sdk), the [indexer and read API](https://github.com/x207-labs/backend), the [solver](https://github.com/x207-labs/solver), the [dashboard](https://github.com/x207-labs/frontend)) reads or calls it.
+
+- **Running now:** release [v0.0.13](https://github.com/x207-labs/contracts/releases/tag/v0.0.13), interface 0.0.13 (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`), as the circle `x207-v013.testnet` on NEAR testnet. No mainnet deploy has been made.
+- **Reproducible build:** the wasm is built in a pinned container, so two builds of one commit give the same bytes. v0.0.13 (commit `8799ebe`, built twice, byte-identical): sha256 `b9327f2b5d64b1180ba76dd619c6091ae57b48964f520a784e366c131e787054`, on-chain `code_hash` `DTw5rUUdJSbWjD361MmBxKW4nm4ETnNkex63mfUCjsjh`.
+
+| Path | Contents |
+| --- | --- |
+| `x207-circle/src/` | Contract source: `member.rs`, `voucher.rs`, `clearing.rs`, `commit.rs`, `settlement.rs`, `bundle.rs`, `risk.rs`, `params.rs`, `events.rs`, and others |
+| `tests/` | near-sandbox and unit tests |
+| `dao/` | Scripts that print Sputnik DAO commands ([`dao/README.md`](dao/README.md)) |
+| `abi.json` | Frozen contract interface |
+| `scripts/` | `repro-build.sh`, `verify-release.sh`, `fetch-intents-wasm.sh` |
 
 ## Build and test
 
@@ -15,113 +23,42 @@ Needs Rust 1.99.1 with the `wasm32-unknown-unknown` target (pinned in `rust-tool
 
 ```bash
 cargo near build non-reproducible-wasm
-```
-
-```bash
 cargo test
 ```
 
-Sandbox tests need the wasm from the build step. A sandbox test that walks a whole epoch takes about one
-minute, because it fast-forwards block time through the epoch and payment windows.
+Sandbox tests need the wasm from the build step. A sandbox test that walks a whole epoch takes about one minute, because it fast-forwards block time. The solver tests in `tests/sv006_solver_cli.rs` run `../solver/dist/cli.js` and skip themselves when the solver repository is not next to this one.
 
-The solver tests in `tests/sv006_solver_cli.rs` run `../solver/dist/cli.js`; they skip themselves when the
-solver repo is not next to this one (build it with `npm run build` there).
-
-## Gas and storage (CT-043)
-
-Measured in near-sandbox by `tests/ct043_gas.rs`, on the real contract with real members, wasm built by
-`cargo near build non-reproducible-wasm`. `Tgas` is `total_gas_burnt` of the whole call including receipts.
-The limit of one transaction is 1000 Tgas; the test fails any method above 500 Tgas.
-
-| Method | Case | Tgas |
-| --- | --- | --- |
-| `register_cumulative` | first voucher of a pair | 4.0 |
-| `register_cumulative` | later voucher of the same pair | 3.8 |
-| `submit_clearing` | 3 / 12 / 30 edges | 2.5 / 3.4 / 5.2 |
-| `commit_epoch` | 3 edges, 3 participants | 5.0 |
-| `commit_epoch` | 12 edges, 6 participants | 7.8 |
-| `commit_epoch` | 30 edges, 6 participants | 12.3 |
-| `commit_epoch` | 63 edges, 64 participants (`MAX_MEMBERS`) | 46.3 |
-| `finalize_epoch` | 64 members, 63 defaults (worst case) | 60.9 |
-| `claim` to a NEAR account, with callback, prepaid exactly `CLAIM_MIN_GAS` (100 Tgas) | | 6.9 |
-| `claim` to Intents, with callback, prepaid 100 Tgas | | 10.7 |
-
-`MAX_EDGES_PER_TX` stays 300 (CT-004); the solver reads it from `MAX_EDGES_PER_TX`. `CLAIM_MIN_GAS` stays 100 Tgas: a claim to
-Intents with 50 Tgas for `ft_transfer_call` and 15 Tgas for the callback completes with that prepaid gas.
-
-Cost of a voucher: a later voucher burns 3.77 Tgas, which is 0.000377 NEAR at the sandbox gas price (1e8 yocto per gas),
-about 0.0011 USD at 3 USD per NEAR, or 5.7% of a payment of 0.02 USD.
-
-Storage: a member entry takes 311 bytes (3.1 mNEAR at 1e19 yocto per byte, inside the join deposit of 10 mNEAR).
-The first voucher of a new pair takes 620 bytes (pair entry, two participant entries, epoch counters).
-
-Repeat the measurement (about 5 minutes; runs of the same code differ by at most 0.1 Tgas, for example 46.2 and 46.3 for
-`commit_epoch` with 63 edges):
+Check a release, and optionally a deployed account (needs Docker for the reproducible build):
 
 ```bash
-cargo near build non-reproducible-wasm
+scripts/repro-build.sh <git-ref> <outdir>               # prints the sha256 of x207_circle.wasm
+scripts/verify-release.sh v0.0.13 [account] [rpc-url]
 ```
 
-```bash
-cargo test --locked --test ct043_gas -- --nocapture --test-threads=1 | grep GAS
-```
+What the check proves: [docs/verify-release.md](docs/verify-release.md).
 
-### Log limit
+## What it costs
 
-near allows 16 KiB of log per call. `finalize_epoch` writes one `member_defaulted` per debtor; with long account ids it
-stops fitting at about 60 debtors. So the contract keeps `limits_updated` and `epoch_finalized` and drops the
-`member_defaulted` events that no longer fit, adding one plain line that says how many were left out. The positions stay
-readable with `list_positions`, and `epoch_finalized.defaulted_count` is always right. `commit_epoch` has the same limit
-for `clearing_applied` (see CT-004); both need a decision in the design notes.
+A full epoch of 210 edges on 15 members burnt **0.1075 NEAR** on testnet (about 0.0005 NEAR per edge), of which 0.0109 NEAR for the four steps of the keeper and the solver; `commit_epoch` of 210 edges burnt 69.4 Tgas. A later voucher burns 3.8 Tgas in near-sandbox. A transaction reserves 0.001 NEAR per Tgas of prepaid gas, so a solver needs at least 0.07 NEAR and a keeper at least 0.16 NEAR.
 
-## Gas and cost of the interface 0.0.13 (CT-102)
-A full epoch of 210 edges on 15 members burnt **0.1075 NEAR** on testnet (about 0.0005 NEAR per edge), of which 0.0109 NEAR for the four steps of the keeper and the solver; `commit_epoch` of 210 edges burnt 69.4 Tgas. A transaction reserves 0.001 NEAR per Tgas of prepaid gas, so a solver needs at least 0.07 NEAR and a keeper at least 0.16 NEAR (prepaid gas: `submit_clearing` 60, `commit_epoch` 150, `finalize_epoch` 100 Tgas). Every number with its transaction hash or test name is in [docs/gas-and-cost.md](docs/gas-and-cost.md); the gas of every method in near-sandbox is in [docs/gas.md](docs/gas.md).
+- Every number with its transaction hash or test name: [docs/gas-and-cost.md](docs/gas-and-cost.md); the gas of every method: [docs/gas.md](docs/gas.md).
+- The measurement tables (`tests/ct043_gas.rs`) and how to repeat them: [docs/gas-measurements.md](docs/gas-measurements.md).
+- The rules of the interface 0.0.13 (logs under the NEAR limit of 16,384 bytes, proposals read in pages with `get_proposal`): [docs/rules-0.0.13.md](docs/rules-0.0.13.md).
 
-## Interface 0.0.13 and reproducible build
+## Evidence
 
-The current interface is **0.0.13** (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`). It keeps every committed proposal inside the NEAR limit of 16,384 bytes of logs per receipt: `clearing_applied` carries a hash and a count of the edges, `epoch_committed` carries the positions in one log, and the edges are read in pages with the view `get_proposal(epoch, from_index, limit)`. The rules are in [`docs/rules-0.0.13.md`](docs/rules-0.0.13.md); gas, storage and the balance a solver or keeper needs are in [`docs/gas-and-cost.md`](docs/gas-and-cost.md).
+- Reproducible build and release check, above.
+- `tests/ct103_real_intents.rs` runs the circle against the wasm of `intents.near` taken from mainnet in near-sandbox and pays and claims one residual through it: [docs/real-intents-test.md](docs/real-intents-test.md). It has not run on testnet or mainnet.
+- Security reviews and the finding behind each fix: [docs/security-review.md](docs/security-review.md). The threat model of the whole project is in the [umbrella docs](https://github.com/x207-labs/x207/blob/main/docs/security-and-limits.md#threat-model).
+- The tests read no secrets. Optional switches: `UPDATE_ABI` (rewrites `abi.json`), `X207_TEST_VECTORS` (voucher test vectors folder), `NEAR_USD` (price for the cost per voucher, default 3.0, an assumption).
 
-The wasm is built in a pinned container (`[package.metadata.near.reproducible_build]` in `Cargo.toml`, `Cargo.lock` committed), so two builds of one commit give the same bytes. Needs Docker.
+## Known risk
 
-```bash
-scripts/repro-build.sh <git-ref> <outdir>   # prints the sha256 of x207_circle.wasm
-scripts/verify-release.sh v0.0.13 [account] [rpc-url]   # checks a release, and a deployed account when given
-```
+An NFT in the escrow of a class A grant leaves only through `complete_escrow` or `cancel_escrow`. If the callback `on_escrow_resolved` never runs the escrow stays `completing`, and if the delivery cannot be taken back it is `stuck`: the NFT stays in the circle. There is no rescue method, because ADR-20 forbids the owner to move assets. Offer only NFTs you accept to lose this way ([docs/security-review.md](docs/security-review.md), F10).
 
-Release 0.0.13 built from commit `8799ebe`, twice, byte-identical:
+## Back to x207
 
-| | |
-| --- | --- |
-| sha256 | `b9327f2b5d64b1180ba76dd619c6091ae57b48964f520a784e366c131e787054` |
-| `code_hash` (base58) | `DTw5rUUdJSbWjD361MmBxKW4nm4ETnNkex63mfUCjsjh` |
-
-The steps and what the check proves are in [`docs/verify-release.md`](docs/verify-release.md).
-
-## The real Intents contract in near-sandbox (CT-103)
-
-The residual tests of CT-036, BE-034 and CT-092 use `probes/mock_intents`. `tests/ct103_real_intents.rs` runs the circle against the **wasm of `intents.near` taken from mainnet** and pays and claims one residual through it: a deposit of USDT to Intents (`ft_transfer_call`), `mt_transfer_call` of Intents to the circle (`mt_on_transfer`, `settle`), `finalize_epoch`, `withdraw_intents_balance` (the real `ft_withdraw`), and `claim`.
-
-```bash
-scripts/fetch-intents-wasm.sh       # RPC view_code of intents.near, read only; checks the sha256 and writes target/intents-near/intents.wasm
-cargo test --test ct103_real_intents
-```
-
-The wasm is not committed. It is 1,297,551 bytes with sha256 `a1afab98916d9f213746544dcf8e4e6bdb22c0be6bc5dfbd8ea8814c9922b547` (`code_hash` `BtA1BEFNS619KkvXFsgcpQ21Tb5yMm32aaUkn7xNothk`, seen at mainnet block 222990644). On a laptop, without the file, the test prints a note and passes; the CI of this repository runs `scripts/fetch-intents-wasm.sh` first and sets `X207_REQUIRE_INTENTS_WASM=1`, which turns a missing file into a failure, so a green CI means the circle ran against the real contract. When Intents is upgraded the script stops on the new hash: read the change, then update the hash in the script and in the test. The contract starts with `new({config: {wnear_id, fees, roles}})`, and the test gives it an account for the fee collector and the super admin.
-
-## Environment variables
-
-The contract and its tests read no secrets. Two optional switches are read by tests:
-
-| Variable | Used by | Meaning |
-| --- | --- | --- |
-| `UPDATE_ABI` | `tests/ct068_abi_freeze.rs` | When set, rewrites `abi.json` instead of comparing with it |
-| `X207_TEST_VECTORS` | `tests/ct023_voucher_vectors.rs` | Folder of voucher test vectors. Default `../sdk/spec/test-vectors`, or `tests/vectors/` when the sdk repo is absent |
-| `NEAR_USD` | `tests/ct043_gas.rs` | NEAR price in USD for the cost per voucher. Default 3.0 (an assumption, not a quote) |
-
-Secrets belong in `.env`, which is not committed.
-
-## Known risk: a class A escrow can hold an asset for good
-An NFT in the escrow of a class A grant (state `held`) leaves only through `complete_escrow` (a buyer pays) or `cancel_escrow` (the grantor, after the time). If the callback `on_escrow_resolved` never runs (for instance, out of gas) the escrow stays `completing`, and if the delivery fails in a way that cannot be taken back it is `stuck`. In both cases the NFT stays in the circle and the pair stays locked for that epoch. There is no rescue method, because ADR-20 forbids the owner to move assets. Offer only NFTs you accept to lose this way. See `docs/security-review.md`, F10.
+Overview, live demo links and the claims map: [x207-labs/x207](https://github.com/x207-labs/x207).
 
 ## License
 
