@@ -51,6 +51,25 @@ A transaction **reserves** its prepaid gas from the balance of the signer and gi
 
 *Estimates* from the rule above: **a solver account needs at least 0.07 NEAR** (0.061 reserve plus the 0.003 burnt), **a keeper that closes, commits and finalizes needs at least 0.16 NEAR** (the largest reserve is `commit_epoch`, 0.151; the calls follow one another, so the reserves are not held together), 0.21 NEAR if it also prunes. Attaching 250 to 300 Tgas to every call, as the first solver and keeper did, needs 0.25 to 0.30 NEAR for calls that burn a tenth of it. A balance well above these (a few NEAR) is the normal setting for a keeper that runs for days: the burn is about 0.011 NEAR per epoch for the four steps.
 
+## 3a. Paying the residual of several debtors in one `execute_intents` (BE-034)
+The debtors of an epoch can pay their residual with one Intents `transfer` each, and one `execute_intents` carries all of them; the circle learns of each payment from `mt_on_transfer`. Measured in near-sandbox on 2026-11-04 with the wasm of `intents.near` (`tests/residual-batch-gas.sandbox.test.ts` of the umbrella repository, the figures and the method are in `backend/docs/residual-batch.md`), one call with the most gas it can carry (300 Tgas). Gas in Tgas; "Intents" is the receipt of `execute_intents`, "circle" is one `mt_on_transfer` receipt on the circle.
+
+| N | `min_gas` of each transfer | all N paid | burnt in the receipt of Intents | burnt by one circle receipt | burnt in all receipts |
+| --- | --- | --- | --- | --- | --- |
+| 2 | Intents default | yes | 8.1 | 2.9 to 3.0 | 21.3 |
+| 3 | Intents default | yes | 10.7 | 2.9 to 3.0 | 30.0 |
+| 5 | Intents default | yes | 15.7 | 2.9 to 3.0 | 47.6 |
+| 6 | Intents default | yes | 18.2 | 2.9 to 3.0 | 56.3 |
+| 7 | Intents default | **no**: `Exceeded the prepaid gas.` | n/a | n/a | n/a |
+| 8 | Intents default | **no**: `Exceeded the prepaid gas.` | n/a | n/a | n/a |
+| 12 | Intents default | **no**: `Exceeded the prepaid gas.` | n/a | n/a | n/a |
+| 8 | 10 Tgas | yes | 23.3 | 2.9 to 3.0 | 74.0 |
+| 9 | 10 Tgas | yes | 25.8 | 2.9 to 3.0 | 82.7 |
+| 10 | 10 Tgas | yes | 28.3 | 2.9 to 3.0 | 91.5 |
+| 12 | 10 Tgas | **no**: `Exceeded the prepaid gas.` | n/a | n/a | n/a |
+
+**At most 8 debtors per call, with `min_gas` of 10 Tgas in each signed transfer.** What limits N is not the gas burnt (about 2.5 Tgas for each debtor in the Intents receipt and 2.9 for each `mt_on_transfer` on the circle, 91.5 Tgas for ten debtors) but the gas that Intents *reserves* for the notification of each transfer, which has to fit in the 300 Tgas of the call. With the default of Intents the reservation allows 6 debtors (7 fail); with `min_gas` of 10 Tgas it allows 10 (12 fail; 11 was not tried), and the backend uses 8, two below the highest N that worked (`DEFAULT_MAX_PER_CALL` and `DEFAULT_MIN_GAS` in `backend/src/settlement/residual/batch.ts`). A call that exceeds the prepaid gas pays nobody and the same batch can be sent again with fewer debtors. These are sandbox figures; the mainnet figures can differ with the version of Intents. The circle contract burns the same on every network.
+
 ## 4. How to repeat it
 ```bash
 # testnet (one epoch of 210 edges, real time about 30 minutes): needs the accounts of x207-v013 and the testnet deployer keys
