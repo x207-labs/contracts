@@ -20,7 +20,7 @@ A group takes one to six minutes. Run them one at a time.
 - **Gas** is `total_gas_burnt` of the transaction, in Tgas (10^12 gas). It includes the receipts that follow the call: the callbacks of the contract (`on_claim_resolved`, `on_escrow_resolved`, `on_withdraw_resolved`, `on_solver_fee_resolved`) and the call of the token contract, which is why a method that pays out or takes a deposit is 7 to 12 Tgas and one that only writes state is 2 to 5 Tgas. The prepaid gas of the caller is not the gas used.
 - **Storage added** is the change of `storage_usage` of the contract account in bytes, after minus before. A negative number is storage that the call freed. 1 byte of storage locks 10^19 yoctoNEAR, that is 0.00001 NEAR (1 KB is 0.01 NEAR); the join deposit that covers one member is measured in `ct062_storage_per_member` (0.35 NEAR).
 - A **REFUSED** row is a call that failed in the sandbox; it is never a number.
-- **The limit is 300 Tgas for one transaction** (NEAR). No method below went above 300 Tgas except where marked. The largest numbers are `apply_upgrade` (110 Tgas, it deploys 657 KB of code) and `commit_bundle` with 64 legs (79 Tgas).
+- **The limit of one transaction.** The older limit of NEAR is 300 Tgas, and the backlog keeps 300 Tgas as the bar for "safe"; a probe on testnet on 2026-11-04 (transactions of 301, 400 and 1000 Tgas of prepaid gas were accepted by `x207-v013.testnet`) shows that testnet now takes up to 1000 Tgas. No method below went above 300 Tgas except where marked. The largest numbers are `apply_upgrade` (110 Tgas, it deploys 657 KB of code) and `commit_bundle` with 64 legs (79 Tgas).
 - Views are free for the caller. The long lists are in the tables of `ct086_gas_limits`, repeated below.
 - `register_voucher` (demo mode) takes the same path as `register_cumulative`; `migrate`, `new`, `on_*` callbacks are part of the transaction of their method; `withdraw_intents_balance`, `claim` to Intents and `mt_on_transfer` (settle) are measured in `be034_intents_withdraw` and `ct058` with the mock Intents contract and are not repeated here.
 
@@ -129,4 +129,4 @@ NEAR limits the **total** length of the logs of one receipt to 16,384 bytes (`Ho
 The gas of `commit_epoch` grows with the edges (about 0.3 Tgas per edge, 104 Tgas at 300), far below 300 Tgas. The tests are `tests/ct099_commit_log_size.rs` (they fail above the budget) and `tests/ct099_hash_vectors.rs`; repeat one at a time with `cargo test --test ct099_commit_log_size <name> -- --nocapture --test-threads=1`.
 
 ## What is above 100 Tgas
-`apply_upgrade` 110 Tgas (deploys the code and runs `migrate`; the limit of the transaction is 300). Nothing is above 300 Tgas.
+`apply_upgrade` 110 Tgas (deploys the code and runs `migrate`; 300 Tgas is the conservative bar, testnet takes up to 1000). Nothing is above 300 Tgas.
