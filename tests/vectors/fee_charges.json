@@ -1,0 +1,1707 @@
+{
+  "definition": "python3 -I scripts/fee_charges.py           # writes tests/vectors/fee_charges.json\n    python3 -I scripts/fee_charges.py --check   # recomputes and compares with the file; exit 1 on a difference\n\nThe contract writes no event per member for this (the log of `commit_epoch` is full), so a reader that wants the stake of a member after a commit repeats the rule below.\nRule (`charge_fees` and `pro_rata_fee` in `commit.rs`), for a proposal with a solver, `cleared_total` = sum of `cleared` over the edges, and `fees` of the epoch:\n  clearing_fee = cleared_total * clearing_fee_bps // 10000          solver_fee = cleared_total * solver_fee_bps // 10000\n  nothing is charged when there is no solver, when cleared_total is 0 or when both bps are 0.\n  fee_total = clearing_fee + solver_fee, split over the DEBTORS of the edges: debtor_cleared = sum of cleared of its edges;\n    share = fee_total * debtor_cleared // cleared_total (floor); the units that are left (fee_total - sum of shares) go one by one, one unit each,\n    to the debtors in account id order (byte order), the first ones first; debtors with share 0 are dropped.\n  for each debtor in account id order: cut = min(share, stake); stake -= cut;\n    limit = min(limit, max(stake - bond_locked, 0))      (`bound_limit`: a locked bond is not available as a limit)\n  charged = sum of the cuts; to_reserve = min(clearing_fee, charged); to_solver = charged - to_reserve.\nAmounts are decimal strings (u128).",
+  "cases": [
+    {
+      "name": "leftover units go one by one to the debtors in account order",
+      "solver": "solver.x207-circle.near",
+      "fees": {
+        "clearing_fee_bps": 5,
+        "solver_fee_bps": 2
+      },
+      "edges": [
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "10000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "citra.x207-circle.near",
+          "cleared": "10000000"
+        },
+        {
+          "debtor": "citra.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "10000001"
+        }
+      ],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "citra.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "30000001",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "7000",
+            "stake_after": "99993000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "7000",
+            "stake_after": "99993000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "citra.x207-circle.near",
+            "stake_cut": "7000",
+            "stake_after": "99993000",
+            "limit_after": "80000000"
+          }
+        ],
+        "clearing_fee_charged": "15000",
+        "solver_fee_charged": "6000"
+      }
+    },
+    {
+      "name": "a stake smaller than its share pays what it has",
+      "solver": "solver.x207-circle.near",
+      "fees": {
+        "clearing_fee_bps": 100,
+        "solver_fee_bps": 50
+      },
+      "edges": [
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "20000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "20000000"
+        }
+      ],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "100000",
+          "limit": "80000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "5000000",
+          "limit": "4000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "40000000",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "100000",
+            "stake_after": "0",
+            "limit_after": "0"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "300000",
+            "stake_after": "4700000",
+            "limit_after": "4000000"
+          }
+        ],
+        "clearing_fee_charged": "400000",
+        "solver_fee_charged": "0"
+      }
+    },
+    {
+      "name": "a locked bond keeps the limit at stake minus bond",
+      "solver": "solver.x207-circle.near",
+      "fees": {
+        "clearing_fee_bps": 100,
+        "solver_fee_bps": 100
+      },
+      "edges": [
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "50000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "50000000"
+        }
+      ],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "20000000"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "100000000",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "1000000",
+            "stake_after": "99000000",
+            "limit_after": "79000000"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "1000000",
+            "stake_after": "99000000",
+            "limit_after": "80000000"
+          }
+        ],
+        "clearing_fee_charged": "1000000",
+        "solver_fee_charged": "1000000"
+      }
+    },
+    {
+      "name": "bound_limit lowers a limit above the new stake",
+      "solver": "solver.x207-circle.near",
+      "fees": {
+        "clearing_fee_bps": 100,
+        "solver_fee_bps": 0
+      },
+      "edges": [
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "30000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "citra.x207-circle.near",
+          "cleared": "30000000"
+        },
+        {
+          "debtor": "citra.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "30000000"
+        }
+      ],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "100000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "99950000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "citra.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "90000000",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "300000",
+            "stake_after": "99700000",
+            "limit_after": "99700000"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "300000",
+            "stake_after": "99700000",
+            "limit_after": "99700000"
+          },
+          {
+            "account": "citra.x207-circle.near",
+            "stake_cut": "300000",
+            "stake_after": "99700000",
+            "limit_after": "80000000"
+          }
+        ],
+        "clearing_fee_charged": "900000",
+        "solver_fee_charged": "0"
+      }
+    },
+    {
+      "name": "fees of zero charge nothing",
+      "solver": "solver.x207-circle.near",
+      "fees": {
+        "clearing_fee_bps": 0,
+        "solver_fee_bps": 0
+      },
+      "edges": [
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "10000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "10000000"
+        }
+      ],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "50000000",
+          "limit": "40000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "50000000",
+          "limit": "40000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "20000000",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "0",
+            "stake_after": "50000000",
+            "limit_after": "40000000"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "0",
+            "stake_after": "50000000",
+            "limit_after": "40000000"
+          }
+        ],
+        "clearing_fee_charged": "0",
+        "solver_fee_charged": "0"
+      }
+    },
+    {
+      "name": "testnet x207-v013 epoch 2: 15 members, 210 edges, a cut of 21000 each",
+      "solver": "x207-v013.testnet",
+      "fees": {
+        "clearing_fee_bps": 10,
+        "solver_fee_bps": 5
+      },
+      "edges": [
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m00.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m01.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m02.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m03.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m04.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m05.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m06.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m07.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m08.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m09.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m10.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m11.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m12.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m13.x207-v013-aux.testnet",
+          "creditor": "m14.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m00.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m01.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m02.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m03.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m04.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m05.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m06.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m07.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m08.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m09.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m10.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m11.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m12.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "m14.x207-v013-aux.testnet",
+          "creditor": "m13.x207-v013-aux.testnet",
+          "cleared": "1000000"
+        }
+      ],
+      "members": [
+        {
+          "account": "m00.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m01.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m02.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m03.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m04.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m05.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m06.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m07.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m08.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m09.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m10.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m11.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m12.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m13.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "m14.x207-v013-aux.testnet",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "210000000",
+        "charges": [
+          {
+            "account": "m00.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m01.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m02.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m03.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m04.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m05.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m06.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m07.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m08.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m09.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m10.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m11.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m12.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m13.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "m14.x207-v013-aux.testnet",
+            "stake_cut": "21000",
+            "stake_after": "99979000",
+            "limit_after": "80000000"
+          }
+        ],
+        "clearing_fee_charged": "210000",
+        "solver_fee_charged": "105000"
+      }
+    },
+    {
+      "name": "no solver, no proposal: nothing is charged",
+      "solver": null,
+      "fees": {
+        "clearing_fee_bps": 10,
+        "solver_fee_bps": 5
+      },
+      "edges": [],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "50000000",
+          "limit": "40000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "50000000",
+          "limit": "40000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "0",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "0",
+            "stake_after": "50000000",
+            "limit_after": "40000000"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "0",
+            "stake_after": "50000000",
+            "limit_after": "40000000"
+          }
+        ],
+        "clearing_fee_charged": "0",
+        "solver_fee_charged": "0"
+      }
+    },
+    {
+      "name": "unequal cleared amounts: floor shares and one leftover unit",
+      "solver": "solver.x207-circle.near",
+      "fees": {
+        "clearing_fee_bps": 7,
+        "solver_fee_bps": 3
+      },
+      "edges": [
+        {
+          "debtor": "dewi.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "3000000"
+        },
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "7000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "citra.x207-circle.near",
+          "cleared": "5000000"
+        },
+        {
+          "debtor": "citra.x207-circle.near",
+          "creditor": "dewi.x207-circle.near",
+          "cleared": "5000000"
+        },
+        {
+          "debtor": "budi.x207-circle.near",
+          "creditor": "dewi.x207-circle.near",
+          "cleared": "2000000"
+        },
+        {
+          "debtor": "andi.x207-circle.near",
+          "creditor": "citra.x207-circle.near",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "citra.x207-circle.near",
+          "creditor": "andi.x207-circle.near",
+          "cleared": "1000000"
+        },
+        {
+          "debtor": "dewi.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "2000000"
+        },
+        {
+          "debtor": "citra.x207-circle.near",
+          "creditor": "budi.x207-circle.near",
+          "cleared": "1"
+        }
+      ],
+      "members": [
+        {
+          "account": "andi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "budi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "citra.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        },
+        {
+          "account": "dewi.x207-circle.near",
+          "stake": "100000000",
+          "limit": "80000000",
+          "bond_locked": "0"
+        }
+      ],
+      "expected": {
+        "cleared_total": "26000001",
+        "charges": [
+          {
+            "account": "andi.x207-circle.near",
+            "stake_cut": "8000",
+            "stake_after": "99992000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "budi.x207-circle.near",
+            "stake_cut": "7000",
+            "stake_after": "99993000",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "citra.x207-circle.near",
+            "stake_cut": "6001",
+            "stake_after": "99993999",
+            "limit_after": "80000000"
+          },
+          {
+            "account": "dewi.x207-circle.near",
+            "stake_cut": "4999",
+            "stake_after": "99995001",
+            "limit_after": "80000000"
+          }
+        ],
+        "clearing_fee_charged": "18200",
+        "solver_fee_charged": "7800"
+      }
+    }
+  ]
+}

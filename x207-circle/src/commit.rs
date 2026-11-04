@@ -642,6 +642,54 @@ mod tests {
         }
     }
 
+    // CT-101: the fees that `commit_epoch` takes from the stake of the debtors, against the golden vector `tests/vectors/fee_charges.json` (written and checked by
+    // `scripts/fee_charges.py`); an indexer repeats the same rule because the log of `commit_epoch` has no event per member for it
+    #[test]
+    fn fee_charges_match_the_golden_vector() {
+        let vector: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vectors/fee_charges.json"))).unwrap();
+        let cases = vector["cases"].as_array().unwrap();
+        assert!(cases.len() >= 6);
+        let num = |v: &Value| -> u128 { v.as_str().unwrap().parse().unwrap() };
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let mut c = circle();
+            let fees = &case["fees"];
+            let e = c.epochs.get_mut(&1).unwrap();
+            e.params.fees.clearing_fee_bps = fees["clearing_fee_bps"].as_u64().unwrap() as u16;
+            e.params.fees.solver_fee_bps = fees["solver_fee_bps"].as_u64().unwrap() as u16;
+            let mut total = 0u128;
+            for m in case["members"].as_array().unwrap() {
+                let id = m["account"].as_str().unwrap();
+                let mut member = member(id);
+                member.stake = num(&m["stake"]);
+                member.limit = num(&m["limit"]);
+                total += member.stake;
+                c.members.insert(acc(id), member);
+                crate::deal::write_u128(&crate::deal::locked_key(&acc(id)), num(&m["bond_locked"]));
+            }
+            c.total_stake = total;
+            let edges: Vec<ClearingEdge> = case["edges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| ClearingEdge { debtor: acc(e["debtor"].as_str().unwrap()), creditor: acc(e["creditor"].as_str().unwrap()), cleared: U128(num(&e["cleared"])) })
+                .collect();
+            let expected = &case["expected"];
+            let cleared_total: u128 = edges.iter().map(|e| e.cleared.0).sum();
+            assert_eq!(cleared_total, num(&expected["cleared_total"]), "{name}");
+            let solver = case["solver"].as_str().map(acc);
+            let (to_reserve, to_solver) = c.charge_fees(1, &solver, cleared_total, &edges);
+            assert_eq!((to_reserve, to_solver), (num(&expected["clearing_fee_charged"]), num(&expected["solver_fee_charged"])), "{name}");
+            for charge in expected["charges"].as_array().unwrap() {
+                let id = acc(charge["account"].as_str().unwrap());
+                let after = c.members.get(&id).unwrap();
+                let was = case["members"].as_array().unwrap().iter().find(|m| m["account"] == charge["account"]).map(|m| num(&m["stake"])).unwrap();
+                assert_eq!((was - after.stake, after.stake, after.limit), (num(&charge["stake_cut"]), num(&charge["stake_after"]), num(&charge["limit_after"])), "{name}: {id}");
+            }
+            assert_eq!(c.total_stake, total - to_reserve - to_solver, "{name}: total_stake");
+        }
+    }
+
     // TC-CT-028-14 (unit side)
     #[test]
     fn anyone_can_commit() {
