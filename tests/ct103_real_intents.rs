@@ -2,7 +2,8 @@
 //! mainnet (`scripts/fetch-intents-wasm.sh`, read only, sha256 checked) runs in near-sandbox as the `intents_id` of the circle, and one residual is paid and claimed through it:
 //!   scraper deposits USDT to Intents (`ft_transfer_call` with its account as the message), pays its residual with `mt_transfer_call` of Intents to the circle (`mt_on_transfer`, `settle`),
 //!   the epoch is finalized, `withdraw_intents_balance` calls the real `ft_withdraw`, and gpu claims its credit in USDT.
-//! Needs `scripts/fetch-intents-wasm.sh` first; without the file the test says so and passes (CI does not fetch from mainnet). `X207_INTENTS_WASM` points to another path.
+//! Needs `scripts/fetch-intents-wasm.sh` first; without the file the test says so and passes on a laptop, but fails when `X207_REQUIRE_INTENTS_WASM=1` (set by the CI of contracts, which fetches
+//! the file first). `X207_INTENTS_WASM` points to another path.
 mod common;
 
 use common::circle::{events, failure_text, Circle, CREDIT};
@@ -73,6 +74,8 @@ async fn mt_balance(f: &Funded, who: &str) -> anyhow::Result<String> {
 #[tokio::test]
 async fn a_residual_is_paid_through_the_real_intents_contract_and_claimed() -> anyhow::Result<()> {
     let Some(wasm) = intents_wasm() else {
+        // CI sets X207_REQUIRE_INTENTS_WASM=1 after `scripts/fetch-intents-wasm.sh`, so a missing file there is a failure and not a pass that proves nothing
+        assert!(std::env::var("X207_REQUIRE_INTENTS_WASM").unwrap_or_default() != "1", "CT-103: X207_REQUIRE_INTENTS_WASM=1 but there is no wasm of intents.near (scripts/fetch-intents-wasm.sh)");
         eprintln!("CT-103: no wasm of intents.near (run scripts/fetch-intents-wasm.sh); the test did not run");
         return Ok(());
     };

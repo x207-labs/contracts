@@ -10,4 +10,6 @@ permissions:
 
 jobs:
   ci:
-    uses: x207-labs/x207/.github/workflows/ci-rust.yml@00d8113d6dd074ff9ecd07cda1d4a53b29d08ec6 # OP-001
+    uses: x207-labs/x207/.github/workflows/ci-rust.yml@a829e583778ed434362c7e2cc4f6dd74f484cb1f # CT-103
+    with:
+      intents-wasm: true

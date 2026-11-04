@@ -106,7 +106,7 @@ scripts/fetch-intents-wasm.sh       # RPC view_code of intents.near, read only; 
 cargo test --test ct103_real_intents
 ```
 
-The wasm is not committed. It is 1,297,551 bytes with sha256 `a1afab98916d9f213746544dcf8e4e6bdb22c0be6bc5dfbd8ea8814c9922b547` (`code_hash` `BtA1BEFNS619KkvXFsgcpQ21Tb5yMm32aaUkn7xNothk`, seen at mainnet block 222990644). Without the file the test prints a note and passes, so CI, which does not fetch from mainnet, is not affected. When Intents is upgraded the script stops on the new hash: read the change, then update the hash in the script and in the test. The contract starts with `new({config: {wnear_id, fees, roles}})`, and the test gives it an account for the fee collector and the super admin.
+The wasm is not committed. It is 1,297,551 bytes with sha256 `a1afab98916d9f213746544dcf8e4e6bdb22c0be6bc5dfbd8ea8814c9922b547` (`code_hash` `BtA1BEFNS619KkvXFsgcpQ21Tb5yMm32aaUkn7xNothk`, seen at mainnet block 222990644). On a laptop, without the file, the test prints a note and passes; the CI of this repository runs `scripts/fetch-intents-wasm.sh` first and sets `X207_REQUIRE_INTENTS_WASM=1`, which turns a missing file into a failure, so a green CI means the circle ran against the real contract. When Intents is upgraded the script stops on the new hash: read the change, then update the hash in the script and in the test. The contract starts with `new({config: {wnear_id, fees, roles}})`, and the test gives it an account for the fee collector and the super admin.
 
 ## Environment variables
 
