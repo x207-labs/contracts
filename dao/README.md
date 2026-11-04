@@ -50,6 +50,14 @@ command, runs it, and confirms any mainnet run.
    node dao/propose-asset-class.mjs --dao x207.sputnik-dao.testnet --contract x207-circle.testnet --signer a.testnet --asset-type near-rpc:access --class B --delivery near_access_key --proofs rpc_access_key,zktls --terms-hash <64 lowercase hex>
    ```
 
+8. Mainnet `set_params` (CT-050): a dry run that reads the chain and prints the proposal (it has no sending mode; it never signs):
+
+   ```bash
+   node dao/mainnet-set-params.mjs --dao <dao>.sputnik-dao.near --contract <circle>.near --signer <member>.near --params-file params.json
+   ```
+
+   It reads `get_owner`, `interface_version`, `get_params`, `get_policy` and `get_last_proposal_id`, shows what changes, checks that the DAO owns the circle, that the new params are the whole `Params` (no key added or dropped), that something changes and that the signer may add a proposal, says how many council votes approve, and prints the three commands (add, vote, read). `--network testnet` runs it against the testnet DAO (`x207v8.sputnikv2.testnet`, circle `x207-v013.testnet`).
+
 Tests of the builders: `node --test dao/`.
 
 Not verified yet: the `act_proposal` arguments (`id`, `action`) follow `sputnikdao2` and may need the `proposal` field of newer DAO versions; the policy shape follows `sputnikdao2` and has not run against the factory wasm.
