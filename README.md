@@ -9,6 +9,51 @@ The contract is the one place where the credit circle is true. It holds the memb
 - **Running now:** release [v0.0.13](https://github.com/x207-labs/contracts/releases/tag/v0.0.13), interface 0.0.13 (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`), as the circle `x207-v013.testnet` on NEAR testnet. No mainnet deploy has been made.
 - **Reproducible build:** the wasm is built in a pinned container, so two builds of one commit give the same bytes. v0.0.13 (commit `8799ebe`, built twice, byte-identical): sha256 `b9327f2b5d64b1180ba76dd619c6091ae57b48964f520a784e366c131e787054`, on-chain `code_hash` `DTw5rUUdJSbWjD361MmBxKW4nm4ETnNkex63mfUCjsjh`.
 
+```mermaid
+sequenceDiagram
+  participant M as Member agent
+  participant S as Any solver
+  participant K as Any keeper
+  participant C as x207-circle
+  M->>C: register_cumulative (voucher, via facilitator)
+  K->>C: close_epoch
+  S->>C: submit_clearing (checked in O(n), best kept)
+  K->>C: commit_epoch
+  M->>C: debtors: ft_transfer_call USDT
+  K->>C: finalize_epoch
+  M->>C: creditors: claim
+```
+
+Member life, as `get_member` reports it:
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending: join
+  pending --> active: stake enough USDT
+  active --> suspended: default at finalize_epoch
+  suspended --> active: reactivated
+  active --> exited: request_exit, then withdraw_stake
+  suspended --> exited: request_exit, then withdraw_stake
+```
+
+Data flow inside the contract:
+
+```mermaid
+flowchart LR
+  AG[Agents] -- "join, stake" --> P1((Members))
+  AG -- "voucher" --> P2((Vouchers))
+  SO[Solver] -- "edges" --> P3((Clearing))
+  P1 --> D1[(Members and stakes)]
+  P2 --> D2[(Pair totals per epoch)]
+  D1 -- "limit" --> P2
+  D2 --> P3
+  P3 --> D3[(Positions)]
+  D3 --> P4((Settlement))
+  D1 -- "covers defaults" --> P4
+  P4 -- "claim" --> AG
+  P1 & P2 & P3 & P4 -- "NEP-297 events" --> EV[Indexer]
+```
+
 | Path | Contents |
 | --- | --- |
 | `x207-circle/src/` | Contract source: `member.rs`, `voucher.rs`, `clearing.rs`, `commit.rs`, `settlement.rs`, `bundle.rs`, `risk.rs`, `params.rs`, `events.rs`, and others |
