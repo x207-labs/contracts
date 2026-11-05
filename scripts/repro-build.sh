@@ -23,7 +23,7 @@ if [ -n "${X207_REPRO_TIMEOUT:-}" ]; then
   elif command -v gtimeout >/dev/null 2>&1; then limit=(gtimeout "$X207_REPRO_TIMEOUT")
   else echo "warning: neither timeout nor gtimeout found (brew install coreutils); running without a time limit" >&2; fi
 fi
-"${limit[@]}" docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
+${limit[@]+"${limit[@]}"} docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
   bash -c 'cargo near build non-reproducible-wasm --locked && chmod -R a+rX target/near'
 cp "$src/target/near/x207_circle.wasm" "$out/x207_circle.wasm"
 cp "$src/target/near/x207_circle_abi.json" "$out/x207_circle_abi.json" 2>/dev/null || true
