@@ -317,3 +317,27 @@ async fn relayer_fee_above_the_cap_is_refused() -> anyhow::Result<()> {
     assert!(Funded::deploy(Some(ok)).await.is_ok());
     Ok(())
 }
+
+// TC-CT-117-08: the owner changes `relayer_fee` with `set_params`: refused above the cap, pending until the next epoch, then in force
+#[tokio::test]
+async fn owner_set_params_changes_relayer_fee_from_the_next_epoch() -> anyhow::Result<()> {
+    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "0");
+    let dao = f.account("dao").await?;
+    let mut params = Funded::params_short();
+    params["relayer_fee"] = json!("1000001");
+    let r = f.circle.call_as(&dao, "set_params", json!({"params": params.clone()})).await?;
+    assert!(failure_text(&r).unwrap_or_default().contains("ERR_PARAM_OUT_OF_RANGE"), "{:?}", failure_text(&r));
+    params["relayer_fee"] = json!("500000");
+    let r = f.circle.call_as(&dao, "set_params", json!({"params": params})).await?;
+    assert!(r.is_success(), "{:?}", failure_text(&r));
+    assert_eq!(f.circle.view("get_pending_params", json!({})).await?["params"]["relayer_fee"], "500000");
+    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "0", "not in force yet");
+    let c = &f.circle;
+    c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
+    let close = c.call_keeper("close_epoch", json!({"epoch": 1})).await?;
+    assert!(close.is_success(), "{:?}", failure_text(&close));
+    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "500000");
+    assert_eq!(f.circle.view("get_pending_params", json!({})).await?, Value::Null);
+    Ok(())
+}

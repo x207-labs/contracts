@@ -32,7 +32,7 @@ Scope: `claim_evm` and `withdraw_stake_evm` take a fee for the relayer (`predece
 - `join_evm`, `request_exit_evm`, `auto_settle` actions pay no fee: the relayer carries their gas. A fee from free stake is postponed to 0.0.17.
 - The fee is a flat amount in token units, not a percentage; the DAO must retune it if the token price moves.
 - Item 6 has no sandbox test with a partial Intents refund.
-- `set_params` of `relayer_fee` through the DAO is covered by unit tests of the pending mechanism, not by a sandbox test with Sputnik.
+- `set_params` of `relayer_fee` is tested in the sandbox with the owner account (cap, pending, in force from the next epoch: `owner_set_params_changes_relayer_fee_from_the_next_epoch`), not through a real Sputnik proposal.
 
 ## Verdict
 
