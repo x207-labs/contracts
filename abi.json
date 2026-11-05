@@ -200,6 +200,12 @@
               }
             },
             {
+              "name": "max_fee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
               "name": "signature",
               "type_schema": {
                 "type": "string"
@@ -1665,6 +1671,62 @@
         "modifiers": [
           "private"
         ],
+        "name": "on_claim_resolved_fee",
+        "params": {
+          "args": [
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "fee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "relayer",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "destination",
+              "type_schema": {
+                "$ref": "#/definitions/ClaimDestination"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
         "name": "on_escrow_resolved",
         "params": {
           "args": [
@@ -1680,6 +1742,30 @@
               "name": "step",
               "type_schema": {
                 "$ref": "#/definitions/EscrowStep"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "name": "on_fee_refund_resolved",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
               }
             }
           ],
@@ -1756,6 +1842,54 @@
             },
             {
               "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "boolean"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "name": "on_withdraw_resolved_fee",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "amount",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "fee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "relayer",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "receiver",
               "type_schema": {
                 "type": "string"
               }
@@ -2364,6 +2498,12 @@
                 "format": "uint64",
                 "minimum": 0.0,
                 "type": "integer"
+              }
+            },
+            {
+              "name": "max_fee",
+              "type_schema": {
+                "type": "string"
               }
             },
             {
@@ -3433,6 +3573,10 @@
               "format": "uint16",
               "minimum": 0.0,
               "type": "integer"
+            },
+            "relayer_fee": {
+              "default": "0",
+              "type": "string"
             }
           },
           "required": [
@@ -4209,12 +4353,32 @@
         "outstanding_debt"
       ],
       "name": "auto_settled"
+    },
+    {
+      "fields": [
+        "account_id",
+        "relayer",
+        "action",
+        "epoch",
+        "amount"
+      ],
+      "name": "relayer_fee_paid"
+    },
+    {
+      "fields": [
+        "account_id",
+        "relayer",
+        "action",
+        "epoch",
+        "amount"
+      ],
+      "name": "relayer_fee_failed"
     }
   ],
-  "interface_version": "0.0.15",
+  "interface_version": "0.0.16",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.15"
+    "version": "0.0.16"
   },
   "schema_version": "0.4.0"
 }

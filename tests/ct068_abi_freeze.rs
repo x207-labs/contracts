@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 52] = [
+const CHANGE_METHODS: [&str; 55] = [
     "new",
     "join",
     "ft_on_transfer",
@@ -83,6 +83,10 @@ const CHANGE_METHODS: [&str; 52] = [
     // 0.0.15: CT-108 (settlement from the stake, opt-in)
     "set_auto_settle",
     "set_auto_settle_evm",
+    // 0.0.16: CT-117 (relayer fee: the callbacks of the fee path)
+    "on_claim_resolved_fee",
+    "on_withdraw_resolved_fee",
+    "on_fee_refund_resolved",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
@@ -132,7 +136,7 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 91] = [
+const SIGNATURES: [&str; 94] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
@@ -141,7 +145,7 @@ const SIGNATURES: [&str; 91] = [
     "cancel_escrow(grant_id:integer:uint64)->Promise []",
     "cancel_freeze(account_id:string)-> []",
     "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
-    "claim_evm(member:string,epoch:integer:uint64,receiver:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)->Promise []",
+    "claim_evm(member:string,epoch:integer:uint64,receiver:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->Promise []",
     "claim_solver_fee()->Promise [payable]",
     "close_epoch(epoch:integer:uint64)-> []",
     "commit_bundle(bundle:BundleInput,signatures:array<BundleSignature>)->integer:uint64 []",
@@ -194,10 +198,13 @@ const SIGNATURES: [&str; 91] = [
     "obligation(epoch:integer:uint64,debtor:string,creditor:string)->ObligationView|null []",
     "offer_grant(input:GrantInput)->integer:uint64 []",
     "on_claim_resolved(epoch:integer:uint64,account_id:string,amount:string,destination:ClaimDestination)->string [private]",
+    "on_claim_resolved_fee(epoch:integer:uint64,account_id:string,amount:string,fee:string,relayer:string,destination:ClaimDestination)->string [private]",
     "on_escrow_resolved(grant_id:integer:uint64,step:EscrowStep)-> [private]",
+    "on_fee_refund_resolved(account_id:string,amount:string)-> [private]",
     "on_intents_withdrawn(amount:string)->string [private]",
     "on_solver_fee_resolved(account_id:string,amount:string)->string [private]",
     "on_withdraw_resolved(account_id:string,amount:string)->boolean [private]",
+    "on_withdraw_resolved_fee(account_id:string,amount:string,fee:string,relayer:string,receiver:string)->boolean [private]",
     "outstanding_debt(account_id:string)->string []",
     "post_intent(intent_hash:string)-> []",
     "propose_freeze(account_id:string,reason_hash:string|null)-> []",
@@ -223,10 +230,10 @@ const SIGNATURES: [&str; 91] = [
     "unfreeze_member(account_id:string)-> []",
     "withdraw_intents_balance()->Promise []",
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
-    "withdraw_stake_evm(member:string,receiver:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)->PromiseOrValueBoolean []",
+    "withdraw_stake_evm(member:string,receiver:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
 ];
 
-const EVENTS: [&str; 48] = [
+const EVENTS: [&str; 50] = [
     "member_joined",
     "stake_added",
     "voucher_registered",
@@ -275,6 +282,8 @@ const EVENTS: [&str; 48] = [
     "intent_removed",
     "auto_settle_set",
     "auto_settled",
+    "relayer_fee_paid",
+    "relayer_fee_failed",
 ];
 
 fn strip_descriptions(value: &mut Value) {
