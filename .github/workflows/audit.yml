@@ -1,0 +1,36 @@
+# CT-121: `cargo audit` on Cargo.lock. NON-BLOCKING for now (continue-on-error) so that the result is visible without stopping a merge.
+# Known advisories are listed with a reason in .cargo/audit.toml; the analysis is in docs/dependency-audit.md.
+name: Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # new advisories appear without a change in the repository
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Non-blocking: a red step shows in the run, the job and the workflow stay green. Remove this line to make it blocking.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-0.22.2-${{ runner.os }}
+      - name: Install cargo-audit
+        # `+stable`: the repository pins its own toolchain in rust-toolchain.toml, which a tool install does not need.
+        run: |
+          if ! cargo audit --version 2>/dev/null | grep -qF "0.22.2"; then
+            cargo +stable install cargo-audit --version 0.22.2 --locked --force
+          fi
+      - name: Audit Cargo.lock
+        # The advisory database is fetched fresh on every run. Exit code 1 = a vulnerability that is not in .cargo/audit.toml.
+        run: cargo audit

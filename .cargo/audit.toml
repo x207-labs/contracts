@@ -1,0 +1,19 @@
+# cargo-audit configuration (CT-121). Every entry is a known advisory with a reason; the analysis is in docs/dependency-audit.md.
+# A new advisory is not on this list, so it shows up in the audit job.
+[advisories]
+ignore = [
+    # rustls / rustls-webpki 0.23.43 / 0.103.13: only in the test tooling (near-workspaces -> reqwest -> hyper-rustls), not in the wasm.
+    # The patched rustls 0.23.46 needs aws-lc-rs ^1.18, but near-crypto 0.37.4 (near-sdk 5.29.1) pins aws-lc-rs =1.16.2. Needs a new near-sdk.
+    "RUSTSEC-2026-0346",
+    "RUSTSEC-2026-0285",
+    "RUSTSEC-2026-0348",
+    "RUSTSEC-2026-0349",
+    "RUSTSEC-2026-0382",
+    # crypto-bigint 0.5.5: test tooling only (near-crypto -> elliptic-curve); the patched 0.7.6 is a major jump that near-crypto must make.
+    "RUSTSEC-2026-0387",
+    # wee_alloc 0.4.5: unmaintained, the default allocator of near-sdk (the only audited package inside the wasm); not a vulnerability.
+    "RUSTSEC-2022-0054",
+    # unsafe-libyaml 0.2.11 (serde_yaml in near-parameters) and lru 0.16.4 (near-vm-runner): test tooling only, no patched version to move to.
+    "RUSTSEC-2024-0449",
+    "RUSTSEC-2026-0253",
+]
