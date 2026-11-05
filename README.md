@@ -6,7 +6,7 @@ The `x207-circle` smart contract (Rust, NEAR) and the Sputnik DAO scripts of [x2
 
 The contract is the one place where the circle is true. It holds the members and their stakes, records the signed vouchers per pair, accepts a clearing proposal from any solver after checking it on chain, applies the best one, covers a default from the debtor's stake, and lets creditors claim USDT. Everything else in x207 (the [SDK](https://github.com/x207-labs/sdk), the [indexer and read API](https://github.com/x207-labs/backend), the [solver](https://github.com/x207-labs/solver), the [dashboard](https://github.com/x207-labs/frontend)) reads or calls it.
 
-- **Running now:** release [v0.0.13](https://github.com/x207-labs/contracts/releases/tag/v0.0.13), interface 0.0.13 (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`), as the circle `x207-v013.testnet` on NEAR testnet. No mainnet deploy has been made.
+- **Running now:** release [v0.0.13](https://github.com/x207-labs/contracts/releases/tag/v0.0.13), interface 0.0.13 (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`), as the circle `x207-v013.testnet` on NEAR testnet; tags v0.0.14 (EVM agents) and v0.0.15 (auto-settle from stake) run as `x207-v014.testnet` and `x207-v015.testnet`. No mainnet deploy has been made.
 - **Reproducible build:** the wasm is built in a pinned container, so two builds of one commit give the same bytes. v0.0.13 (commit `8799ebe`, built twice, byte-identical): sha256 `b9327f2b5d64b1180ba76dd619c6091ae57b48964f520a784e366c131e787054`, on-chain `code_hash` `DTw5rUUdJSbWjD361MmBxKW4nm4ETnNkex63mfUCjsjh`.
 
 ```mermaid
@@ -78,6 +78,16 @@ Check a release, and optionally a deployed account (needs Docker for the reprodu
 scripts/repro-build.sh <git-ref> <outdir>               # prints the sha256 of x207_circle.wasm
 scripts/verify-release.sh v0.0.13 [account] [rpc-url]
 ```
+
+Reproduce a release from a clean clone (CT-112; needs only git, Docker and `shasum`; the first run pulls the pinned `linux/amd64` image, and on Apple Silicon the build runs under emulation, about 4 minutes per tag):
+
+```bash
+git clone https://github.com/x207-labs/contracts.git && cd contracts
+scripts/repro-build.sh v0.0.15 out15     # last line: f832e53f01bf6b0739efb54bf0977d70544dd9bcece2234abd3e18525b4900de  out15/x207_circle.wasm
+scripts/repro-build.sh v0.0.14 out14     # last line: 7d731dfb15db44aa3a1ca95c28616a6e2faecbf11b87de538940991da33d39f9  out14/x207_circle.wasm
+```
+
+The first number is the `code_hash` of `x207-v015.testnet` and the second that of `x207-v014.testnet` (as sha256; the chain shows it in base58, `Hhs82yW5iJD2QH4juP6Ud5u7ApHGhcw8Zo5xCK1hxmoj` and `9ShmoHDuE6QT3AAj6jYdW2Wo6pr53h5JFfs8ea7pYg6L`). Both matched on a clean clone on 2026-11-05. Set `X207_REPRO_TIMEOUT=<seconds>` to limit the build (uses `timeout` or `gtimeout`; without either it runs unlimited and warns).
 
 What the check proves: [docs/verify-release.md](docs/verify-release.md).
 
