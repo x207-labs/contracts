@@ -92,9 +92,14 @@ struct World {
 impl World {
     /// `exit`: the member asks to exit (nonce 0) before the epoch closes.
     async fn finalized(exit: bool) -> anyhow::Result<World> {
+        Self::finalized_on(exit, false).await
+    }
+
+    /// `intents`: the circle is deployed with the `mock_intents` receiver as `intents_id`.
+    async fn finalized_on(exit: bool, intents: bool) -> anyhow::Result<World> {
         let mut params = Funded::params_short();
         params["relayer_fee"] = json!(FEE.to_string());
-        let mut f = Funded::deploy(Some(params)).await?;
+        let mut f = if intents { Funded::deploy_with_intents(Some(params)).await? } else { Funded::deploy(Some(params)).await? };
         let contract = f.circle.contract.id().to_string();
         let secret = SecretKey::from_slice(&[9u8; 32])?;
         let member = address(&secret);
@@ -165,7 +170,10 @@ impl World {
     async fn claim_evm(&mut self, max_fee: u128, deadline: Option<u64>) -> anyhow::Result<ExecutionFinalResult> {
         let nonce = self.take_nonce();
         let deadline = deadline.unwrap_or(self.deadline);
-        let recv = self.recv.id().to_string();
+        let recv = match &self.f.intents {
+            Some(i) => i.id().to_string(),
+            None => self.recv.id().to_string(),
+        };
         let sig = action_sig(&self.secret, &self.contract, &self.member, "claim", 1, &recv, "", nonce, deadline, max_fee);
         Ok(self
             .relayer
@@ -315,6 +323,24 @@ async fn relayer_fee_above_the_cap_is_refused() -> anyhow::Result<()> {
     let mut ok = Funded::params_short();
     ok["relayer_fee"] = json!("1000000");
     assert!(Funded::deploy(Some(ok)).await.is_ok());
+    Ok(())
+}
+
+// TC-CT-117-09: claim to Intents with a fee; Intents hands 5 credit back: fee paid, 14.75 kept, 5 returns to the member's claimable
+#[tokio::test]
+async fn intents_partial_refund_with_fee() -> anyhow::Result<()> {
+    let mut w = World::finalized_on(false, true).await?;
+    let intents = w.f.intents.clone().unwrap();
+    intents.call("set_mode").args_json(json!({"mode": "refund", "refund": (5 * CREDIT).to_string()})).transact().await?.into_result()?;
+    let relayer_before = w.usdt(&w.relayer).await?;
+    let r = w.claim_evm(FEE, None).await?;
+    assert!(r.is_success(), "claim_evm: {:?}", failure_text(&r));
+    assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE, "fee paid");
+    assert_eq!(w.f.balance(&w.f.usdt, intents.id()).await?, 20 * CREDIT - FEE - 5 * CREDIT, "Intents keeps payout minus refund");
+    let p = w.position().await?;
+    assert_eq!((p["status"].as_str(), p["amount"].as_str()), (Some("claimable"), Some((5 * CREDIT).to_string().as_str())), "{p}");
+    assert!(has_event(&r, "relayer_fee_paid") && has_event(&r, "residual_claim_failed"), "{:?}", r.logs());
+    w.f.assert_d6().await?;
     Ok(())
 }
 
