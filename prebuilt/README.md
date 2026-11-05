@@ -12,9 +12,11 @@
 
 - sha256: `743109cbf74c266c75b5416f788ed10aad0233ad74d0211bf3daa9c39c8c2a87` (base58 `8pZfS6mGmJWJxMtPgVVVVLET6uMyobsVunmS8wTNkDGi`). It is the code of `x207-v014.testnet`.
 - Not a reproducible build; the release wasm (reproducible) comes with the tag.
+- CT-111: `scripts/repro-build.sh 69b129f` (commit of CT-106) gives sha256 `7d731dfb15db44aa3a1ca95c28616a6e2faecbf11b87de538940991da33d39f9` (709,266 bytes), which differs from the line above. Cause: the prebuilt file holds 27 absolute paths of the build host (`/Users/<name>/.cargo/...`), the container build holds `/home/near/.cargo/...`; same `Cargo.lock`, same toolchain 1.99.1. `x207-v014.testnet` keeps the prebuilt code.
 
 # Circle 0.0.15 (CT-108)
 
 `x207_circle-0.0.15.wasm` is the `cargo near build non-reproducible-wasm` build at interface 0.0.15 (opt-in auto-settle from stake).
 
 - sha256: `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` (base58 `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5`). It is the code of `x207-v015.testnet` (deploy tx `Ex6CjaGH1XgJfRD19KGpFftEapBNqszszcFPnf3roYy9`).
+- CT-111: the reproducible build of the same commit (`scripts/repro-build.sh HEAD`) gives sha256 `f832e53f01bf6b0739efb54bf0977d70544dd9bcece2234abd3e18525b4900de` (721,250 bytes), which differs from the line above for the same reason as 0.0.14 (build-host paths in the prebuilt file, `/Users/<name>/.cargo` against `/home/near/.cargo`). It becomes the release hash; the prebuilt file is replaced after the redeploy of `x207-v015.testnet`.
