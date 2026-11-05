@@ -4499,8 +4499,10 @@ dependencies = [
  "near-sdk",
  "near-workspaces",
  "proptest",
+ "secp256k1",
  "serde_json",
  "sha2 0.10.9",
+ "sha3 0.10.9",
  "tokio",
 ]
 

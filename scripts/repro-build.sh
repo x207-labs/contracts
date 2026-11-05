@@ -16,7 +16,14 @@ trap 'rm -rf "$src" 2>/dev/null || true' EXIT
 git archive "$ref" | tar -x -C "$src"
 chmod -R a+rwX "$src"
 mkdir -p "$out"
-docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
+# CT-111: optional time limit (X207_REPRO_TIMEOUT seconds, default none). macOS has no `timeout`: use `gtimeout` (brew install coreutils), else run without a limit.
+limit=()
+if [ -n "${X207_REPRO_TIMEOUT:-}" ]; then
+  if command -v timeout >/dev/null 2>&1; then limit=(timeout "$X207_REPRO_TIMEOUT")
+  elif command -v gtimeout >/dev/null 2>&1; then limit=(gtimeout "$X207_REPRO_TIMEOUT")
+  else echo "warning: neither timeout nor gtimeout found (brew install coreutils); running without a time limit" >&2; fi
+fi
+"${limit[@]}" docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
   bash -c 'cargo near build non-reproducible-wasm --locked && chmod -R a+rX target/near'
 cp "$src/target/near/x207_circle.wasm" "$out/x207_circle.wasm"
 cp "$src/target/near/x207_circle_abi.json" "$out/x207_circle_abi.json" 2>/dev/null || true
