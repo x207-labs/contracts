@@ -365,10 +365,16 @@ impl X207Circle {
             let mut mine = signatures.iter().filter(|s| &s.account_id == who);
             let signature = mine.next();
             require!(signature.is_some() && mine.next().is_none(), format!("ERR_BUNDLE_SIGNATURES: {who} must sign exactly once"));
-            let pubkey = self.members.get(who).expect("participants are members").pubkey_voucher.clone();
-            let ok = parse_signature(&signature.expect("checked").signature)
-                .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
-                .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &signing_hash, &pk));
+            let signature = signature.expect("checked").signature.as_str();
+            let ok = if crate::evm::is_evm_member(who) {
+                // CT-104: an EVM participant signs the EIP-712 `Bundle`
+                crate::evm::verify_bundle(who, circle.as_str(), &message, &hex(&terms_hash), signature)
+            } else {
+                let pubkey = self.members.get(who).expect("participants are members").pubkey_voucher.clone();
+                parse_signature(signature)
+                    .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
+                    .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &signing_hash, &pk))
+            };
             require!(ok, format!("ERR_BUNDLE_SIGNATURES: bad signature of {who}"));
         }
 

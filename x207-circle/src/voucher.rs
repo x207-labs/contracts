@@ -188,10 +188,15 @@ impl X207Circle {
             require!(delta <= headroom, format!("ERR_INSUFFICIENT_CREDIT: delta {delta} headroom {headroom}"));
         }
         // 12
-        let verified = parse_signature(&signature)
-            .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
-            .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &voucher_signing_hash(&voucher), &pk));
-        require!(verified, "ERR_BAD_SIGNATURE: ed25519 verification failed");
+        if crate::evm::is_evm_member(&voucher.payer) {
+            // CT-104: an EVM payer signs EIP-712; the recovered address must be the payer id
+            require!(crate::evm::verify_voucher(&voucher, &signature), "ERR_BAD_EVM_SIG: eip712 verification failed");
+        } else {
+            let verified = parse_signature(&signature)
+                .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
+                .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &voucher_signing_hash(&voucher), &pk));
+            require!(verified, "ERR_BAD_SIGNATURE: ed25519 verification failed");
+        }
 
         // State change.
         if let (Some(bundle_id), Some(index)) = (bundle, leg_index) {

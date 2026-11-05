@@ -18,7 +18,7 @@ fn build_produces_wasm_and_abi_with_functions() {
 #[test]
 fn near_sdk_is_pinned_exact() {
     let manifest = std::fs::read_to_string("Cargo.toml").unwrap();
-    assert!(manifest.contains("near-sdk = \"=5.29.1\""));
+    assert!(manifest.contains("near-sdk = \"=5.29.1\"") || manifest.contains("near-sdk = { version = \"=5.29.1\", features = [\"unstable\"] }"));
     let lock = std::fs::read_to_string("Cargo.lock").unwrap();
     assert!(lock.contains("name = \"near-sdk\"\nversion = \"5.29.1\""));
 }

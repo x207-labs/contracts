@@ -4492,7 +4492,7 @@ dependencies = [
 
 [[package]]
 name = "x207-circle"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "ed25519-dalek",

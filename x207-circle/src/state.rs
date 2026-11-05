@@ -75,6 +75,8 @@ pub enum StorageKey {
     AssetContracts = b'w',
     /// D8 side map (CT-094): `bundle_id -> Deal`.
     Deals = b'd',
+    /// D12 sidecar (CT-104): `AccountId -> EvmSigner` of the members that sign with an EVM key.
+    EvmSigners = b'v',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).

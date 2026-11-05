@@ -366,10 +366,17 @@ impl X207Circle {
     #[payable]
     pub fn claim(&mut self, epoch: EpochId, destination: ClaimDestination) -> Promise {
         assert_one_yocto();
+        let account = env::predecessor_account_id();
+        self.claim_for(account, epoch, destination, None)
+    }
+}
+
+impl X207Circle {
+    /// Shared by `claim` and `claim_evm`: `account` holds the position; `receiver` (when set) gets a plain `ft_transfer`.
+    pub(crate) fn claim_for(&mut self, account: AccountId, epoch: EpochId, destination: ClaimDestination, receiver: Option<AccountId>) -> Promise {
         if env::prepaid_gas() < CLAIM_MIN_GAS {
             env::panic_str(&format!("ERR_GAS_TOO_LOW: need {} TGas", CLAIM_MIN_GAS.as_tgas()));
         }
-        let account = env::predecessor_account_id();
         let e = self.epoch_or_panic(epoch);
         if e.phase != EpochPhase::Finalized {
             env::panic_str(&format!("ERR_NOT_FINALIZED: epoch {epoch}"));
@@ -406,7 +413,7 @@ impl X207Circle {
         let transfer = match destination {
             ClaimDestination::Near => Promise::new(usdt).function_call(
                 "ft_transfer".to_string(),
-                json!({"receiver_id": account, "amount": U128(amount), "memo": null}).to_string().into_bytes(),
+                json!({"receiver_id": receiver.unwrap_or_else(|| account.clone()), "amount": U128(amount), "memo": null}).to_string().into_bytes(),
                 NearToken::from_yoctonear(1),
                 FT_TRANSFER_GAS,
             ),
@@ -426,7 +433,10 @@ impl X207Circle {
             destination,
         ))
     }
+}
 
+#[near]
+impl X207Circle {
     /// Callback of the claim transfer (spec 4.6). Never panics. Returns the amount that arrived.
     #[private]
     pub fn on_claim_resolved(

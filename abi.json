@@ -160,6 +160,63 @@
       },
       {
         "kind": "call",
+        "name": "claim_evm",
+        "params": {
+          "args": [
+            {
+              "name": "member",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "epoch",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "receiver",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "nonce",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "deadline",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "modifiers": [
           "payable"
         ],
@@ -310,6 +367,34 @@
             }
           ],
           "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "view",
+        "name": "evm_signer",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/EvmSignerView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       {
@@ -963,6 +1048,50 @@
             },
             {
               "name": "terms_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/MemberView"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "name": "join_evm",
+        "params": {
+          "args": [
+            {
+              "name": "address",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "terms_hash",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "deadline",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "signature",
               "type_schema": {
                 "type": "string"
               }
@@ -1841,6 +1970,43 @@
       },
       {
         "kind": "call",
+        "name": "request_exit_evm",
+        "params": {
+          "args": [
+            {
+              "name": "member",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "nonce",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "deadline",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "revoke_grant",
         "params": {
           "args": [
@@ -2078,6 +2244,55 @@
           "payable"
         ],
         "name": "withdraw_stake",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueBoolean"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "withdraw_stake_evm",
+        "params": {
+          "args": [
+            {
+              "name": "member",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "receiver",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "nonce",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "deadline",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
         "result": {
           "serialization_type": "json",
           "type_schema": {
@@ -2727,6 +2942,25 @@
             "nft_contract",
             "state",
             "token_id"
+          ],
+          "type": "object"
+        },
+        "EvmSignerView": {
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "nonce": {
+              "type": "string"
+            },
+            "sponsor": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "address",
+            "nonce",
+            "sponsor"
           ],
           "type": "object"
         },
@@ -3876,10 +4110,10 @@
       "name": "intent_removed"
     }
   ],
-  "interface_version": "0.0.13",
+  "interface_version": "0.0.14",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.13"
+    "version": "0.0.14"
   },
   "schema_version": "0.4.0"
 }

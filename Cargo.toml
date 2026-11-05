@@ -7,7 +7,7 @@ members = ["probes/ct003_voucher_gas", "probes/ct004_clearing_gas", "probes/mock
 
 [package]
 name = "x207-circle"
-version = "0.0.13"
+version = "0.0.14"
 edition = "2021"
 license = "Apache-2.0"
 description = "x207 mutual-credit circle contract"
@@ -25,7 +25,7 @@ path = "x207-circle/src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-near-sdk = "=5.29.1"
+near-sdk = { version = "=5.29.1", features = ["unstable"] }
 
 [dev-dependencies]
 near-sdk = { version = "=5.29.1", features = ["unit-testing"] }

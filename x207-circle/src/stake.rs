@@ -198,6 +198,51 @@ impl X207Circle {
     pub fn request_exit(&mut self) {
         assert_one_yocto();
         let account = env::predecessor_account_id();
+        self.request_exit_for(account);
+    }
+
+    /// Pays the stake back once the exit epoch is `finalized` and no debt remains. Order of checks:
+    /// `ERR_NOT_MEMBER`, `ERR_MEMBER_EXITED`, `ERR_EXIT_NOT_READY` (no request), `ERR_WITHDRAW_IN_FLIGHT`,
+    /// `ERR_EXIT_NOT_READY` (epoch not final), `ERR_HAS_DUE`. A stake of 0 exits at once.
+    #[payable]
+    pub fn withdraw_stake(&mut self) -> PromiseOrValue<bool> {
+        assert_one_yocto();
+        let account = env::predecessor_account_id();
+        self.withdraw_stake_for(account.clone(), account)
+    }
+
+    /// Callback of the exit transfer. Never panics. Success: `exited`. Failure: the stake and the
+    /// limit come back (the limit as `compute_limit` of the restored stake) and the member may retry.
+    #[private]
+    pub fn on_withdraw_resolved(&mut self, account_id: AccountId, amount: U128) -> bool {
+        let sent = amount.0;
+        let ok = env::promise_result_checked(0, 64).is_ok();
+        let epoch_params = self.epochs.get(&self.current_epoch).map(|e| e.params.clone());
+        let Some(member) = self.members.get_mut(&account_id) else { return false };
+        if !member.withdraw_pending {
+            return false;
+        }
+        member.withdraw_pending = false;
+        if ok {
+            member.status = MemberStatus::Exited;
+            self.d6_in_flight_out(sent);
+            crate::evm::refund_sponsor(&account_id);
+            StakeWithdrawn { account_id, amount }.emit();
+            return true;
+        }
+        member.stake = sent;
+        if let (MemberStatus::Active, Some(params)) = (member.status, epoch_params) {
+            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account_id);
+        }
+        self.d6_in_flight_to_stake(sent);
+        StakeWithdrawFailed { account_id, amount }.emit();
+        false
+    }
+}
+
+impl X207Circle {
+    /// Body of `request_exit`, shared with `request_exit_evm`.
+    pub(crate) fn request_exit_for(&mut self, account: AccountId) {
         let epoch = self.current_epoch;
         crate::deal::assert_no_bond(&account);
         let Some(member) = self.members.get_mut(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
@@ -208,13 +253,8 @@ impl X207Circle {
         ExitRequested { account_id: account, epoch }.emit();
     }
 
-    /// Pays the stake back once the exit epoch is `finalized` and no debt remains. Order of checks:
-    /// `ERR_NOT_MEMBER`, `ERR_MEMBER_EXITED`, `ERR_EXIT_NOT_READY` (no request), `ERR_WITHDRAW_IN_FLIGHT`,
-    /// `ERR_EXIT_NOT_READY` (epoch not final), `ERR_HAS_DUE`. A stake of 0 exits at once.
-    #[payable]
-    pub fn withdraw_stake(&mut self) -> PromiseOrValue<bool> {
-        assert_one_yocto();
-        let account = env::predecessor_account_id();
+    /// Body of `withdraw_stake`, shared with `withdraw_stake_evm`; the stake goes to `receiver`.
+    pub(crate) fn withdraw_stake_for(&mut self, account: AccountId, receiver: AccountId) -> PromiseOrValue<bool> {
         crate::deal::assert_no_bond(&account);
         let Some(member) = self.members.get(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
         if member.status == MemberStatus::Exited {
@@ -239,7 +279,8 @@ impl X207Circle {
         if amount == 0 {
             member.status = MemberStatus::Exited;
             member.limit = 0;
-            StakeWithdrawn { account_id: account, amount: U128(0) }.emit();
+            StakeWithdrawn { account_id: account.clone(), amount: U128(0) }.emit();
+            crate::evm::refund_sponsor(&account);
             return PromiseOrValue::Value(true);
         }
         member.stake = 0;
@@ -248,40 +289,13 @@ impl X207Circle {
         self.d6_stake_to_in_flight(amount);
         let transfer = Promise::new(self.usdt_token_id.clone()).function_call(
             "ft_transfer".to_string(),
-            json!({"receiver_id": account, "amount": U128(amount), "memo": null}).to_string().into_bytes(),
+            json!({"receiver_id": receiver, "amount": U128(amount), "memo": null}).to_string().into_bytes(),
             NearToken::from_yoctonear(1),
             WITHDRAW_TRANSFER_GAS,
         );
         PromiseOrValue::Promise(transfer.then(
             Self::ext(env::current_account_id()).with_static_gas(WITHDRAW_CALLBACK_GAS).on_withdraw_resolved(account, U128(amount)),
         ))
-    }
-
-    /// Callback of the exit transfer. Never panics. Success: `exited`. Failure: the stake and the
-    /// limit come back (the limit as `compute_limit` of the restored stake) and the member may retry.
-    #[private]
-    pub fn on_withdraw_resolved(&mut self, account_id: AccountId, amount: U128) -> bool {
-        let sent = amount.0;
-        let ok = env::promise_result_checked(0, 64).is_ok();
-        let epoch_params = self.epochs.get(&self.current_epoch).map(|e| e.params.clone());
-        let Some(member) = self.members.get_mut(&account_id) else { return false };
-        if !member.withdraw_pending {
-            return false;
-        }
-        member.withdraw_pending = false;
-        if ok {
-            member.status = MemberStatus::Exited;
-            self.d6_in_flight_out(sent);
-            StakeWithdrawn { account_id, amount }.emit();
-            return true;
-        }
-        member.stake = sent;
-        if let (MemberStatus::Active, Some(params)) = (member.status, epoch_params) {
-            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account_id);
-        }
-        self.d6_in_flight_to_stake(sent);
-        StakeWithdrawFailed { account_id, amount }.emit();
-        false
     }
 }
 

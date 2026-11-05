@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 46] = [
+const CHANGE_METHODS: [&str; 50] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -43,21 +43,23 @@ const CHANGE_METHODS: [&str; 46] = [
     "set_asset_contracts",
     // 0.0.12: CT-094 (bond with an arbiter)
     "confirm_deal", "dispute_deal", "rule_deal", "settle_deal",
+    // 0.0.14: CT-104 and CT-105 (EVM agents)
+    "join_evm", "claim_evm", "request_exit_evm", "withdraw_stake_evm",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 37] = [
+const VIEWS: [&str; 38] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
     "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked", "get_proposal",
+    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked", "get_proposal", "evm_signer",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 83] = [
+const SIGNATURES: [&str; 88] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
@@ -66,6 +68,7 @@ const SIGNATURES: [&str; 83] = [
     "cancel_escrow(grant_id:integer:uint64)->Promise []",
     "cancel_freeze(account_id:string)-> []",
     "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
+    "claim_evm(member:string,epoch:integer:uint64,receiver:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)->Promise []",
     "claim_solver_fee()->Promise [payable]",
     "close_epoch(epoch:integer:uint64)-> []",
     "commit_bundle(bundle:BundleInput,signatures:array<BundleSignature>)->integer:uint64 []",
@@ -73,6 +76,7 @@ const SIGNATURES: [&str; 83] = [
     "complete_escrow(grant_id:integer:uint64,voucher:Voucher,signature:string)->Promise []",
     "confirm_deal(bundle_id:integer:uint64)-> []",
     "dispute_deal(bundle_id:integer:uint64,evidence_hash:string)-> []",
+    "evm_signer(account_id:string)->EvmSignerView|null []",
     "finalize_epoch(epoch:integer:uint64)-> []",
     "ft_on_transfer(sender_id:string,amount:string,msg:string)->PromiseOrValueString []",
     "get_asset_class(asset_type:string)->AssetClassEntry|null []",
@@ -100,6 +104,7 @@ const SIGNATURES: [&str; 83] = [
     "interface_version()->string []",
     "is_frozen(account_id:string)->boolean []",
     "join(circle_id:string,pubkey_voucher:string,terms_hash:string)->MemberView [payable]",
+    "join_evm(address:string,terms_hash:string,deadline:integer:uint64,signature:string)->MemberView [payable]",
     "last_seq(payer:string,payee:string,epoch:integer:uint64)->integer:uint64 []",
     "limit(account_id:string)->string []",
     "list_asset_classes(from_index:integer:uint32,limit:integer:uint32)->array<AssetClassEntry> []",
@@ -129,6 +134,7 @@ const SIGNATURES: [&str; 83] = [
     "register_voucher(voucher:Voucher,signature:string)->string []",
     "remove_intent(intent_hash:string)-> []",
     "request_exit()-> [payable]",
+    "request_exit_evm(member:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)-> []",
     "revoke_grant(grant_id:integer:uint64,reason:RevokeReason)-> []",
     "rule_deal(bundle_id:integer:uint64,verdict:Verdict)-> []",
     "set_asset_class(asset_type:string,entry:AssetClassEntry)-> []",
@@ -141,6 +147,7 @@ const SIGNATURES: [&str; 83] = [
     "unfreeze_member(account_id:string)-> []",
     "withdraw_intents_balance()->Promise []",
     "withdraw_stake()->PromiseOrValueBoolean [payable]",
+    "withdraw_stake_evm(member:string,receiver:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)->PromiseOrValueBoolean []",
 ];
 
 const EVENTS: [&str; 46] = [
