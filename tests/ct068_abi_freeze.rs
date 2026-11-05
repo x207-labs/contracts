@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 55] = [
+const CHANGE_METHODS: [&str; 56] = [
     "new",
     "join",
     "ft_on_transfer",
@@ -87,6 +87,8 @@ const CHANGE_METHODS: [&str; 55] = [
     "on_claim_resolved_fee",
     "on_withdraw_resolved_fee",
     "on_fee_refund_resolved",
+    // 0.0.17: CT-118 (relayer fee of request_exit_evm and set_auto_settle_evm)
+    "on_action_fee_resolved",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
@@ -136,7 +138,7 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 94] = [
+const SIGNATURES: [&str; 95] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
@@ -182,7 +184,7 @@ const SIGNATURES: [&str; 94] = [
     "is_auto_settle(account_id:string)->boolean []",
     "is_frozen(account_id:string)->boolean []",
     "join(circle_id:string,pubkey_voucher:string,terms_hash:string)->MemberView [payable]",
-    "join_evm(address:string,terms_hash:string,deadline:integer:uint64,signature:string)->MemberView [payable]",
+    "join_evm(address:string,terms_hash:string,deadline:integer:uint64,signature:string,max_fee:string|null)->MemberView [payable]",
     "last_seq(payer:string,payee:string,epoch:integer:uint64)->integer:uint64 []",
     "limit(account_id:string)->string []",
     "list_asset_classes(from_index:integer:uint32,limit:integer:uint32)->array<AssetClassEntry> []",
@@ -197,6 +199,7 @@ const SIGNATURES: [&str; 94] = [
     "nft_on_transfer(sender_id:string,previous_owner_id:string,token_id:string,msg:string)->PromiseOrValueBoolean []",
     "obligation(epoch:integer:uint64,debtor:string,creditor:string)->ObligationView|null []",
     "offer_grant(input:GrantInput)->integer:uint64 []",
+    "on_action_fee_resolved(account_id:string,fee:string,limit_before:string,relayer:string,action:string)->boolean [private]",
     "on_claim_resolved(epoch:integer:uint64,account_id:string,amount:string,destination:ClaimDestination)->string [private]",
     "on_claim_resolved_fee(epoch:integer:uint64,account_id:string,amount:string,fee:string,relayer:string,destination:ClaimDestination)->string [private]",
     "on_escrow_resolved(grant_id:integer:uint64,step:EscrowStep)-> [private]",
@@ -215,13 +218,13 @@ const SIGNATURES: [&str; 94] = [
     "register_voucher(voucher:Voucher,signature:string)->string []",
     "remove_intent(intent_hash:string)-> []",
     "request_exit()-> [payable]",
-    "request_exit_evm(member:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)-> []",
+    "request_exit_evm(member:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
     "revoke_grant(grant_id:integer:uint64,reason:RevokeReason)-> []",
     "rule_deal(bundle_id:integer:uint64,verdict:Verdict)-> []",
     "set_asset_class(asset_type:string,entry:AssetClassEntry)-> []",
     "set_asset_contracts(asset_type:string,contracts:array<string>)-> []",
     "set_auto_settle(enabled:boolean)-> [payable]",
-    "set_auto_settle_evm(member:string,enabled:boolean,nonce:integer:uint64,deadline:integer:uint64,signature:string)-> []",
+    "set_auto_settle_evm(member:string,enabled:boolean,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
     "set_params(params:Params)-> []",
     "settle_deal(bundle_id:integer:uint64)-> []",
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",

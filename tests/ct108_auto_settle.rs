@@ -177,7 +177,7 @@ async fn an_opted_in_evm_member_who_does_not_pay_stays_active() -> anyhow::Resul
     // opt in: Action `auto_settle`, nonce 0 (first action after the join)
     let opt = relayer
         .call(f.circle.contract.id(), "set_auto_settle_evm")
-        .args_json(json!({"member": member, "enabled": true, "nonce": 0, "deadline": deadline, "signature": action_sig(&secret, &contract, &member, "auto_settle", 0, "", "", 0, deadline)}))
+        .args_json(json!({"member": member, "enabled": true, "nonce": 0, "deadline": deadline, "max_fee": "0", "signature": action_sig(&secret, &contract, &member, "auto_settle", 0, "", "", 0, deadline)}))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
@@ -195,7 +195,7 @@ async fn an_opted_in_evm_member_who_does_not_pay_stays_active() -> anyhow::Resul
     // the same signature cannot be used twice
     let again = relayer
         .call(f.circle.contract.id(), "set_auto_settle_evm")
-        .args_json(json!({"member": member, "enabled": true, "nonce": 0, "deadline": deadline, "signature": action_sig(&secret, &contract, &member, "auto_settle", 0, "", "", 0, deadline)}))
+        .args_json(json!({"member": member, "enabled": true, "nonce": 0, "deadline": deadline, "max_fee": "0", "signature": action_sig(&secret, &contract, &member, "auto_settle", 0, "", "", 0, deadline)}))
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;

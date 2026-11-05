@@ -131,7 +131,7 @@ impl World {
             let r = w
                 .relayer
                 .call(w.f.circle.contract.id(), "request_exit_evm")
-                .args_json(json!({"member": w.member, "nonce": nonce, "deadline": w.deadline, "signature": sig}))
+                .args_json(json!({"member": w.member, "nonce": nonce, "deadline": w.deadline, "max_fee": "0", "signature": sig}))
                 .gas(Gas::from_tgas(100))
                 .transact()
                 .await?;
@@ -182,6 +182,25 @@ impl World {
             .gas(Gas::from_tgas(100))
             .transact()
             .await?)
+    }
+
+    /// CT-118 (0.0.17): `request_exit_evm` (`action` = "request_exit") or `set_auto_settle_evm` ("auto_settle" / "auto_settle_off") with a fee ceiling.
+    async fn small_action_evm(&mut self, action: &str, max_fee: u128) -> anyhow::Result<ExecutionFinalResult> {
+        let nonce = self.take_nonce();
+        let sig = action_sig(&self.secret, &self.contract, &self.member, action, 0, "", "", nonce, self.deadline, max_fee);
+        let (method, args) = if action == "request_exit" {
+            ("request_exit_evm", json!({"member": self.member, "nonce": nonce, "deadline": self.deadline, "max_fee": max_fee.to_string(), "signature": sig}))
+        } else {
+            (
+                "set_auto_settle_evm",
+                json!({"member": self.member, "enabled": action == "auto_settle", "nonce": nonce, "deadline": self.deadline, "max_fee": max_fee.to_string(), "signature": sig}),
+            )
+        };
+        Ok(self.relayer.call(self.f.circle.contract.id(), method).args_json(args).gas(Gas::from_tgas(100)).transact().await?)
+    }
+
+    async fn member_stake(&self) -> anyhow::Result<String> {
+        Ok(self.f.circle.view("member", json!({"account_id": self.member})).await?["stake"].as_str().unwrap_or_default().to_string())
     }
 
     async fn withdraw_evm(&mut self, max_fee: u128) -> anyhow::Result<ExecutionFinalResult> {
@@ -365,5 +384,94 @@ async fn owner_set_params_changes_relayer_fee_from_the_next_epoch() -> anyhow::R
     assert!(close.is_success(), "{:?}", failure_text(&close));
     assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "500000");
     assert_eq!(f.circle.view("get_pending_params", json!({})).await?, Value::Null);
+    Ok(())
+}
+
+// TC-CT-118-01: request_exit_evm pays the relayer from the free stake; the exit stands; D6 holds
+#[tokio::test]
+async fn request_exit_evm_pays_the_relayer_from_free_stake() -> anyhow::Result<()> {
+    let mut w = World::finalized(false).await?;
+    let stake_before: u128 = w.member_stake().await?.parse()?;
+    let relayer_before = w.usdt(&w.relayer).await?;
+    let r = w.small_action_evm("request_exit", FEE).await?;
+    assert!(r.is_success(), "request_exit_evm: {:?}", failure_text(&r));
+    println!("GAS request_exit_evm with fee: {:.1} Tgas", tgas(&r));
+    assert!(has_event(&r, "exit_requested") && has_event(&r, "relayer_fee_paid") && !has_event(&r, "relayer_fee_failed"), "{:?}", r.logs());
+    assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE);
+    assert_eq!(w.member_stake().await?.parse::<u128>()?, stake_before - FEE);
+    w.f.assert_d6().await?;
+    Ok(())
+}
+
+// TC-CT-118-02: unregistered relayer: the exit stands, the fee goes back to the member stake, no reserve
+#[tokio::test]
+async fn request_exit_evm_fee_failure_returns_to_the_stake() -> anyhow::Result<()> {
+    let mut w = World::finalized(false).await?;
+    let stake_before = w.member_stake().await?;
+    w.unregister_relayer().await?;
+    let r = w.small_action_evm("request_exit", FEE).await?;
+    assert!(r.is_success(), "request_exit_evm: {:?}", failure_text(&r));
+    assert!(has_event(&r, "exit_requested") && has_event(&r, "relayer_fee_failed") && !has_event(&r, "relayer_fee_paid"), "{:?}", r.logs());
+    assert_eq!(w.member_stake().await?, stake_before, "the fee came back");
+    w.f.assert_d6().await?;
+    Ok(())
+}
+
+// TC-CT-118-03: maxFee 0 takes nothing; set_auto_settle_evm with a fee takes it and the flag is set
+#[tokio::test]
+async fn set_auto_settle_evm_fee_and_max_fee_zero() -> anyhow::Result<()> {
+    let mut w = World::finalized(false).await?;
+    let stake_before: u128 = w.member_stake().await?.parse()?;
+    let relayer_before = w.usdt(&w.relayer).await?;
+    let r = w.small_action_evm("auto_settle", 0).await?;
+    assert!(r.is_success(), "{:?}", failure_text(&r));
+    assert!(!has_event(&r, "relayer_fee_paid"));
+    assert_eq!(w.usdt(&w.relayer).await?, relayer_before);
+    let r = w.small_action_evm("auto_settle_off", FEE).await?;
+    assert!(r.is_success(), "{:?}", failure_text(&r));
+    println!("GAS set_auto_settle_evm with fee: {:.1} Tgas", tgas(&r));
+    assert!(has_event(&r, "relayer_fee_paid"));
+    assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE);
+    assert_eq!(w.member_stake().await?.parse::<u128>()?, stake_before - FEE);
+    assert_eq!(w.f.circle.view("is_auto_settle", json!({"account_id": w.member})).await?, json!(false));
+    w.f.assert_d6().await?;
+    Ok(())
+}
+
+// TC-CT-118-04: join_evm with a signed fee is refused with an explicit error
+#[tokio::test]
+async fn join_evm_refuses_a_fee_ceiling() -> anyhow::Result<()> {
+    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    let contract = f.circle.contract.id().to_string();
+    let secret = SecretKey::from_slice(&[7u8; 32])?;
+    let member = address(&secret);
+    let deadline = f.circle.now_ns().await? / 1_000_000 + 3_600_000;
+    let relayer = f.account("relayer").await?;
+    let terms = "a".repeat(64);
+    let join = relayer
+        .call(f.circle.contract.id(), "join_evm")
+        .args_json(json!({"address": member, "terms_hash": terms, "deadline": deadline, "max_fee": "1", "signature": action_sig(&secret, &contract, &member, "join", 0, "", &terms, 0, deadline, 1)}))
+        .deposit(NearToken::from_millinear(350))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(failure_text(&join).unwrap_or_default().contains("ERR_EVM_FEE_NOT_ALLOWED"), "{:?}", failure_text(&join));
+    Ok(())
+}
+
+// TC-CT-118-05: get_epoch shows the rules in force when each epoch opened
+#[tokio::test]
+async fn get_epoch_params_show_the_rules_of_each_epoch() -> anyhow::Result<()> {
+    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    let dao = f.account("dao").await?;
+    let mut params = Funded::params_short();
+    params["relayer_fee"] = json!("500000");
+    assert!(f.circle.call_as(&dao, "set_params", json!({"params": params})).await?.is_success());
+    let c = &f.circle;
+    c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
+    assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
+    assert_eq!(f.circle.view("get_epoch", json!({"epoch": 1})).await?["params"]["relayer_fee"], "0");
+    assert_eq!(f.circle.view("get_epoch", json!({"epoch": 2})).await?["params"]["relayer_fee"], "500000");
+    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "500000");
     Ok(())
 }
