@@ -275,3 +275,7 @@ No High finding. The cryptographic core holds: EIP-712 hashing, `ecrecover` use,
 - M1 (member slots): accepted for the testnet demo and reported to the coordinator as a design question. Every member row, EVM or not, counts against `MAX_MEMBERS` (64) for ever, and the sponsor refund makes a slot cheap to burn in an `open` circle. Options if it matters: keep the deposit (no refund), or use `admission = dao`.
 - M3 (stale `request_exit` signature): accepted. SDK/relayer must sign short deadlines (minutes) for `request_exit` and `withdraw_stake`; a signature that fails for a business reason stays valid only until its deadline.
 - Low and Info findings: see above; none changes the interface.
+
+## Domain binding (audits C55 and C60)
+
+The contract is not an EVM contract, so the usual EIP-712 anchors do not fit. Wallets such as MetaMask refuse `signTypedData` when the `chainId` of the domain differs from the chain they are connected to (an agent on Base is on 8453), so a made-up NEAR `chainId` would make real wallets fail; and `verifyingContract` must be a 20-byte address, which a NEAR account is not. The domain `salt` (`keccak256("near:" + network + ":" + contract account id)`) gives the same binding: a signature is valid for one contract on one network only (test `tc_ct_104_09`). The `circle` field of every message binds it again. `x207-v014.testnet` runs this salted code (on-chain `code_hash` sha256 `743109cb...c2a87` equals the salted build; the wasm holds the type string `EIP712Domain(string name,string version,bytes32 salt)`).
