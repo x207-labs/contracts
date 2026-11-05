@@ -15,7 +15,11 @@ An agent with only an `0x` key joins a circle, pays and gets paid. Code: `x207-c
 | `withdraw_stake` | 0 | payout account | "" | signer nonce |
 | `auto_settle` (on) / `auto_settle_off` (off) | 0 | "" | "" | signer nonce |
 
-`deadline` is in milliseconds; an action is valid while `block_timestamp_ms <= deadline`. The nonce starts at 0 after `join_evm` and goes up by one per successful action (view `evm_signer`). Use short deadlines.
+`deadline` is in milliseconds; an action is valid while `block_timestamp_ms <= deadline`. The nonce starts at 0 after `join_evm` and goes up by one per successful action (view `evm_signer`).
+
+**Short deadlines; re-sign if not sent.** The contract has no upper bound on `deadline` (an upper limit, `ERR_EVM_DEADLINE_TOO_FAR`, is on the roadmap for the next mainnet release). A signed action stays valid until its deadline passes or its nonce is used, so a signature that a relayer holds is as good as the deadline is long. Sign with a short deadline and sign again if the action was not sent in time; the SDK default is `now + 10 minutes`. Example: a member signs `auto_settle_off`; a relayer that holds it for a month and sends it late switches auto-settle off at that moment, which the member may no longer want. With a 10-minute deadline the held message is dead, and the member signs a new one with the same nonce.
+
+Salt note: the network word of the salt comes from the account suffix (`.testnet` gives `testnet`, every other name gives `mainnet`), so on mainnet and on a sandbox or fork only the account name separates circles. An init parameter that names the network is proposed on the roadmap (CT-113 R3).
 
 ## Methods (anyone may relay; the signature is the gate)
 
