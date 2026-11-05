@@ -1906,6 +1906,99 @@ mod claim_tests {
         assert_eq!((status(&c, "gpu").0, c.epochs.get(&1).unwrap().pool), (PositionStatus::Claimable, 35 * CREDIT));
     }
 
+    // ---- CT-117: relayer fee on claim_evm (payout and fee are separate promises, one callback) ----
+
+    const FEE: u128 = 250_000;
+
+    fn claim_with_fee(max_fee: u128) -> X207Circle {
+        let mut c = s1_fin();
+        testing_env!(ctx("circle", 1, 300).build());
+        crate::params::write_relayer_fee(FEE);
+        let _ = c.claim_for(acc("gpu"), 1, ClaimDestination::Near, None, Some((acc("relayer"), max_fee)));
+        c
+    }
+
+    fn resolve_fee(c: &mut X207Circle, payout: PromiseResult, fee_leg: PromiseResult) -> U128 {
+        testing_env!(ctx("circle", 0, 300).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![payout, fee_leg]);
+        c.on_claim_resolved_fee(1, acc("gpu"), U128(35 * CREDIT), U128(FEE), acc("relayer"), ClaimDestination::Near)
+    }
+
+    fn ok() -> PromiseResult {
+        PromiseResult::Successful(vec![])
+    }
+
+    #[test]
+    fn ct117_claim_fee_sends_two_separate_transfers_and_one_callback() {
+        let c = claim_with_fee(FEE);
+        let calls = calls();
+        assert_eq!(calls.len(), 3);
+        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str(), &calls[0].2["amount"]), ("usdt.near", "ft_transfer", &json!((35 * CREDIT - FEE).to_string())));
+        assert_eq!(calls[0].2["receiver_id"], "gpu.near");
+        assert_eq!((calls[1].0.as_str(), calls[1].1.as_str(), &calls[1].2["receiver_id"], &calls[1].2["amount"]), ("usdt.near", "ft_transfer", &json!("relayer.near"), &json!(FEE.to_string())));
+        assert_eq!(calls[2].1, "on_claim_resolved_fee");
+        assert_eq!((c.epochs.get(&1).unwrap().pool, c.in_flight), (0, 35 * CREDIT));
+        c.assert_d6(None);
+    }
+
+    #[test]
+    fn ct117_claim_fee_capped_by_signed_max_fee_and_zero_fee_is_plain_claim() {
+        let _ = claim_with_fee(10_000);
+        assert_eq!(calls()[1].2["amount"], json!("10000"));
+        let _ = claim_with_fee(0);
+        let calls = calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].1, "on_claim_resolved");
+        assert_eq!(calls[0].2["amount"], json!((35 * CREDIT).to_string()));
+        testing_env!(VMContextBuilder::new().build());
+    }
+
+    #[test]
+    fn ct117_both_ok() {
+        let mut c = claim_with_fee(FEE);
+        assert_eq!(resolve_fee(&mut c, ok(), ok()), U128(35 * CREDIT - FEE));
+        assert_eq!((status(&c, "gpu").0, c.in_flight, c.epochs.get(&1).unwrap().pool), (PositionStatus::Claimed, 0, 0));
+        let ev = events();
+        assert!(ev.iter().any(|e| e["event"] == "relayer_fee_paid" && e["data"][0]["amount"] == json!(FEE.to_string())));
+        c.assert_d6(Some(300 * CREDIT));
+    }
+
+    // the relayer is not registered on the token: the fee leg fails, the payout still lands and the fee stays claimable
+    #[test]
+    fn ct117_relayer_unregistered_fee_fails_payout_stays_paid() {
+        let mut c = claim_with_fee(FEE);
+        assert_eq!(resolve_fee(&mut c, ok(), PromiseResult::Failed), U128(35 * CREDIT - FEE));
+        assert_eq!((status(&c, "gpu"), c.in_flight, c.epochs.get(&1).unwrap().pool), ((PositionStatus::Claimable, FEE), 0, FEE));
+        let ev = events();
+        assert!(ev.iter().any(|e| e["event"] == "relayer_fee_failed"));
+        assert!(!ev.iter().any(|e| e["event"] == "relayer_fee_paid"));
+        c.assert_d6(Some(300 * CREDIT + FEE));
+    }
+
+    #[test]
+    fn ct117_payout_fails_fee_ok() {
+        let mut c = claim_with_fee(FEE);
+        assert_eq!(resolve_fee(&mut c, PromiseResult::Failed, ok()), U128(0));
+        let back = 35 * CREDIT - FEE;
+        assert_eq!((status(&c, "gpu"), c.in_flight, c.epochs.get(&1).unwrap().pool), ((PositionStatus::Claimable, back), 0, back));
+        assert!(events().iter().any(|e| e["event"] == "relayer_fee_paid"));
+        c.assert_d6(Some(300 * CREDIT + back));
+    }
+
+    #[test]
+    fn ct117_both_fail_everything_returns() {
+        let mut c = claim_with_fee(FEE);
+        assert_eq!(resolve_fee(&mut c, PromiseResult::Failed, PromiseResult::Failed), U128(0));
+        assert_eq!((status(&c, "gpu"), c.in_flight, c.epochs.get(&1).unwrap().pool), ((PositionStatus::Claimable, 35 * CREDIT), 0, 35 * CREDIT));
+        c.assert_d6(Some(335 * CREDIT));
+    }
+
+    #[test]
+    fn ct117_second_callback_is_a_noop() {
+        let mut c = s1_fin();
+        assert_eq!(resolve_fee(&mut c, PromiseResult::Failed, PromiseResult::Failed), U128(0));
+        assert_eq!((c.in_flight, status(&c, "gpu")), (0, (PositionStatus::Claimable, 35 * CREDIT)));
+    }
+
     #[test]
     fn epoch_struct_unused_import_guard() {
         let _ = Epoch::open(2, 0, 1, Params::default());

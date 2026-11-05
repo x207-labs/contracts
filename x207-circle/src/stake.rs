@@ -994,6 +994,97 @@ mod exit_tests {
         assert_eq!((ev[0]["event"].as_str(), ev[0]["data"][0]["amount"].as_str()), (Some("stake_withdrawn"), Some("0")));
     }
 
+    // ---- CT-117: relayer fee on withdraw_stake_evm ----
+
+    const FEE: u128 = 100_000;
+
+    fn withdraw_fee(c: &mut X207Circle, max_fee: u128) {
+        testing_env!(ctx("circle", 1).build());
+        crate::params::write_relayer_fee(FEE);
+        let _ = c.withdraw_stake_for(acc("coder"), acc("coder"), Some((acc("relayer"), max_fee)));
+    }
+
+    fn resolve_fee2(c: &mut X207Circle, payout: PromiseResult, fee_leg: PromiseResult) -> bool {
+        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![payout, fee_leg]);
+        c.on_withdraw_resolved_fee(acc("coder"), U128(100 * CREDIT), U128(FEE), acc("relayer"), acc("coder"))
+    }
+
+    fn ok() -> PromiseResult {
+        PromiseResult::Successful(vec![])
+    }
+
+    #[test]
+    fn ct117_withdraw_fee_two_transfers_one_callback() {
+        let mut c = ready();
+        withdraw_fee(&mut c, FEE);
+        let calls = calls();
+        assert_eq!(calls.len(), 3);
+        assert_eq!((calls[0].1.as_str(), &calls[0].2["receiver_id"], &calls[0].2["amount"]), ("ft_transfer", &serde_json::json!("coder.near"), &serde_json::json!((100 * CREDIT - FEE).to_string())));
+        assert_eq!((calls[1].1.as_str(), &calls[1].2["receiver_id"], &calls[1].2["amount"]), ("ft_transfer", &serde_json::json!("relayer.near"), &serde_json::json!(FEE.to_string())));
+        assert_eq!(calls[2].1, "on_withdraw_resolved_fee");
+        assert_eq!(c.in_flight, 100 * CREDIT);
+        c.assert_d6(None);
+    }
+
+    #[test]
+    fn ct117_withdraw_fee_both_ok() {
+        let mut c = ready();
+        withdraw_fee(&mut c, FEE);
+        assert!(resolve_fee2(&mut c, ok(), ok()));
+        assert_eq!((c.members.get(&acc("coder")).unwrap().status, c.in_flight), (MemberStatus::Exited, 0));
+        assert!(events().iter().any(|e| e["event"] == "relayer_fee_paid"));
+        c.assert_d6(Some(100 * CREDIT));
+    }
+
+    // relayer not registered on the token: the member still exits; the fee goes on to the receiver, and if that fails too it lands in the reserve
+    #[test]
+    fn ct117_withdraw_relayer_unregistered_fee_goes_to_member() {
+        let mut c = ready();
+        withdraw_fee(&mut c, FEE);
+        assert!(resolve_fee2(&mut c, ok(), PromiseResult::Failed));
+        assert_eq!((c.members.get(&acc("coder")).unwrap().status, c.in_flight), (MemberStatus::Exited, FEE));
+        let calls = calls();
+        let refund = calls.iter().find(|(_, m, _)| m == "ft_transfer").expect("refund transfer");
+        assert_eq!((&refund.2["receiver_id"], &refund.2["amount"]), (&serde_json::json!("coder.near"), &serde_json::json!(FEE.to_string())));
+        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![ok()]);
+        c.on_fee_refund_resolved(acc("coder"), U128(FEE));
+        assert_eq!(c.in_flight, 0);
+        c.assert_d6(Some(100 * CREDIT));
+    }
+
+    #[test]
+    fn ct117_withdraw_refund_fails_fee_goes_to_reserve() {
+        let mut c = ready();
+        withdraw_fee(&mut c, FEE);
+        assert!(resolve_fee2(&mut c, ok(), PromiseResult::Failed));
+        let reserve = c.reserve;
+        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![PromiseResult::Failed]);
+        c.on_fee_refund_resolved(acc("coder"), U128(FEE));
+        assert_eq!((c.in_flight, c.reserve), (0, reserve + FEE));
+        assert!(events().iter().any(|e| e["event"] == "relayer_fee_failed"));
+        c.assert_d6(Some(100 * CREDIT + FEE));
+    }
+
+    #[test]
+    fn ct117_withdraw_payout_fails_fee_ok() {
+        let mut c = ready();
+        withdraw_fee(&mut c, FEE);
+        assert!(!resolve_fee2(&mut c, PromiseResult::Failed, ok()));
+        let m = c.members.get(&acc("coder")).unwrap();
+        assert_eq!((m.stake, m.withdraw_pending, c.in_flight), (100 * CREDIT - FEE, false, 0));
+        c.assert_d6(Some(200 * CREDIT - FEE));
+    }
+
+    #[test]
+    fn ct117_withdraw_both_fail_whole_stake_returns() {
+        let mut c = ready();
+        withdraw_fee(&mut c, FEE);
+        assert!(!resolve_fee2(&mut c, PromiseResult::Failed, PromiseResult::Failed));
+        let m = c.members.get(&acc("coder")).unwrap();
+        assert_eq!((m.stake, m.withdraw_pending, c.in_flight, m.status), (100 * CREDIT, false, 0, MemberStatus::Active));
+        c.assert_d6(Some(200 * CREDIT));
+    }
+
     // TC-CT-077-20: an exited account stays registered, so `join` refuses it
     #[test]
     fn tc_ct_077_20_exited_member_stays_registered() {

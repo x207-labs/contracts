@@ -610,6 +610,33 @@ mod tests {
         assert!(text.contains("ERR_ALREADY_MEMBER"), "{text}");
     }
 
+    // CT-117 R1a: a deadline more than 24 h ahead is refused (checked before signature and nonce)
+    #[test]
+    fn ct117_deadline_too_far() {
+        let mut c = circle();
+        let t = "a".repeat(64);
+        // 1.9e12 ms is one hour ahead of NOW_NS: fine for the limit. Move the clock 24 h back so the same deadline is 25 h ahead.
+        ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS - 24 * 3_600 * 1_000_000_000);
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65)); }));
+        assert!(text.contains("ERR_EVM_DEADLINE_TOO_FAR"), "{text}");
+        // exactly 24 h ahead passes the deadline check (and then fails on the signature)
+        ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS - 23 * 3_600 * 1_000_000_000);
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65)); }));
+        assert!(!text.contains("ERR_EVM_DEADLINE_TOO_FAR") && !text.contains("ERR_EVM_EXPIRED"), "{text}");
+    }
+
+    #[test]
+    fn ct117_relayer_fee_math() {
+        ctx("relayer.testnet", NearToken::from_yoctonear(0), NOW_NS);
+        assert_eq!(relayer_fee_for(1_000_000, 500), 0, "DAO fee 0 -> no fee");
+        crate::params::write_relayer_fee(250_000);
+        assert_eq!(relayer_fee_for(10_000_000, 1_000_000), 250_000, "flat fee");
+        assert_eq!(relayer_fee_for(10_000_000, 100), 100, "capped by the signed maxFee");
+        assert_eq!(relayer_fee_for(300_000, 1_000_000), 150_000, "capped at half the base");
+        assert_eq!(relayer_fee_for(1, 1_000_000), 0, "dust base");
+        assert_eq!(relayer_fee_for(10_000_000, 0), 0, "maxFee 0 forbids a fee");
+    }
+
     // TC-CT-105-01: nonce, replay, expiry, receiver
     #[test]
     fn tc_ct_105_01_request_exit_evm_replay_and_nonce() {
