@@ -30,9 +30,12 @@ Warnings (informational, none in the wasm except `wee_alloc`): `unsafe-libyaml 0
 
 The contract never parses TLS, never decompresses zstd and does no big-integer arithmetic of its own: signatures use the host functions (`env::ed25519_verify`, `env::ecrecover`, `env::keccak256`). The advisories sit in code that runs on a developer machine or in CI while the tests run, and that talks only to a local sandbox or to the public RPC.
 
-## Suggested fixes (not applied; the coordinator decides)
+## Fixes
 
-1. `cargo update -p rustls -p rustls-webpki -p zstd -p zstd-safe` in `contracts/`: the patched versions are semver-compatible with the current requirements (`rustls 0.23.x`, `zstd ^0.13`, `zstd-safe ^7`), so `Cargo.lock` changes and `Cargo.toml` does not. Not tried here: it changes the lock file that the reproducible build reads, so the build after the update must be checked to give the same wasm sha256 (the wasm should not change, because none of these packages is in it; verify with `scripts/repro-build.sh`).
+Status after the update of 2026-11-05 (contracts `4088b6f`):
+
+1. **Applied, zstd:** `cargo update -p rustls -p rustls-webpki -p zstd -p zstd-safe` moved only `zstd 0.13.3 -> 0.13.4` and `zstd-safe 7.3.0 -> 7.4.0` (closes RUSTSEC-2026-0391, 0403, 0398 and the nine unsound advisories on `zstd-safe`). `Cargo.lock` changed, `Cargo.toml` did not. The reproducible build of the commit after the update (`scripts/repro-build.sh 4088b6f`) gives wasm sha256 `4295351f395d0cc31419d43adf10e5b60f3c2a0e546ae0e912c5da4fef5aebe7`, the same as v0.0.16, as expected because none of these packages is in the wasm. The ABI freeze and init tests pass.
+1b. **Not possible now, rustls and rustls-webpki:** the patched `rustls 0.23.46` needs `aws-lc-rs ^1.18`, while `near-crypto 0.37.4` (through `near-sdk 5.29.1`) pins `aws-lc-rs =1.16.2`, so `cargo update -p rustls --precise 0.23.46` fails with "failed to select a version for `aws-lc-rs`". The same holds for `rustls-webpki 0.103.16`. It needs a `near-sdk` / `near-crypto` release; the packages are only in the test tooling (`near-workspaces` -> `reqwest`), not in the wasm. Known risk, no action now.
 2. `crypto-bigint 0.5.5` needs a new `near-crypto` / `near-sdk`; wait for a `near-sdk` release, no action now.
 3. `wee_alloc`: nothing to do while `near-sdk` makes it the default; switching the allocator would change the wasm hash and is not worth a release.
 4. Re-run `cargo audit` in CI (a non-blocking job is enough) so that the report stays current; today `.github` has no audit step.
