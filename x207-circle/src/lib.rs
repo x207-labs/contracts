@@ -4,6 +4,7 @@
 //! `#[near] impl X207Circle` block, so lanes working in parallel do not need to edit this file.
 
 pub mod asset_contracts;
+pub mod auto_settle;
 pub mod bundle;
 pub mod canonical;
 pub mod clearing;
@@ -35,4 +36,4 @@ pub mod voucher;
 pub use state::X207Circle;
 
 /// Interface version; same value as the `version` field of every event (spec section 1).
-pub const INTERFACE_VERSION: &str = "0.0.14";
+pub const INTERFACE_VERSION: &str = "0.0.15";

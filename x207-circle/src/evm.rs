@@ -226,7 +226,7 @@ pub(crate) fn refund_sponsor(account: &AccountId) {
 /// Checks the signer, deadline, nonce and signature of one `*_evm` action, then bumps the nonce. Order of checks:
 /// `ERR_NOT_EVM_MEMBER`, `ERR_EVM_EXPIRED`, `ERR_EVM_NONCE`, `ERR_BAD_EVM_SIG`. A later panic of the same
 /// transaction reverts the bump.
-fn authorize(account: &AccountId, action: &str, epoch: u64, receiver: &str, nonce: u64, deadline: u64, signature: &str) {
+pub(crate) fn authorize(account: &AccountId, action: &str, epoch: u64, receiver: &str, nonce: u64, deadline: u64, signature: &str) {
     let mut signers = evm_signers();
     let Some(mut signer) = looks_evm(account).then(|| signers.get(account).cloned()).flatten() else {
         env::panic_str(&format!("ERR_NOT_EVM_MEMBER: {account}"))
@@ -733,5 +733,35 @@ mod tests {
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         let obligation = c.register_cumulative(voucher, sig("voucher"));
         assert_eq!(obligation.0.to_string(), m["cumulativeAmount"].as_str().unwrap());
+    }
+
+    // TC-CT-108-05: set_auto_settle_evm is a signed Action; the choice is part of the signed action name
+    #[test]
+    fn tc_ct_108_05_set_auto_settle_evm() {
+        let mut c = circle();
+        active(&mut c, 3);
+        let id = acc(&address());
+        ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
+        // the "off" signature cannot switch it on, and the other way round
+        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, sig("auto_settle_off"))));
+        assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
+        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), false, 3, 1_900_000_000_000, sig("auto_settle"))));
+        assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
+        c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, sig("auto_settle"));
+        assert!(c.is_auto_settle(id.clone()));
+        assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 4);
+        // replay
+        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, sig("auto_settle"))));
+        assert!(text.contains("ERR_EVM_NONCE"), "{text}");
+        c.set_auto_settle_evm(id.clone(), false, 4, 1_900_000_000_000, sig("auto_settle_off"));
+        assert!(!c.is_auto_settle(id.clone()));
+        // expired
+        ctx("anyone.testnet", NearToken::from_yoctonear(0), 1_900_000_001_000_000_000);
+        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), true, 5, 1_900_000_000_000, sig("auto_settle"))));
+        assert!(text.contains("ERR_EVM_NONCE") || text.contains("ERR_EVM_EXPIRED"), "{text}");
+        // a NEAR-key member is not driven by an EVM signature
+        ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
+        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(acc("gpu.testnet"), true, 3, 1_900_000_000_000, sig("auto_settle"))));
+        assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
     }
 }

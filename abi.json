@@ -1007,6 +1007,27 @@
       },
       {
         "kind": "view",
+        "name": "is_auto_settle",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "boolean"
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "is_frozen",
         "params": {
           "args": [
@@ -2090,6 +2111,67 @@
                   "type": "string"
                 },
                 "type": "array"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "name": "set_auto_settle",
+        "params": {
+          "args": [
+            {
+              "name": "enabled",
+              "type_schema": {
+                "type": "boolean"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "set_auto_settle_evm",
+        "params": {
+          "args": [
+            {
+              "name": "member",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "enabled",
+              "type_schema": {
+                "type": "boolean"
+              }
+            },
+            {
+              "name": "nonce",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "deadline",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
               }
             }
           ],
@@ -4108,12 +4190,31 @@
         "account_id"
       ],
       "name": "intent_removed"
+    },
+    {
+      "fields": [
+        "account_id",
+        "enabled"
+      ],
+      "name": "auto_settle_set"
+    },
+    {
+      "fields": [
+        "epoch",
+        "account_id",
+        "due",
+        "stake",
+        "status",
+        "position_status",
+        "outstanding_debt"
+      ],
+      "name": "auto_settled"
     }
   ],
-  "interface_version": "0.0.14",
+  "interface_version": "0.0.15",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.14"
+    "version": "0.0.15"
   },
   "schema_version": "0.4.0"
 }

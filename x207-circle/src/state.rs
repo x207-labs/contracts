@@ -77,6 +77,8 @@ pub enum StorageKey {
     Deals = b'd',
     /// D12 sidecar (CT-104): `AccountId -> EvmSigner` of the members that sign with an EVM key.
     EvmSigners = b'v',
+    /// D13 sidecar (CT-108): `AccountId -> true` for members that settle a missed `due` from their stake.
+    AutoSettle = b'u',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).

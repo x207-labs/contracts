@@ -78,6 +78,36 @@
       "digest": "0x332410242f1b756df2a5a2fba4e219650c2cdbbbfa277920b7aa3ee3708259a4",
       "signature": "0x172eaa2596dba305a4ce959c7a750f0b3627db93b736b90be937851dab73507018a76ed911f8e9fc2a04e18b915440f9a6a1deaa8981bc6342ddba0a4fdccc2f1b"
     },
+    "auto_settle": {
+      "primaryType": "Action",
+      "message": {
+        "circle": "x207-v014.testnet",
+        "member": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+        "action": "auto_settle",
+        "epoch": "0",
+        "receiver": "",
+        "termsHash": "",
+        "nonce": "3",
+        "deadline": "1900000000000"
+      },
+      "digest": "0xe408703f85336d15fd2316161f122ab3f8c602cc7a9b324bfc25a69857656176",
+      "signature": "0x26f707c4b3172544cafd9847027e7a976ba1ad0aabb6ffcfa0f62b105f83cd2b484cfcc622f452ad3d65d7fbe2bb598977cb4d841873488ef5ea0729d6fcbf4f1c"
+    },
+    "auto_settle_off": {
+      "primaryType": "Action",
+      "message": {
+        "circle": "x207-v014.testnet",
+        "member": "0x70997970c51812dc3a010c7d01b50e0d17dc79c8",
+        "action": "auto_settle_off",
+        "epoch": "0",
+        "receiver": "",
+        "termsHash": "",
+        "nonce": "4",
+        "deadline": "1900000000000"
+      },
+      "digest": "0xa73d1d930cb2d2001efa242b89bacfd72a249aff63481faa124df534a35deb0e",
+      "signature": "0xa515a5d9e4929707800ee378c0234696d81fcaff77e34d5318f5902889d05c58576a652639893c9b1b0f7ef1b9c55a54754b7783740e58a46121b8180898078e1b"
+    },
     "withdraw_stake": {
       "primaryType": "Action",
       "message": {

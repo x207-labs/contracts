@@ -293,12 +293,18 @@ impl X207Circle {
         self.epoch_mut_or_panic(epoch).finalize(now);
 
         let accounts: Vec<AccountId> = self.epoch_or_panic(epoch).position_accounts.iter().cloned().collect();
-        let (mut defaulted, mut total_defaulted, mut claimable_final) = (Vec::new(), 0u128, 0u128);
+        let (mut defaulted, mut auto_settled, mut total_defaulted, mut claimable_final) = (Vec::new(), Vec::new(), 0u128, 0u128);
         for account in accounts {
             let position = self.positions.get(&(epoch, account.clone())).expect("indexed position");
             match (position.role, position.status) {
                 (PositionRole::Debtor, PositionStatus::Due) => {
-                    total_defaulted += position.amount;
+                    let due = position.amount;
+                    // CT-108: an opted-in member whose stake covers the due pays it from the stake and stays active
+                    if let Some(event) = self.try_auto_settle(epoch, &account, block) {
+                        auto_settled.push(event);
+                        continue;
+                    }
+                    total_defaulted += due;
                     defaulted.push(self.default_debtor(epoch, &account, block));
                 }
                 (PositionRole::Creditor, PositionStatus::Claimable) => claimable_final += position.amount,
@@ -342,6 +348,19 @@ impl X207Circle {
         }
         if omitted > 0 {
             env::log_str(&format!("x207: {omitted} member_defaulted events left out of the log limit, read list_positions({epoch})"));
+        }
+        let mut omitted_auto = 0u32;
+        for event in auto_settled {
+            let log = event.to_log();
+            if log.len() <= room {
+                room -= log.len();
+                env::log_str(&log);
+            } else {
+                omitted_auto += 1;
+            }
+        }
+        if omitted_auto > 0 {
+            env::log_str(&format!("x207: {omitted_auto} auto_settled events left out of the log limit, read list_positions({epoch})"));
         }
         for log in limit_logs {
             env::log_str(&log);
@@ -966,7 +985,7 @@ mod finalize_tests {
     }
 
     fn at(who: &str, now: u64) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(who)).block_timestamp(now).block_height(88).build());
+        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(who)).block_timestamp(now).block_height(88).attached_deposit(near_sdk::NearToken::from_yoctonear(1)).build());
     }
 
     fn member(c: &mut X207Circle, name: &str, stake: u128, limit: u128) {
@@ -1076,6 +1095,97 @@ mod finalize_tests {
         let f = &all[2]["data"][0];
         assert_eq!((&f["defaulted_count"], &f["total_defaulted"], &f["pool"], &f["shortfall"]), (&json!(1), &json!("35000000"), &json!("35000000"), &json!("0")));
         assert_eq!(f["finalized_at"], json!(T_PAY.to_string()));
+    }
+
+    // TC-CT-108-01: an opted-in debtor with enough stake pays the due from the stake and stays active
+    #[test]
+    fn tc_ct_108_01_auto_settle_pays_from_stake_and_stays_active() {
+        let mut c = s1();
+        at("scraper", 1);
+        c.set_auto_settle(true);
+        assert!(c.is_auto_settle(acc("scraper")));
+        fin(&mut c);
+        let p = pos(&c, "scraper");
+        assert_eq!((p.status, p.recovered), (PositionStatus::Paid, 0));
+        let m = c.members.get(&acc("scraper")).unwrap();
+        assert_eq!((m.stake, m.status), (65 * CREDIT, MemberStatus::Active));
+        assert!(m.limit <= m.stake && m.limit > 0, "limit {} stake {}", m.limit, m.stake);
+        assert_eq!(c.outstanding_debt(acc("scraper")), U128(0));
+        let e = c.epochs.get(&1).unwrap();
+        assert_eq!((e.pool, e.pool_final, e.claimable_final, e.shortfall, e.phase), (35 * CREDIT, 35 * CREDIT, 35 * CREDIT, 0, EpochPhase::Finalized));
+        let all = events();
+        assert!(named(&all, "member_defaulted").is_empty());
+        let a = &named(&all, "auto_settled")[0]["data"][0];
+        assert_eq!(a, &json!({"epoch":1,"account_id":"scraper.near","due":"35000000","stake":"65000000","status":"active","position_status":"paid","outstanding_debt":"0"}));
+        let f = &named(&all, "epoch_finalized")[0]["data"][0];
+        assert_eq!((&f["defaulted_count"], &f["total_defaulted"], &f["pool"]), (&json!(0), &json!("0"), &json!("35000000")));
+        c.assert_d6(None);
+    }
+
+    // TC-CT-108-02: the creditor is paid in full from the pool
+    #[test]
+    fn tc_ct_108_02_creditor_claims_in_full_after_auto_settle() {
+        let mut c = s1();
+        at("scraper", 1);
+        c.set_auto_settle(true);
+        fin(&mut c);
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("gpu"))
+            .block_timestamp(T_PAY + SEC)
+            .attached_deposit(near_sdk::NearToken::from_yoctonear(1))
+            .prepaid_gas(near_sdk::Gas::from_tgas(300))
+            .build());
+        let _ = c.claim(1, crate::types::ClaimDestination::Near);
+        let p = pos(&c, "gpu");
+        assert_eq!(p.status, PositionStatus::Claimed);
+        assert_eq!(c.epochs.get(&1).unwrap().pool, 0);
+    }
+
+    // TC-CT-108-03: stake below the due leaves the old default path; opt-out too
+    #[test]
+    fn tc_ct_108_03_short_stake_and_opt_out_default_as_before() {
+        let mut c = s1();
+        c.members.get_mut(&acc("scraper")).unwrap().stake = 20 * CREDIT;
+        c.total_stake -= 80 * CREDIT;
+        at("scraper", 1);
+        c.set_auto_settle(true);
+        fin(&mut c);
+        let p = pos(&c, "scraper");
+        assert_eq!((p.status, p.recovered), (PositionStatus::Defaulted, 20 * CREDIT));
+        assert_eq!(c.members.get(&acc("scraper")).unwrap().status, MemberStatus::Suspended);
+        assert!(named(&events(), "auto_settled").is_empty());
+        c.assert_d6(None);
+
+        let mut c = s1();
+        at("scraper", 1);
+        c.set_auto_settle(true);
+        c.set_auto_settle(false);
+        assert!(!c.is_auto_settle(acc("scraper")));
+        fin(&mut c);
+        assert_eq!(pos(&c, "scraper").status, PositionStatus::Defaulted);
+    }
+
+    // TC-CT-108-08 (review M1): an opt-in after the commit of the epoch does not save the debtor from the default
+    #[test]
+    fn tc_ct_108_08_late_opt_in_does_not_count() {
+        let mut c = s1();
+        at("scraper", T_COMMIT + SEC);
+        c.set_auto_settle(true);
+        fin(&mut c);
+        assert_eq!(pos(&c, "scraper").status, PositionStatus::Defaulted);
+        assert_eq!(c.members.get(&acc("scraper")).unwrap().status, MemberStatus::Suspended);
+        assert!(named(&events(), "auto_settled").is_empty());
+    }
+
+    // TC-CT-108-04: the flag is for members only
+    #[test]
+    fn tc_ct_108_04_only_a_member_sets_the_flag() {
+        let mut c = s1();
+        at("outsider", 1);
+        assert!(panics(|| c.set_auto_settle(true)).contains("ERR_NOT_MEMBER"));
+        c.members.get_mut(&acc("gpu")).unwrap().status = MemberStatus::Exited;
+        at("gpu", 1);
+        assert!(panics(|| c.set_auto_settle(true)).contains("ERR_MEMBER_EXITED"));
     }
 
     // TC-CT-033-03

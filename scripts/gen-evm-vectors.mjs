@@ -64,6 +64,8 @@ const out = {
     join: await entry('Action', { circle: CIRCLE, member: address, action: 'join', epoch: 0n, receiver: '', termsHash: joinTerms, nonce: 0n, deadline: 1900000000000n }),
     claim: await entry('Action', { circle: CIRCLE, member: address, action: 'claim', epoch: 5n, receiver: 'agent.testnet', termsHash: '', nonce: 0n, deadline: 1900000000000n }),
     request_exit: await entry('Action', { circle: CIRCLE, member: address, action: 'request_exit', epoch: 0n, receiver: '', termsHash: '', nonce: 1n, deadline: 1900000000000n }),
+    auto_settle: await entry('Action', { circle: CIRCLE, member: address, action: 'auto_settle', epoch: 0n, receiver: '', termsHash: '', nonce: 3n, deadline: 1900000000000n }),
+    auto_settle_off: await entry('Action', { circle: CIRCLE, member: address, action: 'auto_settle_off', epoch: 0n, receiver: '', termsHash: '', nonce: 4n, deadline: 1900000000000n }),
     withdraw_stake: await entry('Action', { circle: CIRCLE, member: address, action: 'withdraw_stake', epoch: 0n, receiver: 'agent.testnet', termsHash: '', nonce: 2n, deadline: 1900000000000n }),
   },
 };

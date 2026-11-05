@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 50] = [
+const CHANGE_METHODS: [&str; 52] = [
     "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
     "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
     "on_withdraw_resolved",
@@ -45,21 +45,23 @@ const CHANGE_METHODS: [&str; 50] = [
     "confirm_deal", "dispute_deal", "rule_deal", "settle_deal",
     // 0.0.14: CT-104 and CT-105 (EVM agents)
     "join_evm", "claim_evm", "request_exit_evm", "withdraw_stake_evm",
+    // 0.0.15: CT-108 (settlement from the stake, opt-in)
+    "set_auto_settle", "set_auto_settle_evm",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 38] = [
+const VIEWS: [&str; 39] = [
     "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
     "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
     "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked", "get_proposal", "evm_signer",
+    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked", "get_proposal", "evm_signer", "is_auto_settle",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 88] = [
+const SIGNATURES: [&str; 91] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
@@ -102,6 +104,7 @@ const SIGNATURES: [&str; 88] = [
     "headroom(account_id:string)->string []",
     "intents_balance()->string []",
     "interface_version()->string []",
+    "is_auto_settle(account_id:string)->boolean []",
     "is_frozen(account_id:string)->boolean []",
     "join(circle_id:string,pubkey_voucher:string,terms_hash:string)->MemberView [payable]",
     "join_evm(address:string,terms_hash:string,deadline:integer:uint64,signature:string)->MemberView [payable]",
@@ -139,6 +142,8 @@ const SIGNATURES: [&str; 88] = [
     "rule_deal(bundle_id:integer:uint64,verdict:Verdict)-> []",
     "set_asset_class(asset_type:string,entry:AssetClassEntry)-> []",
     "set_asset_contracts(asset_type:string,contracts:array<string>)-> []",
+    "set_auto_settle(enabled:boolean)-> [payable]",
+    "set_auto_settle_evm(member:string,enabled:boolean,nonce:integer:uint64,deadline:integer:uint64,signature:string)-> []",
     "set_params(params:Params)-> []",
     "settle_deal(bundle_id:integer:uint64)-> []",
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
@@ -150,8 +155,8 @@ const SIGNATURES: [&str; 88] = [
     "withdraw_stake_evm(member:string,receiver:string,nonce:integer:uint64,deadline:integer:uint64,signature:string)->PromiseOrValueBoolean []",
 ];
 
-const EVENTS: [&str; 46] = [
-    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "bond_locked", "deal_confirmed", "deal_disputed", "deal_ruled", "bond_slashed", "bond_released", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed",
+const EVENTS: [&str; 48] = [
+    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "bond_locked", "deal_confirmed", "deal_disputed", "deal_ruled", "bond_slashed", "bond_released", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed", "auto_settle_set", "auto_settled",
 ];
 
 fn strip_descriptions(value: &mut Value) {
