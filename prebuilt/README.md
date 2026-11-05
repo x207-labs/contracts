@@ -19,3 +19,10 @@
 
 - sha256: `f832e53f01bf6b0739efb54bf0977d70544dd9bcece2234abd3e18525b4900de` (721,250 bytes, base58 `Hhs82yW5iJD2QH4juP6Ud5u7ApHGhcw8Zo5xCK1hxmoj`). It is the **reproducible** build (`scripts/repro-build.sh`) and the code of `x207-v015.testnet` since 2026-11-05 (redeploy tx `BYHH9YUPWuYtk453LELRFaFut7J4HKNiXyo9n4RydHAW`, state unchanged). The SD-094 run happened on the earlier host build, sha256 `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` (base58 `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5`, deploy tx `Ex6CjaGH1XgJfRD19KGpFftEapBNqszszcFPnf3roYy9`).
 - CT-111: the old host build differed because it held build-host absolute paths (`/Users/<name>/.cargo`) against `/home/near/.cargo` in the container.
+
+# Circle 0.0.16 (CT-117)
+
+`x207_circle-0.0.16.wasm` is the **reproducible** build (`scripts/repro-build.sh`) at interface 0.0.16 (relayer fee on `claim_evm` and `withdraw_stake_evm`, `maxFee` in the EIP-712 `Action`, 24 h deadline limit).
+
+- sha256: `4295351f395d0cc31419d43adf10e5b60f3c2a0e546ae0e912c5da4fef5aebe7` (742,662 bytes, base58 `5UusLiFf2xXdgyFGnfrjuhqFNof7TpyBoMGDdsx8Qu8S`). Built twice from the committed ref, byte-identical. It is the code of `x207-v016.testnet` (deployed with `new`, owner `x207v8.sputnikv2.testnet`, `admission` open, `relayer_fee` 250000).
+- Source: contracts commit `93f8d8e` (the ref given to `repro-build.sh`). The commit that adds this file changes only `prebuilt/`.
