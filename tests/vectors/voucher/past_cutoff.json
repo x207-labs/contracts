@@ -1,6 +1,6 @@
 {
   "name": "past_cutoff",
-  "description": "epoch belum di-close_epoch: get_epoch tanpa argumen masih epoch 42 fase cutoff (K-28).",
+  "description": "epoch not yet closed with close_epoch: get_epoch without an argument still answers epoch 42 in phase cutoff (K-28).",
   "input": {
     "voucher": {
       "circle": "x207-circle.near",

@@ -120,8 +120,8 @@ fn no_method_moves_d6_or_replaces_the_owner() {
     for function in abi_functions() {
         let name = function["name"].as_str().unwrap();
         let init = function["modifiers"].as_array().is_some_and(|m| m.iter().any(|x| x == "init"));
-        if name == "get_owner" || name == "withdraw_stake" || name == "on_withdraw_resolved" {
-            continue; // the member's own exit (CT-077), gated by the member, not the owner
+        if name == "get_owner" || name == "withdraw_stake" || name == "withdraw_stake_evm" || name == "on_withdraw_resolved" {
+            continue; // the member's own exit (CT-077; CT-105 for an EVM member, gated by its signature), not the owner
         }
         if name == "withdraw_intents_balance" || name == "on_intents_withdrawn" {
             continue; // BE-034: permissionless, the receiver is the circle itself, the amount is what `mt_on_transfer` booked; no owner is involved (and its private callback)
