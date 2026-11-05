@@ -71,7 +71,7 @@ Run on 2026-11-03 after the epoch, the same check for this circle answers `MATCH
 | Account | File | sha256 (hex) | base58 (= `code_hash`) |
 |---|---|---|---|
 | `x207-v014.testnet` | `prebuilt/x207_circle-0.0.14.wasm` | `7d731dfb15db44aa3a1ca95c28616a6e2faecbf11b87de538940991da33d39f9` | `9ShmoHDuE6QT3AAj6jYdW2Wo6pr53h5JFfs8ea7pYg6L` (redeployed 2026-11-05, tx `7TiLoPdbBcyksM3XSQ6MKRjBnqTC4V1g1h2DQDfi9zEB`; the code before was `743109cb…` / `8pZfS6mG…`, the code of the SD-090 transactions) |
-| `x207-v015.testnet` | `prebuilt/x207_circle-0.0.15.wasm` | `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` | `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5` |
+| `x207-v015.testnet` | `prebuilt/x207_circle-0.0.15.wasm` | `f832e53f01bf6b0739efb54bf0977d70544dd9bcece2234abd3e18525b4900de` | `Hhs82yW5iJD2QH4juP6Ud5u7ApHGhcw8Zo5xCK1hxmoj` (redeployed 2026-11-05, tx `BYHH9YUPWuYtk453LELRFaFut7J4HKNiXyo9n4RydHAW`; the SD-094 transactions ran on the code before: `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` / `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5`) |
 
 Checked on 2026-11-05: the sha256 of the code returned by the RPC `view_code` of each account (708,964 and 720,952 bytes) is equal to the sha256 of the committed file, and the `hash` field of `view_code` equals the base58 above. To repeat it:
 

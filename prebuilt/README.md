@@ -17,5 +17,5 @@
 
 `x207_circle-0.0.15.wasm` is the `cargo near build non-reproducible-wasm` build at interface 0.0.15 (opt-in auto-settle from stake).
 
-- sha256: `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` (base58 `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5`). It is the code of `x207-v015.testnet` (deploy tx `Ex6CjaGH1XgJfRD19KGpFftEapBNqszszcFPnf3roYy9`).
-- CT-111: the reproducible build of the same commit (`scripts/repro-build.sh HEAD`) gives sha256 `f832e53f01bf6b0739efb54bf0977d70544dd9bcece2234abd3e18525b4900de` (721,250 bytes), which differs from the line above for the same reason as 0.0.14 (build-host paths in the prebuilt file, `/Users/<name>/.cargo` against `/home/near/.cargo`). It becomes the release hash; the prebuilt file is replaced after the redeploy of `x207-v015.testnet`.
+- sha256: `f832e53f01bf6b0739efb54bf0977d70544dd9bcece2234abd3e18525b4900de` (721,250 bytes, base58 `Hhs82yW5iJD2QH4juP6Ud5u7ApHGhcw8Zo5xCK1hxmoj`). It is the **reproducible** build (`scripts/repro-build.sh`) and the code of `x207-v015.testnet` since 2026-11-05 (redeploy tx `BYHH9YUPWuYtk453LELRFaFut7J4HKNiXyo9n4RydHAW`, state unchanged). The SD-094 run happened on the earlier host build, sha256 `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` (base58 `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5`, deploy tx `Ex6CjaGH1XgJfRD19KGpFftEapBNqszszcFPnf3roYy9`).
+- CT-111: the old host build differed because it held build-host absolute paths (`/Users/<name>/.cargo`) against `/home/near/.cargo` in the container.
