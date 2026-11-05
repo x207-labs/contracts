@@ -12,3 +12,9 @@
 
 - sha256: `743109cbf74c266c75b5416f788ed10aad0233ad74d0211bf3daa9c39c8c2a87` (base58 `8pZfS6mGmJWJxMtPgVVVVLET6uMyobsVunmS8wTNkDGi`). It is the code of `x207-v014.testnet`.
 - Not a reproducible build; the release wasm (reproducible) comes with the tag.
+
+# Circle 0.0.15 (CT-108)
+
+`x207_circle-0.0.15.wasm` is the `cargo near build non-reproducible-wasm` build at interface 0.0.15 (opt-in auto-settle from stake).
+
+- sha256: `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` (base58 `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5`). It is the code of `x207-v015.testnet` (deploy tx `Ex6CjaGH1XgJfRD19KGpFftEapBNqszszcFPnf3roYy9`).
