@@ -15,6 +15,17 @@ Three on-chain results on testnet, all with a fresh spike key (not a Hardhat key
 | `ft_transfer` of 3000 units to `x207-deployer.testnet` (the account held 5000 after an owner `mint`) | `GqWKKZjmskwT4vgAkLitj9xFoAKQTe2txDgPRMaXDNgW` | Success: the balance went from 5000 to 2000. So a `0x` key can move the balance that a token keeps for its `0x` id (the SD-090 payout case). |
 | `functionCall("x207-v015.testnet", "set_auto_settle", {enabled: true})`, 1 yocto | `BQ1AgLZV71kub29evxTgMytCWwxDjoKcEriziiV6v68q` | The contract panicked `ERR_NOT_MEMBER: 0x4c72ec82…` because the spike account is not a member. That is the expected answer and proves the circle sees the 0x account as `predecessor`. |
 
+## SD-095: the SD-090 agent spends its own payout
+
+The agent `0x58cd3d4987ad29a7bafdb8cdb90bfbe995e680b7` (the payout of 80000 from the SD-090 clearing run on v014, kept by the token under its 0x id) had no NEAR account. 1 NEAR sent to it (tx `GL8d5tvsneybDdui3ktz7HezeEXidHGM9GYcagfhwEN3`) created the eth-implicit account with the wallet contract (`get_nonce` = 0). Then its own key (read from a file, never printed) signed a type-2 transaction, chain id 398, `functionCall("usdt.x207-deployer.testnet", "ft_transfer", {receiver_id: "x207-deployer.testnet", amount: "30000"}, 30 Tgas, 1 yocto)`, sent to `rlp_execute` by `x207-deployer.testnet` (tx `J59PWbv4MHUz2o7DPJcNk1fUZGrnZc8xy7N39VTXwx6m`, success).
+
+| | before | after |
+|---|---|---|
+| balance of the agent at the token | 80000 | 50000 |
+| balance of `x207-deployer.testnet` at the token | 3000 | 33000 |
+
+No `storage_deposit` was needed for the agent (the relayer paid it when the payout arrived). So the payout of a clearing run is spent by the 0x key alone; x207 runs no relayer for it. Record: `docs/testnet-epochs/sd090-evm-agent-run.json`, field `spendFromOwnKey`.
+
 ## What I found out
 
 - NEP-518 is live on testnet, and the wallet contract is installed on a 0x account as soon as it is created by a transfer. No setup, no deploy step.
