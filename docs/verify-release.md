@@ -64,3 +64,23 @@ This is the check of steps 1 and 2 on a circle that was deployed from the downlo
 - **Not covered:** a circle on mainnet, real Intents (`intents.testnet` has no code), and the token and multi-token escrows (they are in 0.0.11, not in this release).
 
 Run on 2026-11-03 after the epoch, the same check for this circle answers `MATCH: the account runs the wasm of v0.0.9`. In one command: `scripts/verify-release.sh v0.0.9 x207-circle-v11.testnet https://rpc.testnet.fastnear.com`.
+
+## Testnet circles v014 and v015 run a prebuilt local build, not a release (CT-110, 2026-11-05)
+`x207-v014.testnet` (interface 0.0.14) and `x207-v015.testnet` (interface 0.0.15) were deployed from `cargo near build non-reproducible-wasm` on one machine, and the exact files are committed in `prebuilt/`. They are not the reproducible build of a tag, so `scripts/verify-release.sh` (which downloads a release) does not apply to them. The chain of proof is shorter and has no container: the committed file equals the code on chain.
+
+| Account | File | sha256 (hex) | base58 (= `code_hash`) |
+|---|---|---|---|
+| `x207-v014.testnet` | `prebuilt/x207_circle-0.0.14.wasm` | `743109cbf74c266c75b5416f788ed10aad0233ad74d0211bf3daa9c39c8c2a87` | `8pZfS6mGmJWJxMtPgVVVVLET6uMyobsVunmS8wTNkDGi` |
+| `x207-v015.testnet` | `prebuilt/x207_circle-0.0.15.wasm` | `3632861bddfb9b2993cb337346dfa3a4e6f3f11de0d0e006c8573af90b0d28fe` | `4eZhZF16ySGGv9ux3gzbxnH6znVxcHNQYivVFdfpuHz5` |
+
+Checked on 2026-11-05: the sha256 of the code returned by the RPC `view_code` of each account (708,964 and 720,952 bytes) is equal to the sha256 of the committed file, and the `hash` field of `view_code` equals the base58 above. To repeat it:
+
+```bash
+ACCOUNT=x207-v015.testnet; FILE=prebuilt/x207_circle-0.0.15.wasm
+curl -s -X POST https://rpc.testnet.fastnear.com -H 'content-type: application/json' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":{\"request_type\":\"view_code\",\"finality\":\"final\",\"account_id\":\"$ACCOUNT\"}}" \
+  | python3 -c 'import json,sys,base64,hashlib;r=json.load(sys.stdin)["result"];print(hashlib.sha256(base64.b64decode(r["code_base64"])).hexdigest(), r["hash"])'
+shasum -a 256 "$FILE"    # the two hex values must be equal
+```
+
+What this does **not** prove: that the file was built from a given commit. A local build is not byte-reproducible on another machine (a different toolchain path or container gives another hash). A reproducible build of the same source (`scripts/repro-build.sh <ref> <outdir>`, needs Docker) has its own hash and will differ from the account above; a mainnet deployment must use the wasm of a release, as written above. Source of the 0.0.14 file: commits `87f29fb` to `f03879e`; of the 0.0.15 file: commit `a933555` (`CT-108`).
