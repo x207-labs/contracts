@@ -6,6 +6,7 @@
 //! - `limit <= stake` for every member (I-01), and a payer that just registered a voucher owes no more than its limit;
 //! - for every epoch the debtors owe exactly what the creditors are owed (I-09);
 //! - the USDT that the contract booked (`get_pool().accounted`) equals the USDT that came in minus what went out, and `total_stake` is the sum of the stakes (D6).
+//!
 //! Run: `cargo test --lib stateful_tests`. A failing sequence is shrunk by proptest and its seed is kept in `proptest-regressions/`.
 
 use std::collections::{BTreeMap, HashMap};
@@ -157,7 +158,7 @@ enum Op {
     RemoveIntent(usize, u8),
     SetAssetClass,
     OfferGrant(usize),
-    AcceptGrant(usize, u8),
+    AcceptGrant(usize, #[allow(dead_code)] u8),
     RevokeGrant(usize, u8, u8),
     Advance(u8),
     CloseEpoch,
@@ -377,11 +378,11 @@ fn run_inner(w: &mut World, op: &Op) -> Result<(), String> {
             });
             let Some((e, amount)) = found else {
                 return w.call(&format!("m{m}.near"), NearToken::from_yoctonear(1), vec![], |c| {
-                    c.claim(epoch, crate::types::ClaimDestination::Near);
+                    let _ = c.claim(epoch, crate::types::ClaimDestination::Near);
                 });
             };
             w.call(&format!("m{m}.near"), NearToken::from_yoctonear(1), vec![], |c| {
-                c.claim(e, crate::types::ClaimDestination::Near);
+                let _ = c.claim(e, crate::types::ClaimDestination::Near);
             })?;
             let result = if ok { PromiseResult::Successful(vec![]) } else { PromiseResult::Failed };
             let paid = w.call(CIRCLE, none, vec![result], |c| c.on_claim_resolved(e, acc(m), U128(amount), crate::types::ClaimDestination::Near))?;

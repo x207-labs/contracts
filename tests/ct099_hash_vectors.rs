@@ -9,7 +9,14 @@ use x207_circle::events::{edges_hash, positions_hash, PositionEntry};
 use x207_circle::types::ClearingEdge;
 
 fn vector() -> Value {
-    serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vectors/clearing_hashes.json")).unwrap()).unwrap()
+    serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/clearing_hashes.json"
+        ))
+        .unwrap(),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -20,9 +27,18 @@ fn edges_hash_matches_the_golden_vector() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|e| ClearingEdge { debtor: e["debtor"].as_str().unwrap().parse().unwrap(), creditor: e["creditor"].as_str().unwrap().parse().unwrap(), cleared: U128(e["cleared"].as_str().unwrap().parse().unwrap()) })
+            .map(|e| ClearingEdge {
+                debtor: e["debtor"].as_str().unwrap().parse().unwrap(),
+                creditor: e["creditor"].as_str().unwrap().parse().unwrap(),
+                cleared: U128(e["cleared"].as_str().unwrap().parse().unwrap()),
+            })
             .collect();
-        assert_eq!(edges_hash(&edges), case["edges_hash"].as_str().unwrap(), "{}", case["name"]);
+        assert_eq!(
+            edges_hash(&edges),
+            case["edges_hash"].as_str().unwrap(),
+            "{}",
+            case["name"]
+        );
     }
 }
 
@@ -43,6 +59,11 @@ fn positions_hash_matches_the_golden_vector() {
                 outstanding_debt: U128(p["outstanding_debt"].as_str().unwrap().parse().unwrap()),
             })
             .collect();
-        assert_eq!(positions_hash(&positions), case["positions_hash"].as_str().unwrap(), "{}", case["name"]);
+        assert_eq!(
+            positions_hash(&positions),
+            case["positions_hash"].as_str().unwrap(),
+            "{}",
+            case["name"]
+        );
     }
 }

@@ -29,7 +29,11 @@ async fn fund_intents(f: &Funded, who: &Account, amount: u128) -> anyhow::Result
     Ok(())
 }
 
-async fn pay_through_intents(f: &Funded, debtor: &str, amount: u128) -> anyhow::Result<ExecutionFinalResult> {
+async fn pay_through_intents(
+    f: &Funded,
+    debtor: &str,
+    amount: u128,
+) -> anyhow::Result<ExecutionFinalResult> {
     let intents = f.intents.as_ref().expect("mock intents");
     let caller = f.circle.worker.dev_create_account().await?;
     Ok(caller
@@ -45,7 +49,11 @@ async fn pay_through_intents(f: &Funded, debtor: &str, amount: u128) -> anyhow::
 
 async fn withdraw(f: &Funded, gas_tgas: u64) -> anyhow::Result<ExecutionFinalResult> {
     let anyone = f.circle.worker.dev_create_account().await?;
-    Ok(anyone.call(f.circle.contract.id(), "withdraw_intents_balance").gas(Gas::from_tgas(gas_tgas)).transact().await?)
+    Ok(anyone
+        .call(f.circle.contract.id(), "withdraw_intents_balance")
+        .gas(Gas::from_tgas(gas_tgas))
+        .transact()
+        .await?)
 }
 
 async fn claim(f: &Funded, who: &Account) -> anyhow::Result<ExecutionFinalResult> {
@@ -60,11 +68,20 @@ async fn claim(f: &Funded, who: &Account) -> anyhow::Result<ExecutionFinalResult
 
 async fn at_intents(f: &Funded) -> anyhow::Result<String> {
     let intents = f.intents.as_ref().expect("mock intents");
-    Ok(intents.view("balance_of").args_json(json!({"account_id": f.circle.contract.id()})).await?.json::<String>()?)
+    Ok(intents
+        .view("balance_of")
+        .args_json(json!({"account_id": f.circle.contract.id()}))
+        .await?
+        .json::<String>()?)
 }
 
 async fn booked(f: &Funded) -> anyhow::Result<String> {
-    Ok(f.circle.view("intents_balance", json!({})).await?.as_str().unwrap().to_string())
+    Ok(f.circle
+        .view("intents_balance", json!({}))
+        .await?
+        .as_str()
+        .unwrap()
+        .to_string())
 }
 
 /// How much more the pool says the circle holds than its NEP-141 account does.
@@ -76,7 +93,8 @@ async fn unbacked(f: &Funded) -> anyhow::Result<i128> {
 
 // TC-BE-034-10..16: pool booked at mt_on_transfer, NEP-141 short, claim fails and can be repeated, withdrawal fixes it
 #[tokio::test]
-async fn the_booked_pool_is_backed_after_the_withdrawal_and_a_failed_claim_can_be_repeated() -> anyhow::Result<()> {
+async fn the_booked_pool_is_backed_after_the_withdrawal_and_a_failed_claim_can_be_repeated(
+) -> anyhow::Result<()> {
     let f = window().await?;
     let scraper = f.accounts["scraper"].clone();
     fund_intents(&f, &scraper, 35 * CREDIT).await?;
@@ -97,8 +115,21 @@ async fn the_booked_pool_is_backed_after_the_withdrawal_and_a_failed_claim_can_b
     let gpu_before = f.balance(&f.usdt, gpu.id()).await?;
     let failed = claim(&f, &gpu).await?;
     let log = events(&failed);
-    assert!(log.iter().any(|(n, d)| n == "residual_claim_failed" && d["amount"] == "35000000" && d["status"] == "claimable"), "{log:?}");
-    assert_eq!(f.circle.view("net_position", json!({"epoch": 1, "account_id": account_of("gpu")})).await?["status"], "claimable");
+    assert!(
+        log.iter().any(|(n, d)| n == "residual_claim_failed"
+            && d["amount"] == "35000000"
+            && d["status"] == "claimable"),
+        "{log:?}"
+    );
+    assert_eq!(
+        f.circle
+            .view(
+                "net_position",
+                json!({"epoch": 1, "account_id": account_of("gpu")})
+            )
+            .await?["status"],
+        "claimable"
+    );
     assert_eq!(f.balance(&f.usdt, gpu.id()).await?, gpu_before);
 
     // the withdrawal: permissionless, the whole booked amount, one event, the books agree
@@ -106,17 +137,38 @@ async fn the_booked_pool_is_backed_after_the_withdrawal_and_a_failed_claim_can_b
     let done = withdraw(&f, 300).await?;
     assert!(done.is_success(), "{:?}", failure_text(&done));
     assert_eq!(done.clone().json::<String>()?, "35000000");
-    assert!(events(&done).iter().any(|(n, d)| n == "intents_withdrawn" && d["amount"] == "35000000"));
-    assert_eq!(f.balance(&f.usdt, f.circle.contract.id()).await?, before + 35 * CREDIT);
-    assert_eq!((at_intents(&f).await?.as_str(), booked(&f).await?.as_str()), ("0", "0"));
+    assert!(events(&done)
+        .iter()
+        .any(|(n, d)| n == "intents_withdrawn" && d["amount"] == "35000000"));
+    assert_eq!(
+        f.balance(&f.usdt, f.circle.contract.id()).await?,
+        before + 35 * CREDIT
+    );
+    assert_eq!(
+        (at_intents(&f).await?.as_str(), booked(&f).await?.as_str()),
+        ("0", "0")
+    );
     let again = withdraw(&f, 300).await?;
-    assert!(failure_text(&again).expect("refused").contains("ERR_NOTHING_TO_WITHDRAW"));
+    assert!(failure_text(&again)
+        .expect("refused")
+        .contains("ERR_NOTHING_TO_WITHDRAW"));
 
     // the claim that failed is repeated and pays
     let paid_claim = claim(&f, &gpu).await?;
     assert!(paid_claim.is_success(), "{:?}", failure_text(&paid_claim));
-    assert_eq!(f.balance(&f.usdt, gpu.id()).await?, gpu_before + 35 * CREDIT);
-    assert_eq!(f.circle.view("net_position", json!({"epoch": 1, "account_id": account_of("gpu")})).await?["status"], "claimed");
+    assert_eq!(
+        f.balance(&f.usdt, gpu.id()).await?,
+        gpu_before + 35 * CREDIT
+    );
+    assert_eq!(
+        f.circle
+            .view(
+                "net_position",
+                json!({"epoch": 1, "account_id": account_of("gpu")})
+            )
+            .await?["status"],
+        "claimed"
+    );
     Ok(())
 }
 
@@ -125,19 +177,33 @@ async fn the_booked_pool_is_backed_after_the_withdrawal_and_a_failed_claim_can_b
 async fn a_failed_withdrawal_books_nothing_and_can_be_called_again() -> anyhow::Result<()> {
     let f = window().await?;
     let nothing = withdraw(&f, 300).await?;
-    assert!(failure_text(&nothing).expect("refused").contains("ERR_NOTHING_TO_WITHDRAW"));
+    assert!(failure_text(&nothing)
+        .expect("refused")
+        .contains("ERR_NOTHING_TO_WITHDRAW"));
 
     // Intents holds no NEP-141 tokens behind the balance (nobody deposited), so its transfer fails and it answers 0
     let paid = pay_through_intents(&f, "scraper", 35 * CREDIT).await?;
     assert!(paid.is_success(), "{:?}", failure_text(&paid));
     assert_eq!(booked(&f).await?, "35000000");
     let low = withdraw(&f, 60).await?;
-    assert!(failure_text(&low).expect("refused").contains("ERR_GAS_TOO_LOW"));
+    assert!(failure_text(&low)
+        .expect("refused")
+        .contains("ERR_GAS_TOO_LOW"));
     let failed = withdraw(&f, 300).await?;
     assert!(failed.is_success(), "{:?}", failure_text(&failed));
-    assert_eq!(failed.clone().json::<String>()?, "0", "nothing left Intents");
-    assert!(events(&failed).iter().all(|(n, _)| n != "intents_withdrawn"));
-    assert_eq!((booked(&f).await?.as_str(), at_intents(&f).await?.as_str()), ("35000000", "35000000"), "still booked, still at Intents");
+    assert_eq!(
+        failed.clone().json::<String>()?,
+        "0",
+        "nothing left Intents"
+    );
+    assert!(events(&failed)
+        .iter()
+        .all(|(n, _)| n != "intents_withdrawn"));
+    assert_eq!(
+        (booked(&f).await?.as_str(), at_intents(&f).await?.as_str()),
+        ("35000000", "35000000"),
+        "still booked, still at Intents"
+    );
 
     // the deposit arrives at Intents; the same call now works
     let scraper = f.accounts["scraper"].clone();
@@ -155,14 +221,24 @@ async fn a_second_withdrawal_while_one_is_in_flight_is_refused() -> anyhow::Resu
     let f = window().await?;
     let scraper = f.accounts["scraper"].clone();
     fund_intents(&f, &scraper, 35 * CREDIT).await?;
-    assert!(pay_through_intents(&f, "scraper", 35 * CREDIT).await?.is_success());
+    assert!(pay_through_intents(&f, "scraper", 35 * CREDIT)
+        .await?
+        .is_success());
     let (a, b) = tokio::join!(withdraw(&f, 300), withdraw(&f, 300));
     let (a, b) = (a?, b?);
     let (won, lost) = if a.is_success() { (a, b) } else { (b, a) };
     assert!(won.is_success(), "{:?}", failure_text(&won));
     let text = failure_text(&lost).expect("the second call is refused");
-    assert!(text.contains("ERR_WITHDRAW_IN_FLIGHT") || text.contains("ERR_NOTHING_TO_WITHDRAW"), "{}", text.chars().take(200).collect::<String>());
-    assert_eq!(unbacked(&f).await?, 0, "after the one withdrawal the pool is backed");
+    assert!(
+        text.contains("ERR_WITHDRAW_IN_FLIGHT") || text.contains("ERR_NOTHING_TO_WITHDRAW"),
+        "{}",
+        text.chars().take(200).collect::<String>()
+    );
+    assert_eq!(
+        unbacked(&f).await?,
+        0,
+        "after the one withdrawal the pool is backed"
+    );
     assert_eq!(booked(&f).await?, "0");
     Ok(())
 }

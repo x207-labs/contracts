@@ -25,7 +25,15 @@ fn voucher(cumulative: &str) -> Value {
 }
 
 /// Spec 3.3 written out byte by byte.
-fn signing_hash(circle: &str, payer: &str, payee: &str, epoch: u64, seq: u64, cumulative: &str, resource: &str) -> [u8; 32] {
+fn signing_hash(
+    circle: &str,
+    payer: &str,
+    payee: &str,
+    epoch: u64,
+    seq: u64,
+    cumulative: &str,
+    resource: &str,
+) -> [u8; 32] {
     let message = format!(
         r#"{{"circle":"{circle}","payer":"{payer}","payee":"{payee}","epoch":{epoch},"seq":{seq},"cumulativeAmount":"{cumulative}","unit":"credit","resource":"{resource}"}}"#
     );
@@ -55,11 +63,17 @@ fn sign(key: &SigningKey) -> [u8; 64] {
 }
 
 fn encode_sig(signature: &[u8]) -> String {
-    format!("ed25519:{}", near_sdk::bs58::encode(signature).into_string())
+    format!(
+        "ed25519:{}",
+        near_sdk::bs58::encode(signature).into_string()
+    )
 }
 
 fn encode_key(key: &SigningKey) -> String {
-    format!("ed25519:{}", near_sdk::bs58::encode(key.verifying_key().to_bytes()).into_string())
+    format!(
+        "ed25519:{}",
+        near_sdk::bs58::encode(key.verifying_key().to_bytes()).into_string()
+    )
 }
 
 async fn deploy() -> anyhow::Result<(Worker<near_workspaces::network::Sandbox>, Contract)> {
@@ -69,9 +83,20 @@ async fn deploy() -> anyhow::Result<(Worker<near_workspaces::network::Sandbox>, 
     Ok((worker, contract))
 }
 
-async fn verify(contract: &Contract, voucher: Value, signature: String, pubkey: String) -> anyhow::Result<bool> {
+async fn verify(
+    contract: &Contract,
+    voucher: Value,
+    signature: String,
+    pubkey: String,
+) -> anyhow::Result<bool> {
     let args = json!({"voucher": voucher, "signature": signature, "pubkey": pubkey});
-    Ok(contract.call("probe_verify").args_json(args).gas(Gas::from_tgas(100)).transact().await?.json()?)
+    Ok(contract
+        .call("probe_verify")
+        .args_json(args)
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?
+        .json()?)
 }
 
 // TC-CT-003-01..04
@@ -81,23 +106,65 @@ async fn verification_accepts_valid_and_rejects_tampered() -> anyhow::Result<()>
     let key = SigningKey::from_bytes(&[7u8; 32]);
     let signature = sign(&key);
 
-    assert!(verify(&contract, voucher("2740000"), encode_sig(&signature), encode_key(&key)).await?);
-    assert!(!verify(&contract, voucher("2740001"), encode_sig(&signature), encode_key(&key)).await?);
+    assert!(
+        verify(
+            &contract,
+            voucher("2740000"),
+            encode_sig(&signature),
+            encode_key(&key)
+        )
+        .await?
+    );
+    assert!(
+        !verify(
+            &contract,
+            voucher("2740001"),
+            encode_sig(&signature),
+            encode_key(&key)
+        )
+        .await?
+    );
 
     let mut flipped = signature;
     flipped[0] ^= 1;
-    assert!(!verify(&contract, voucher("2740000"), encode_sig(&flipped), encode_key(&key)).await?);
+    assert!(
+        !verify(
+            &contract,
+            voucher("2740000"),
+            encode_sig(&flipped),
+            encode_key(&key)
+        )
+        .await?
+    );
 
     let access_key = SigningKey::from_bytes(&[9u8; 32]);
-    assert!(!verify(&contract, voucher("2740000"), encode_sig(&signature), encode_key(&access_key)).await?);
+    assert!(
+        !verify(
+            &contract,
+            voucher("2740000"),
+            encode_sig(&signature),
+            encode_key(&access_key)
+        )
+        .await?
+    );
     Ok(())
 }
 
-async fn burnt_tgas(contract: &Contract, args: &Value, count: u32, stage: &str) -> anyhow::Result<f64> {
+async fn burnt_tgas(
+    contract: &Contract,
+    args: &Value,
+    count: u32,
+    stage: &str,
+) -> anyhow::Result<f64> {
     let mut args = args.clone();
     args["count"] = json!(count);
     args["stage"] = json!(stage);
-    let outcome = contract.call("probe_measure").args_json(args).gas(Gas::from_tgas(300)).transact().await?;
+    let outcome = contract
+        .call("probe_measure")
+        .args_json(args)
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?;
     let burnt = outcome.total_gas_burnt.as_gas() as f64 / 1e12;
     let passed: u32 = outcome.json()?;
     assert_eq!(passed, count, "{stage} x{count}");

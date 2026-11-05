@@ -18,10 +18,17 @@ use std::collections::BTreeMap;
 const INTENTS_SHA256: &str = "a1afab98916d9f213746544dcf8e4e6bdb22c0be6bc5dfbd8ea8814c9922b547";
 
 fn intents_wasm() -> Option<Vec<u8>> {
-    let path = std::env::var("X207_INTENTS_WASM").unwrap_or_else(|_| "target/intents-near/intents.wasm".to_string());
+    let path = std::env::var("X207_INTENTS_WASM")
+        .unwrap_or_else(|_| "target/intents-near/intents.wasm".to_string());
     let bytes = std::fs::read(&path).ok()?;
-    let hex: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
-    assert_eq!(hex, INTENTS_SHA256, "{path} is not the wasm of intents.near that this test was written for");
+    let hex: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(
+        hex, INTENTS_SHA256,
+        "{path} is not the wasm of intents.near that this test was written for"
+    );
     Some(bytes)
 }
 
@@ -29,7 +36,9 @@ fn intents_wasm() -> Option<Vec<u8>> {
 async fn deploy_with_real_intents(wasm: &[u8]) -> anyhow::Result<Funded> {
     let worker = near_workspaces::sandbox().await?;
     let token = |w: near_workspaces::Worker<near_workspaces::network::Sandbox>| async move {
-        let ft = w.dev_deploy(&std::fs::read(common::probe_wasm("mock_ft"))?).await?;
+        let ft = w
+            .dev_deploy(&std::fs::read(common::probe_wasm("mock_ft"))?)
+            .await?;
         ft.call("new").transact().await?.into_result()?;
         anyhow::Ok(ft)
     };
@@ -50,7 +59,9 @@ async fn deploy_with_real_intents(wasm: &[u8]) -> anyhow::Result<Funded> {
         .transact()
         .await?;
     assert!(init.is_success(), "intents new: {:?}", failure_text(&init));
-    let contract = worker.dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?).await?;
+    let contract = worker
+        .dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?)
+        .await?;
     contract
         .call("new")
         .args_json(json!({
@@ -61,13 +72,30 @@ async fn deploy_with_real_intents(wasm: &[u8]) -> anyhow::Result<Funded> {
         .await?
         .into_result()?;
     let keeper = worker.dev_create_account().await?;
-    let circle = Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new(), max_jump: 4000, keeper };
-    Ok(Funded { circle, usdt, palsu, intents: Some(intents), accounts: BTreeMap::new() })
+    let circle = Circle {
+        worker,
+        contract,
+        keys: BTreeMap::new(),
+        seqs: BTreeMap::new(),
+        max_jump: 4000,
+        keeper,
+    };
+    Ok(Funded {
+        circle,
+        usdt,
+        palsu,
+        intents: Some(intents),
+        accounts: BTreeMap::new(),
+    })
 }
 
 async fn mt_balance(f: &Funded, who: &str) -> anyhow::Result<String> {
     let intents = f.intents.as_ref().expect("intents");
-    Ok(intents.view("mt_balance_of").args_json(json!({"account_id": who, "token_id": format!("nep141:{}", f.usdt.id())})).await?.json::<String>()?)
+    Ok(intents
+        .view("mt_balance_of")
+        .args_json(json!({"account_id": who, "token_id": format!("nep141:{}", f.usdt.id())}))
+        .await?
+        .json::<String>()?)
 }
 
 // TC-CT-103-01: a residual paid through the real Intents and claimed in USDT
@@ -94,8 +122,16 @@ async fn a_residual_is_paid_through_the_real_intents_contract_and_claimed() -> a
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
-    assert!(deposit.is_success(), "deposit to Intents: {:?}", failure_text(&deposit));
-    assert_eq!(mt_balance(&f, scraper.id().as_str()).await?, (35 * CREDIT).to_string(), "the deposit is a multi-token balance of scraper at Intents");
+    assert!(
+        deposit.is_success(),
+        "deposit to Intents: {:?}",
+        failure_text(&deposit)
+    );
+    assert_eq!(
+        mt_balance(&f, scraper.id().as_str()).await?,
+        (35 * CREDIT).to_string(),
+        "the deposit is a multi-token balance of scraper at Intents"
+    );
 
     // 2. scraper pays its residual with `mt_transfer_call` of the real Intents: the circle books it in the pool
     let paid = scraper
@@ -108,12 +144,27 @@ async fn a_residual_is_paid_through_the_real_intents_contract_and_claimed() -> a
         .gas(Gas::from_tgas(200))
         .transact()
         .await?;
-    assert!(paid.is_success(), "mt_transfer_call: {:?}", failure_text(&paid));
+    assert!(
+        paid.is_success(),
+        "mt_transfer_call: {:?}",
+        failure_text(&paid)
+    );
     let log = events(&paid);
-    assert!(log.iter().any(|(n, d)| n == "residual_paid" && d["amount"] == "35000000"), "{log:?}");
+    assert!(
+        log.iter()
+            .any(|(n, d)| n == "residual_paid" && d["amount"] == "35000000"),
+        "{log:?}"
+    );
     assert_eq!(mt_balance(&f, scraper.id().as_str()).await?, "0");
-    assert_eq!(mt_balance(&f, &circle_id).await?, (35 * CREDIT).to_string(), "the tokens now sit at Intents under the account of the circle");
-    assert_eq!(f.circle.view("intents_balance", json!({})).await?.as_str(), Some("35000000"));
+    assert_eq!(
+        mt_balance(&f, &circle_id).await?,
+        (35 * CREDIT).to_string(),
+        "the tokens now sit at Intents under the account of the circle"
+    );
+    assert_eq!(
+        f.circle.view("intents_balance", json!({})).await?.as_str(),
+        Some("35000000")
+    );
 
     // 3. the epoch is finalized; the NEP-141 balance of the circle does not hold the 35 yet
     let fin = finalize(&f.circle).await?;
@@ -122,13 +173,29 @@ async fn a_residual_is_paid_through_the_real_intents_contract_and_claimed() -> a
     // 4. `withdraw_intents_balance` calls the real `ft_withdraw` of Intents: the USDT comes to the NEP-141 account of the circle
     let before = f.balance(&f.usdt, f.circle.contract.id()).await?;
     let anyone = f.circle.worker.dev_create_account().await?;
-    let done = anyone.call(f.circle.contract.id(), "withdraw_intents_balance").gas(Gas::from_tgas(300)).transact().await?;
-    assert!(done.is_success(), "withdraw_intents_balance: {:?}", failure_text(&done));
+    let done = anyone
+        .call(f.circle.contract.id(), "withdraw_intents_balance")
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?;
+    assert!(
+        done.is_success(),
+        "withdraw_intents_balance: {:?}",
+        failure_text(&done)
+    );
     assert_eq!(done.clone().json::<String>()?, "35000000");
-    assert!(events(&done).iter().any(|(n, d)| n == "intents_withdrawn" && d["amount"] == "35000000"));
-    assert_eq!(f.balance(&f.usdt, f.circle.contract.id()).await?, before + 35 * CREDIT);
+    assert!(events(&done)
+        .iter()
+        .any(|(n, d)| n == "intents_withdrawn" && d["amount"] == "35000000"));
+    assert_eq!(
+        f.balance(&f.usdt, f.circle.contract.id()).await?,
+        before + 35 * CREDIT
+    );
     assert_eq!(mt_balance(&f, &circle_id).await?, "0");
-    assert_eq!(f.circle.view("intents_balance", json!({})).await?.as_str(), Some("0"));
+    assert_eq!(
+        f.circle.view("intents_balance", json!({})).await?.as_str(),
+        Some("0")
+    );
 
     // 5. gpu claims its 35 credit in USDT
     let gpu_before = f.balance(&f.usdt, gpu.id()).await?;
@@ -140,8 +207,17 @@ async fn a_residual_is_paid_through_the_real_intents_contract_and_claimed() -> a
         .transact()
         .await?;
     assert!(claimed.is_success(), "claim: {:?}", failure_text(&claimed));
-    assert_eq!(f.balance(&f.usdt, gpu.id()).await?, gpu_before + 35 * CREDIT);
-    let position: Value = f.circle.view("net_position", json!({"epoch": 1, "account_id": common::circle::account_of("gpu")})).await?;
+    assert_eq!(
+        f.balance(&f.usdt, gpu.id()).await?,
+        gpu_before + 35 * CREDIT
+    );
+    let position: Value = f
+        .circle
+        .view(
+            "net_position",
+            json!({"epoch": 1, "account_id": common::circle::account_of("gpu")}),
+        )
+        .await?;
     assert_eq!(position["status"], "claimed");
     Ok(())
 }

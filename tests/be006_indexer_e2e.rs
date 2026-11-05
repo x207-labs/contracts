@@ -26,11 +26,22 @@ async fn indexer_agrees_with_the_contract() -> anyhow::Result<()> {
     // short jumps: the sandbox forgets old outcomes after a few epochs of height, so the indexer follows live
     f.circle.max_jump = 25;
     let start_block = f.circle.worker.view_block().await?.height();
-    let rpc = format!("http://{}", f.circle.worker.rpc_addr().trim_start_matches("http://"));
-    let accounts: Vec<String> = ["scraper", "gpu", "translator"].iter().map(|n| account_of(n)).collect();
+    let rpc = format!(
+        "http://{}",
+        f.circle.worker.rpc_addr().trim_start_matches("http://")
+    );
+    let accounts: Vec<String> = ["scraper", "gpu", "translator"]
+        .iter()
+        .map(|n| account_of(n))
+        .collect();
     let mut indexer = tokio::process::Command::new("node")
         .arg("tests/e2e/index_chain.mjs")
-        .args([rpc, f.circle.contract.id().to_string(), start_block.to_string(), "agents-main".into()])
+        .args([
+            rpc,
+            f.circle.contract.id().to_string(),
+            start_block.to_string(),
+            "agents-main".into(),
+        ])
         .args(&accounts)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -57,37 +68,112 @@ async fn indexer_agrees_with_the_contract() -> anyhow::Result<()> {
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     use tokio::io::AsyncWriteExt;
     // a halted indexer has already left: the broken pipe is then not the interesting error
-    let _ = indexer.stdin.take().expect("stdin").write_all(b"stop\n").await;
+    let _ = indexer
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"stop\n")
+        .await;
     let output = indexer.wait_with_output().await?;
-    assert!(output.status.success(), "indexer failed: {}\n{}", String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success(),
+        "indexer failed: {}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
     let out: Value = serde_json::from_slice(&output.stdout)?;
 
-    let list = |v: &Value| v["events"].as_array().unwrap().iter().map(|e| format!("{}:{}", e["event"], e["handled"])).collect::<Vec<_>>().join(" ");
-    assert!(out["haltError"].is_null(), "the indexer halted: {} after {} blocks; debug {}; events: {}", out["haltError"], out["processed"], out["debug"], list(&out));
+    let list = |v: &Value| {
+        v["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| format!("{}:{}", e["event"], e["handled"]))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    assert!(
+        out["haltError"].is_null(),
+        "the indexer halted: {} after {} blocks; debug {}; events: {}",
+        out["haltError"],
+        out["processed"],
+        out["debug"],
+        list(&out)
+    );
     // every event the contract wrote was understood: nothing pending, nothing unknown
     let events = out["events"].as_array().unwrap();
-    assert!(events.len() >= 15, "{} events: {}; debug {}", events.len(), list(&out), out["debug"]);
+    assert!(
+        events.len() >= 15,
+        "{} events: {}; debug {}",
+        events.len(),
+        list(&out),
+        out["debug"]
+    );
     for e in events {
         assert_eq!(e["handled"], 1, "event {} was not handled", e["event"]);
     }
-    let names: Vec<&str> = events.iter().map(|e| e["event"].as_str().unwrap()).collect();
-    for expected in ["member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "exit_requested", "stake_withdrawn"] {
-        assert!(names.contains(&expected), "{expected} missing from {names:?}");
+    let names: Vec<&str> = events
+        .iter()
+        .map(|e| e["event"].as_str().unwrap())
+        .collect();
+    for expected in [
+        "member_joined",
+        "stake_added",
+        "voucher_registered",
+        "epoch_cutoff",
+        "clearing_submitted",
+        "clearing_applied",
+        "epoch_committed",
+        "member_defaulted",
+        "limits_updated",
+        "epoch_finalized",
+        "residual_claimed",
+        "exit_requested",
+        "stake_withdrawn",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "{expected} missing from {names:?}"
+        );
     }
 
     // TC-BE-020-15: the 207 report equals net_position of the contract
     let report = &out["report"]["1"];
     assert_eq!(report["status"], 207);
     let body = &report["body"];
-    assert_eq!((body["phase"].as_str(), body["committed"].as_bool(), body["finalized"].as_bool()), (Some("finalized"), Some(true), Some(true)));
-    assert_eq!((body["totalObligation"].as_str(), body["cleared"].as_str()), (Some("110000000"), Some("75000000")));
+    assert_eq!(
+        (
+            body["phase"].as_str(),
+            body["committed"].as_bool(),
+            body["finalized"].as_bool()
+        ),
+        (Some("finalized"), Some(true), Some(true))
+    );
+    assert_eq!(
+        (body["totalObligation"].as_str(), body["cleared"].as_str()),
+        (Some("110000000"), Some("75000000"))
+    );
     for name in ["scraper", "gpu", "translator"] {
         let id = account_of(name);
-        let on_chain = f.circle.view("net_position", json!({"epoch": 1, "account_id": id})).await?;
-        let entry = body["members"].as_array().unwrap().iter().find(|m| m["account"] == id.as_str()).unwrap_or_else(|| panic!("{name} missing from the report"));
-        let expected_net = if on_chain.is_null() { "0".to_string() } else {
+        let on_chain = f
+            .circle
+            .view("net_position", json!({"epoch": 1, "account_id": id}))
+            .await?;
+        let entry = body["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["account"] == id.as_str())
+            .unwrap_or_else(|| panic!("{name} missing from the report"));
+        let expected_net = if on_chain.is_null() {
+            "0".to_string()
+        } else {
             let net = on_chain["net"].as_str().unwrap();
-            if net.starts_with('-') || net == "0" { net.to_string() } else { format!("+{net}") }
+            if net.starts_with('-') || net == "0" {
+                net.to_string()
+            } else {
+                format!("+{net}")
+            }
         };
         assert_eq!(entry["net"], expected_net.as_str(), "{name}: net");
         let expected_status = match on_chain["status"].as_str() {
@@ -100,10 +186,30 @@ async fn indexer_agrees_with_the_contract() -> anyhow::Result<()> {
         };
         assert_eq!(entry["status"], expected_status, "{name}: status");
     }
-    let scraper = body["members"].as_array().unwrap().iter().find(|m| m["account"] == account_of("scraper").as_str()).unwrap();
-    assert_eq!((scraper["status"].as_u64(), scraper["stakeSlashed"].as_str(), scraper["amount"].as_str()), (Some(409), Some("35000000"), Some("35000000")));
-    let gpu = body["members"].as_array().unwrap().iter().find(|m| m["account"] == account_of("gpu").as_str()).unwrap();
-    assert_eq!((gpu["status"].as_u64(), gpu["settlement"].as_str()), (Some(200), Some("claimed")));
+    let scraper = body["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["account"] == account_of("scraper").as_str())
+        .unwrap();
+    assert_eq!(
+        (
+            scraper["status"].as_u64(),
+            scraper["stakeSlashed"].as_str(),
+            scraper["amount"].as_str()
+        ),
+        (Some(409), Some("35000000"), Some("35000000"))
+    );
+    let gpu = body["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["account"] == account_of("gpu").as_str())
+        .unwrap();
+    assert_eq!(
+        (gpu["status"].as_u64(), gpu["settlement"].as_str()),
+        (Some(200), Some("claimed"))
+    );
 
     // TC-BE-039-12: members in D9 equal the contract view
     for name in ["scraper", "gpu", "translator"] {
@@ -114,7 +220,13 @@ async fn indexer_agrees_with_the_contract() -> anyhow::Result<()> {
         }
     }
     let translator = &out["members"][account_of("translator")]["body"];
-    assert_eq!((translator["status"].as_str(), translator["exitRequestedEpoch"].as_u64()), (Some("exited"), Some(1)));
+    assert_eq!(
+        (
+            translator["status"].as_str(),
+            translator["exitRequestedEpoch"].as_u64()
+        ),
+        (Some("exited"), Some(1))
+    );
     let _ = (request_exit, CREDIT);
     Ok(())
 }

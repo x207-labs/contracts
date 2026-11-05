@@ -31,22 +31,44 @@ async fn three_debtors_default_and_the_creditors_are_paid_in_full() -> anyhow::R
     }
     let c = &f.circle;
     c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
-    assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
-    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
-    assert!(c.call_keeper("commit_epoch", json!({"epoch": 1})).await?.is_success());
+    assert!(c
+        .call_keeper("close_epoch", json!({"epoch": 1}))
+        .await?
+        .is_success());
+    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?)
+        .await?;
+    assert!(c
+        .call_keeper("commit_epoch", json!({"epoch": 1}))
+        .await?
+        .is_success());
 
     let before = (usdt(&f, "c1").await?, usdt(&f, "c2").await?);
     let fin = finalize(&f.circle).await?;
     assert!(fin.is_success(), "{:?}", failure_text(&fin));
     let log = events(&fin);
-    let defaulted: Vec<_> = log.iter().filter(|(n, _)| n == "member_defaulted").collect();
+    let defaulted: Vec<_> = log
+        .iter()
+        .filter(|(n, _)| n == "member_defaulted")
+        .collect();
     assert_eq!(defaulted.len(), 3, "three debtors default");
     for (_, d) in &defaulted {
         assert_eq!(d["shortfall"], "0", "the stake covers the residual: {d}");
         assert_eq!(d["from_reserve"], "0");
     }
-    let finalized = log.iter().find(|(n, _)| n == "epoch_finalized").expect("epoch_finalized").1.clone();
-    assert_eq!((finalized["defaulted_count"].as_u64(), finalized["total_defaulted"].as_str(), finalized["shortfall"].as_str()), (Some(3), Some("90000000"), Some("0")));
+    let finalized = log
+        .iter()
+        .find(|(n, _)| n == "epoch_finalized")
+        .expect("epoch_finalized")
+        .1
+        .clone();
+    assert_eq!(
+        (
+            finalized["defaulted_count"].as_u64(),
+            finalized["total_defaulted"].as_str(),
+            finalized["shortfall"].as_str()
+        ),
+        (Some(3), Some("90000000"), Some("0"))
+    );
     f.assert_d6().await?;
 
     for (name, owed) in [("c1", 50), ("c2", 40)] {
@@ -60,8 +82,16 @@ async fn three_debtors_default_and_the_creditors_are_paid_in_full() -> anyhow::R
         assert!(claim.is_success(), "{name}: {:?}", failure_text(&claim));
         let _ = owed;
     }
-    assert_eq!(usdt(&f, "c1").await?, before.0 + 50 * CREDIT, "c1 is paid in full, no haircut");
-    assert_eq!(usdt(&f, "c2").await?, before.1 + 40 * CREDIT, "c2 is paid in full, no haircut");
+    assert_eq!(
+        usdt(&f, "c1").await?,
+        before.0 + 50 * CREDIT,
+        "c1 is paid in full, no haircut"
+    );
+    assert_eq!(
+        usdt(&f, "c2").await?,
+        before.1 + 40 * CREDIT,
+        "c2 is paid in full, no haircut"
+    );
     for name in ["d1", "d2", "d3"] {
         let m = f.member(name).await?;
         assert_eq!(m["status"], "suspended", "{name}");

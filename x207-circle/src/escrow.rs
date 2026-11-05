@@ -621,7 +621,7 @@ mod tests {
     }
 
     /// Everything `take_back` may touch, to compare before and after.
-    fn picture(c: &X207Circle) -> (Option<PairState>, u128, Option<ParticipantTotals>, Option<ParticipantTotals>, u32, u32, u128, usize, usize) {
+    #[allow(clippy::type_complexity)] fn picture(c: &X207Circle) -> (Option<PairState>, u128, Option<ParticipantTotals>, Option<ParticipantTotals>, u32, u32, u128, usize, usize) {
         let e = c.epochs.get(&1).unwrap();
         (
             c.pairs.get(&(1, acc("bob.near"), acc("alice.near"))).cloned(),
@@ -1118,7 +1118,7 @@ mod tests {
     // TC-CT-092-S01: attacks on the receiver; each one is a panic, so the multi-token contract gives everything back
     #[test]
     fn a_multi_token_deposit_that_does_not_match_the_grant_is_refused() {
-        let cases: [(&str, &[&str], &[&str], &[u128], &str); 9] = [
+        #[allow(clippy::type_complexity)] let cases: [(&str, &[&str], &[&str], &[u128], &str); 9] = [
             ("fake.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT], "ERR_ESCROW_MT_MISMATCH"),
             ("mt.near", &["alice.near"], &["nep141:other.near"], &[RWA_AMOUNT], "ERR_ESCROW_MT_MISMATCH"),
             ("mt.near", &["alice.near"], &[MT_TOKEN], &[RWA_AMOUNT - 1], "ERR_ESCROW_MT_AMOUNT"),

@@ -27,7 +27,15 @@ pub async fn world() -> anyhow::Result<World> {
     }
     let dao = f.account("dao").await?;
     let entry = json!({"asset_type": "mt:usdc", "class": "A", "delivery_methods": ["escrow_mt"], "accepted_proofs": [], "terms_hash": "5a".repeat(32)});
-    assert!(f.circle.call_as(&dao, "set_asset_class", json!({"asset_type": "mt:usdc", "entry": entry})).await?.is_success());
+    assert!(f
+        .circle
+        .call_as(
+            &dao,
+            "set_asset_class",
+            json!({"asset_type": "mt:usdc", "entry": entry})
+        )
+        .await?
+        .is_success());
     let mt = deploy_mt(&f).await?;
     let (alice, bob) = (f.accounts["alice"].clone(), f.accounts["bob"].clone());
     mt.call("mint").args_json(json!({"account_id": alice.id(), "token_id": TOKEN, "amount": (10 * AMOUNT).to_string()})).transact().await?.into_result()?;
@@ -52,11 +60,25 @@ pub fn offer(expires_at: u64, mt: &str, token: &str, amount: u128) -> Value {
 impl World {
     pub async fn offer(&mut self, expires_in_ns: u64) -> anyhow::Result<u64> {
         let expires = self.f.circle.now_ns().await? + expires_in_ns;
-        Ok(self.f.circle.call_as(&self.alice, "offer_grant", offer(expires, self.mt.id().as_str(), TOKEN, AMOUNT)).await?.json::<u64>()?)
+        Ok(self
+            .f
+            .circle
+            .call_as(
+                &self.alice,
+                "offer_grant",
+                offer(expires, self.mt.id().as_str(), TOKEN, AMOUNT),
+            )
+            .await?
+            .json::<u64>()?)
     }
 
     pub async fn deposit_with(
-        &self, mt: &Contract, from: &Account, token: &str, amount: u128, msg: &str,
+        &self,
+        mt: &Contract,
+        from: &Account,
+        token: &str,
+        amount: u128,
+        msg: &str,
     ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
         Ok(from
             .call(mt.id(), "mt_transfer_call")
@@ -67,12 +89,29 @@ impl World {
             .await?)
     }
 
-    pub async fn deposit(&self, from: &Account, amount: u128, grant_id: u64) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-        self.deposit_with(&self.mt, from, TOKEN, amount, &json!({"action": "escrow", "grant_id": grant_id}).to_string()).await
+    pub async fn deposit(
+        &self,
+        from: &Account,
+        amount: u128,
+        grant_id: u64,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        self.deposit_with(
+            &self.mt,
+            from,
+            TOKEN,
+            amount,
+            &json!({"action": "escrow", "grant_id": grant_id}).to_string(),
+        )
+        .await
     }
 
     pub async fn balance(&self, mt: &Contract, who: &str, token: &str) -> anyhow::Result<u128> {
-        Ok(mt.view("mt_balance_of").args_json(json!({"account_id": who, "token_id": token})).await?.json::<String>()?.parse()?)
+        Ok(mt
+            .view("mt_balance_of")
+            .args_json(json!({"account_id": who, "token_id": token}))
+            .await?
+            .json::<String>()?
+            .parse()?)
     }
 
     pub async fn of(&self, who: &Account) -> anyhow::Result<u128> {
@@ -80,16 +119,35 @@ impl World {
     }
 
     pub async fn in_circle(&self) -> anyhow::Result<u128> {
-        self.balance(&self.mt, self.f.circle.contract.id().as_str(), TOKEN).await
+        self.balance(&self.mt, self.f.circle.contract.id().as_str(), TOKEN)
+            .await
     }
 
     pub async fn epoch(&self) -> anyhow::Result<u64> {
-        Ok(self.f.circle.view("get_epoch", json!({})).await?["epoch"].as_u64().unwrap())
+        Ok(self.f.circle.view("get_epoch", json!({})).await?["epoch"]
+            .as_u64()
+            .unwrap())
     }
 
-    pub async fn buy(&mut self, buyer: &str, epoch: u64, cumulative: u128, grant_id: u64) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-        let (voucher, signature) = self.f.circle.next_voucher(buyer, "alice", epoch, cumulative);
+    pub async fn buy(
+        &mut self,
+        buyer: &str,
+        epoch: u64,
+        cumulative: u128,
+        grant_id: u64,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        let (voucher, signature) = self
+            .f
+            .circle
+            .next_voucher(buyer, "alice", epoch, cumulative);
         let account = self.f.accounts[buyer].clone();
-        Ok(self.f.circle.call_as(&account, "complete_escrow", json!({"grant_id": grant_id, "voucher": voucher, "signature": signature})).await?)
+        self.f
+            .circle
+            .call_as(
+                &account,
+                "complete_escrow",
+                json!({"grant_id": grant_id, "voucher": voucher, "signature": signature}),
+            )
+            .await
     }
 }

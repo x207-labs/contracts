@@ -41,45 +41,54 @@ fn wide() -> impl Strategy<Value = Graph> {
 }
 
 fn graph_between(low: usize, high: usize) -> impl Strategy<Value = Graph> {
-    (low..=high).prop_flat_map(|n| {
-        let cycle = (proptest::collection::vec(0..n, 2..=6), 1u128..=1_000, 0u128..=100);
-        let extra = (0..n, 0..n, 1u128..=1_000);
-        (
-            Just(n),
-            proptest::collection::vec(cycle, 1..=8),
-            proptest::collection::vec(extra, 0..=6),
-        )
-    })
-    .prop_map(|(n, cycles, extras)| {
-        let mut obligations: BTreeMap<(usize, usize), u128> = BTreeMap::new();
-        let mut proposal: BTreeMap<(usize, usize), u128> = BTreeMap::new();
-        for (nodes, amount, pct) in cycles {
-            let mut seen = Vec::new();
-            for v in nodes {
-                if !seen.contains(&v) {
-                    seen.push(v);
+    (low..=high)
+        .prop_flat_map(|n| {
+            let cycle = (
+                proptest::collection::vec(0..n, 2..=6),
+                1u128..=1_000,
+                0u128..=100,
+            );
+            let extra = (0..n, 0..n, 1u128..=1_000);
+            (
+                Just(n),
+                proptest::collection::vec(cycle, 1..=8),
+                proptest::collection::vec(extra, 0..=6),
+            )
+        })
+        .prop_map(|(n, cycles, extras)| {
+            let mut obligations: BTreeMap<(usize, usize), u128> = BTreeMap::new();
+            let mut proposal: BTreeMap<(usize, usize), u128> = BTreeMap::new();
+            for (nodes, amount, pct) in cycles {
+                let mut seen = Vec::new();
+                for v in nodes {
+                    if !seen.contains(&v) {
+                        seen.push(v);
+                    }
+                }
+                if seen.len() < 2 {
+                    continue;
+                }
+                // `cleared` of this cycle is a share of `amount`, so Σ cleared <= obligation per edge.
+                let cleared = amount * pct / 100;
+                for i in 0..seen.len() {
+                    let key = (seen[i], seen[(i + 1) % seen.len()]);
+                    *obligations.entry(key).or_default() += amount;
+                    if cleared > 0 {
+                        *proposal.entry(key).or_default() += cleared;
+                    }
                 }
             }
-            if seen.len() < 2 {
-                continue;
-            }
-            // `cleared` of this cycle is a share of `amount`, so Σ cleared <= obligation per edge.
-            let cleared = amount * pct / 100;
-            for i in 0..seen.len() {
-                let key = (seen[i], seen[(i + 1) % seen.len()]);
-                *obligations.entry(key).or_default() += amount;
-                if cleared > 0 {
-                    *proposal.entry(key).or_default() += cleared;
+            for (a, b, amount) in extras {
+                if a != b {
+                    *obligations.entry((a, b)).or_default() += amount;
                 }
             }
-        }
-        for (a, b, amount) in extras {
-            if a != b {
-                *obligations.entry((a, b)).or_default() += amount;
+            Graph {
+                n,
+                obligations,
+                proposal,
             }
-        }
-        Graph { n, obligations, proposal }
-    })
+        })
 }
 
 fn circle(g: &Graph) -> X207Circle {
@@ -102,7 +111,14 @@ fn circle(g: &Graph) -> X207Circle {
         1_000,
     );
     for (&(d, k), &amount) in &g.obligations {
-        c.pairs.insert((1, acc(d), acc(k)), PairState { cumulative: amount, last_seq: 1, cleared: 0 });
+        c.pairs.insert(
+            (1, acc(d), acc(k)),
+            PairState {
+                cumulative: amount,
+                last_seq: 1,
+                cleared: 0,
+            },
+        );
         c.epochs.get_mut(&1).unwrap().edges.push((acc(d), acc(k)));
     }
     c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Clearing;
@@ -112,7 +128,11 @@ fn circle(g: &Graph) -> X207Circle {
 fn edges(proposal: &BTreeMap<(usize, usize), u128>) -> Vec<ClearingEdge> {
     proposal
         .iter()
-        .map(|(&(d, k), &cleared)| ClearingEdge { debtor: acc(d), creditor: acc(k), cleared: U128(cleared) })
+        .map(|(&(d, k), &cleared)| ClearingEdge {
+            debtor: acc(d),
+            creditor: acc(k),
+            cleared: U128(cleared),
+        })
         .collect()
 }
 
@@ -143,7 +163,11 @@ fn circle_with_totals(g: &Graph) -> X207Circle {
         for (member, out, inn) in [(d, amount, 0), (k, 0, amount)] {
             let key = (1, acc(member));
             let is_new = c.totals.get(&key).is_none();
-            let mut totals = c.totals.get(&key).cloned().unwrap_or_else(ParticipantTotals::default);
+            let mut totals = c
+                .totals
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(ParticipantTotals::default);
             totals.owed_out += out;
             totals.owed_in += inn;
             c.totals.insert(key, totals);
@@ -160,7 +184,11 @@ fn circle_with_totals(g: &Graph) -> X207Circle {
 }
 
 fn at(ns: u64, predecessor: &str) {
-    near_sdk::testing_env!(VMContextBuilder::new().predecessor_account_id(predecessor.parse().unwrap()).block_timestamp(ns).block_height(500).build());
+    near_sdk::testing_env!(VMContextBuilder::new()
+        .predecessor_account_id(predecessor.parse().unwrap())
+        .block_timestamp(ns)
+        .block_height(500)
+        .build());
 }
 
 proptest! {
@@ -249,7 +277,7 @@ proptest! {
         let keys: Vec<_> = g.proposal.keys().copied().collect();
         let key = keys[pick.index(keys.len())];
         let (cleared, o) = (g.proposal[&key], g.obligations[&key]);
-        let changed = if cleared < o { cleared + 1 } else if cleared > 1 { cleared - 1 } else { 0 };
+        let changed = if cleared < o { cleared + 1 } else { cleared.saturating_sub(1) };
         prop_assume!(changed > 0);
         let mut p = g.proposal.clone();
         p.insert(key, changed);
@@ -306,7 +334,10 @@ fn oracle(g: &Graph, proposal: &Proposal) -> Result<u128, &'static str> {
         return Err("ERR_TOO_MANY_EDGES");
     }
     let mut seen = std::collections::HashSet::new();
-    let (mut credit, mut debit) = (BTreeMap::<usize, u128>::new(), BTreeMap::<usize, u128>::new());
+    let (mut credit, mut debit) = (
+        BTreeMap::<usize, u128>::new(),
+        BTreeMap::<usize, u128>::new(),
+    );
     let mut total = 0u128;
     for &(d, k, cleared) in proposal {
         if cleared == 0 {
@@ -315,7 +346,9 @@ fn oracle(g: &Graph, proposal: &Proposal) -> Result<u128, &'static str> {
         if !seen.insert((d, k)) {
             return Err("ERR_DUPLICATE_EDGE");
         }
-        let Some(&obligation) = g.obligations.get(&(d, k)) else { return Err("ERR_EDGE_NOT_IN_SNAPSHOT") };
+        let Some(&obligation) = g.obligations.get(&(d, k)) else {
+            return Err("ERR_EDGE_NOT_IN_SNAPSHOT");
+        };
         if cleared > obligation {
             return Err("ERR_CLEARED_EXCEEDS_OBLIGATION");
         }
@@ -323,15 +356,26 @@ fn oracle(g: &Graph, proposal: &Proposal) -> Result<u128, &'static str> {
         *credit.entry(k).or_default() += cleared;
         *debit.entry(d).or_default() += cleared;
     }
-    let members: std::collections::BTreeSet<usize> = credit.keys().chain(debit.keys()).copied().collect();
-    if members.iter().any(|m| credit.get(m).copied().unwrap_or(0) != debit.get(m).copied().unwrap_or(0)) {
+    let members: std::collections::BTreeSet<usize> =
+        credit.keys().chain(debit.keys()).copied().collect();
+    if members
+        .iter()
+        .any(|m| credit.get(m).copied().unwrap_or(0) != debit.get(m).copied().unwrap_or(0))
+    {
         return Err("ERR_UNBALANCED_MEMBER");
     }
     Ok(total)
 }
 
 fn wire(proposal: &Proposal) -> Vec<ClearingEdge> {
-    proposal.iter().map(|&(d, k, cleared)| ClearingEdge { debtor: acc(d), creditor: acc(k), cleared: U128(cleared) }).collect()
+    proposal
+        .iter()
+        .map(|&(d, k, cleared)| ClearingEdge {
+            debtor: acc(d),
+            creditor: acc(k),
+            cleared: U128(cleared),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -389,7 +433,11 @@ fn mutate(mut p: Proposal, g: &Graph, m: &Mutation) -> Proposal {
 
 /// A proposal for `g`: its valid one, or a random one, and then up to three mutations.
 fn candidate(g: &Graph, use_raw: bool, raw: &Proposal, muts: &[Mutation]) -> Proposal {
-    let mut p: Proposal = if use_raw { raw.iter().map(|&(a, b, c)| (a % g.n, b % g.n, c)).collect() } else { g.proposal.iter().map(|(&(d, k), &c)| (d, k, c)).collect() };
+    let mut p: Proposal = if use_raw {
+        raw.iter().map(|&(a, b, c)| (a % g.n, b % g.n, c)).collect()
+    } else {
+        g.proposal.iter().map(|(&(d, k), &c)| (d, k, c)).collect()
+    };
     for m in muts {
         p = mutate(p, g, m);
     }
@@ -467,7 +515,15 @@ proptest! {
 /// Cycles and several proposals made of shares of the same cycles: all valid, and of different size.
 fn rounds() -> impl Strategy<Value = (Graph, Vec<Proposal>)> {
     (2usize..=30).prop_flat_map(|n| {
-        let cycle = (proptest::collection::vec(0..n, 2..=6), 2u128..=1_000).prop_flat_map(|(nodes, amount)| (Just(nodes), Just(amount), proptest::collection::vec(0..=amount, 5)));
+        let cycle = (proptest::collection::vec(0..n, 2..=6), 2u128..=1_000).prop_flat_map(
+            |(nodes, amount)| {
+                (
+                    Just(nodes),
+                    Just(amount),
+                    proptest::collection::vec(0..=amount, 5),
+                )
+            },
+        );
         proptest::collection::vec(cycle, 1..=6).prop_map(move |cycles| {
             let mut obligations: BTreeMap<(usize, usize), u128> = BTreeMap::new();
             let mut proposals: Vec<BTreeMap<(usize, usize), u128>> = vec![BTreeMap::new(); 5];
@@ -491,14 +547,30 @@ fn rounds() -> impl Strategy<Value = (Graph, Vec<Proposal>)> {
                     }
                 }
             }
-            let rounds = proposals.into_iter().filter(|p| !p.is_empty()).map(|p| p.into_iter().map(|((d, k), x)| (d, k, x)).collect()).collect();
-            (Graph { n, obligations, proposal: BTreeMap::new() }, rounds)
+            let rounds = proposals
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .map(|p| p.into_iter().map(|((d, k), x)| (d, k, x)).collect())
+                .collect();
+            (
+                Graph {
+                    n,
+                    obligations,
+                    proposal: BTreeMap::new(),
+                },
+                rounds,
+            )
         })
     })
 }
 
 fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
-    std::panic::catch_unwind(f).err().map(|e| e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default())
+    std::panic::catch_unwind(f).err().map(|e| {
+        e.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
+    })
 }
 
 proptest! {
@@ -517,7 +589,7 @@ proptest! {
         for (i, proposal) in proposals.iter().enumerate() {
             at(cutoff + 1 + i as u64, "solver1.near");
             let total: u128 = proposal.iter().map(|e| e.2).sum();
-            let better = stored.map_or(true, |(t, n)| total > t || (total == t && proposal.len() < n));
+            let better = stored.is_none_or(|(t, n)| total > t || (total == t && proposal.len() < n));
             let outcome = panic_text(std::panic::AssertUnwindSafe(|| {
                 c.submit_clearing(1, wire(proposal));
             }));
@@ -535,6 +607,7 @@ proptest! {
 
 // TC-CT-030-07
 #[test]
+#[allow(clippy::assertions_on_constants)]
 fn tc_ct_030_07_runs_at_least_1000_cases() {
     assert!(CASES >= 1_000);
 }

@@ -39,6 +39,14 @@ proptest = "=1.12.0"
 secp256k1 = { version = "=0.27.0", features = ["recovery"] }
 sha3 = "=0.10.9"
 
+# CT-115: these lints point at code that is in the released wasm. Fixing them changes the wasm (checked: another sha256 than v0.0.15), so
+# they are allowed here until the next release. Remove the lines when the source changes anyway.
+[lints.clippy]
+chunks_exact_to_as_chunks = "allow"
+unnecessary_map_or = "allow"
+manual_is_multiple_of = "allow"
+needless_borrows_for_generic_args = "allow"
+
 [profile.release]
 codegen-units = 1
 opt-level = "z"

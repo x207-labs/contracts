@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::circle::{account_of, failure_text, events, CREDIT};
+use common::circle::{account_of, events, failure_text, CREDIT};
 use common::funded::Funded;
 use near_workspaces::types::{Gas, NearToken};
 use near_workspaces::Account;
@@ -14,8 +14,16 @@ use serde_json::{json, Value};
 const SEC: u64 = 1_000_000_000;
 
 fn node(args: &[&str]) -> Value {
-    let out = std::process::Command::new("node").arg("tests/e2e/dao_args.mjs").args(args).output().expect("run node");
-    assert!(out.status.success(), "dao_args {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    let out = std::process::Command::new("node")
+        .arg("tests/e2e/dao_args.mjs")
+        .args(args)
+        .output()
+        .expect("run node");
+    assert!(
+        out.status.success(),
+        "dao_args {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     serde_json::from_slice(&out.stdout).expect("json")
 }
 
@@ -34,7 +42,12 @@ async fn setup() -> anyhow::Result<Dao> {
 async fn setup_with(params: Value) -> anyhow::Result<Dao> {
     let mut f = Funded::deploy(Some(params)).await?;
     let root = f.circle.worker.root_account()?;
-    let dao = root.create_subaccount("dao").initial_balance(NearToken::from_near(30)).transact().await?.into_result()?;
+    let dao = root
+        .create_subaccount("dao")
+        .initial_balance(NearToken::from_near(30))
+        .transact()
+        .await?
+        .into_result()?;
     assert_eq!(dao.id().as_str(), account_of("dao"));
     let mut council = Vec::new();
     for name in ["c1", "c2", "c3"] {
@@ -43,14 +56,23 @@ async fn setup_with(params: Value) -> anyhow::Result<Dao> {
     let outsider = f.account("outsider").await?;
     let wasm = std::fs::read("tests/fixtures/sputnik/sputnikdao2_original.wasm")?;
     let dao = dao.deploy(&wasm).await?.into_result()?;
-    let members = council.iter().map(|a| a.id().to_string()).collect::<Vec<_>>().join(",");
+    let members = council
+        .iter()
+        .map(|a| a.id().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let init = dao
         .call("new")
         .args_json(json!({"config": {"name": "x207", "purpose": "test", "metadata": ""}, "policy": node(&["policy", &members])}))
         .transact()
         .await?;
     assert!(init.is_success(), "{:?}", failure_text(&init));
-    Ok(Dao { f, dao: dao.as_account().clone(), council, outsider })
+    Ok(Dao {
+        f,
+        dao: dao.as_account().clone(),
+        council,
+        outsider,
+    })
 }
 
 impl Dao {
@@ -59,23 +81,53 @@ impl Dao {
     }
 
     async fn propose(&self, who: &Account, params: &Value) -> anyhow::Result<u64> {
-        let args = node(&["propose", self.f.circle.contract.id().as_str(), &params.to_string()]);
-        let r = who.call(self.dao_id(), "add_proposal").args_json(args).deposit(NearToken::from_millinear(100)).gas(Gas::from_tgas(100)).transact().await?;
+        let args = node(&[
+            "propose",
+            self.f.circle.contract.id().as_str(),
+            &params.to_string(),
+        ]);
+        let r = who
+            .call(self.dao_id(), "add_proposal")
+            .args_json(args)
+            .deposit(NearToken::from_millinear(100))
+            .gas(Gas::from_tgas(100))
+            .transact()
+            .await?;
         assert!(r.is_success(), "{:?}", failure_text(&r));
         Ok(r.json::<u64>()?)
     }
 
-    async fn act(&self, who: &Account, id: u64, action: &str) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    async fn act(
+        &self,
+        who: &Account,
+        id: u64,
+        action: &str,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
         let args = node(&["act", &id.to_string(), action]);
-        Ok(who.call(self.dao_id(), "act_proposal").args_json(args).gas(Gas::from_tgas(250)).transact().await?)
+        Ok(who
+            .call(self.dao_id(), "act_proposal")
+            .args_json(args)
+            .gas(Gas::from_tgas(250))
+            .transact()
+            .await?)
     }
 
     async fn proposal(&self, id: u64) -> anyhow::Result<Value> {
-        Ok(self.f.circle.worker.view(self.dao_id(), "get_proposal").args_json(json!({"id": id})).await?.json()?)
+        Ok(self
+            .f
+            .circle
+            .worker
+            .view(self.dao_id(), "get_proposal")
+            .args_json(json!({"id": id}))
+            .await?
+            .json()?)
     }
 
     async fn status(&self, id: u64) -> anyhow::Result<String> {
-        Ok(self.proposal(id).await?["status"].as_str().unwrap().to_string())
+        Ok(self.proposal(id).await?["status"]
+            .as_str()
+            .unwrap()
+            .to_string())
     }
 
     async fn pending(&self) -> anyhow::Result<Value> {
@@ -102,26 +154,50 @@ async fn proposal_vote_execute_and_effect() -> anyhow::Result<()> {
     assert_eq!(call["receiver_id"], d.f.circle.contract.id().as_str());
     assert_eq!(call["actions"][0]["method_name"], "set_params");
     use near_sdk::base64::Engine;
-    let decoded = near_sdk::base64::engine::general_purpose::STANDARD.decode(call["actions"][0]["args"].as_str().unwrap())?;
-    assert_eq!(serde_json::from_slice::<Value>(&decoded)?, json!({"params": params}), "TC-CT-046-02");
+    let decoded = near_sdk::base64::engine::general_purpose::STANDARD
+        .decode(call["actions"][0]["args"].as_str().unwrap())?;
+    assert_eq!(
+        serde_json::from_slice::<Value>(&decoded)?,
+        json!({"params": params}),
+        "TC-CT-046-02"
+    );
     assert_eq!(d.status(id).await?, "InProgress");
     // TC-CT-046-05: the active parameters the print script reads are the view `get_params`
-    let printed = std::process::Command::new("node").args(["dao/print-params.mjs", "--contract", d.f.circle.contract.id().as_str(), "--network", "testnet"]).output()?;
+    let printed = std::process::Command::new("node")
+        .args([
+            "dao/print-params.mjs",
+            "--contract",
+            d.f.circle.contract.id().as_str(),
+            "--network",
+            "testnet",
+        ])
+        .output()?;
     assert!(String::from_utf8_lossy(&printed.stdout).contains("get_params"));
 
     let first = d.act(&d.council[0], id, "VoteApprove").await?;
     assert!(first.is_success(), "{:?}", failure_text(&first));
-    assert_eq!(d.status(id).await?, "InProgress", "one vote of three is not a majority");
+    assert_eq!(
+        d.status(id).await?,
+        "InProgress",
+        "one vote of three is not a majority"
+    );
     assert_eq!(d.pending().await?, Value::Null);
 
     let second = d.act(&d.council[1], id, "VoteApprove").await?;
     assert!(second.is_success(), "{:?}", failure_text(&second));
     assert_eq!(d.status(id).await?, "Approved");
     let log = events(&second);
-    let updated = log.iter().find(|(name, _)| name == "params_updated").unwrap_or_else(|| panic!("no params_updated in {log:?}"));
+    let updated = log
+        .iter()
+        .find(|(name, _)| name == "params_updated")
+        .unwrap_or_else(|| panic!("no params_updated in {log:?}"));
     assert_eq!(updated.1["new"]["epoch_length"], 600);
     assert_eq!(d.pending().await?["params"]["epoch_length"], 600);
-    assert_eq!(d.f.circle.view("get_params", json!({})).await?, before, "active params change only after close_epoch");
+    assert_eq!(
+        d.f.circle.view("get_params", json!({})).await?,
+        before,
+        "active params change only after close_epoch"
+    );
 
     // TC-CT-048-05: the next cutoff uses the new epoch_length
     let c = &d.f.circle;
@@ -129,8 +205,15 @@ async fn proposal_vote_execute_and_effect() -> anyhow::Result<()> {
     c.advance_to(cutoff1).await?;
     let close = c.call_keeper("close_epoch", json!({"epoch": 1})).await?;
     assert!(close.is_success(), "{:?}", failure_text(&close));
-    let cutoff = events(&close).into_iter().find(|(n, _)| n == "epoch_cutoff").expect("epoch_cutoff").1;
-    assert_eq!(cutoff["next_cutoff_at"].as_str().unwrap().parse::<u64>()?, cutoff1 + 600 * SEC);
+    let cutoff = events(&close)
+        .into_iter()
+        .find(|(n, _)| n == "epoch_cutoff")
+        .expect("epoch_cutoff")
+        .1;
+    assert_eq!(
+        cutoff["next_cutoff_at"].as_str().unwrap().parse::<u64>()?,
+        cutoff1 + 600 * SEC
+    );
     assert_eq!(c.view("get_params", json!({})).await?["epoch_length"], 600);
     let _ = CREDIT;
     Ok(())
@@ -140,16 +223,43 @@ async fn proposal_vote_execute_and_effect() -> anyhow::Result<()> {
 #[tokio::test]
 async fn out_of_range_fails_at_execution() -> anyhow::Result<()> {
     let d = setup().await?;
-    let bad = std::process::Command::new("node").args(["dao/propose-set-params.mjs", "--dao", "x207.test.near", "--contract", "c.test.near", "--signer", "a.test.near", "--params", "{not json"]).output()?;
+    let bad = std::process::Command::new("node")
+        .args([
+            "dao/propose-set-params.mjs",
+            "--dao",
+            "x207.test.near",
+            "--contract",
+            "c.test.near",
+            "--signer",
+            "a.test.near",
+            "--params",
+            "{not json",
+        ])
+        .output()?;
     assert!(!bad.status.success(), "TC-CT-046-03");
-    assert_eq!(d.f.circle.worker.view(d.dao_id(), "get_last_proposal_id").await?.json::<u64>()?, 0);
+    assert_eq!(
+        d.f.circle
+            .worker
+            .view(d.dao_id(), "get_last_proposal_id")
+            .await?
+            .json::<u64>()?,
+        0
+    );
 
-    let id = d.propose(&d.council[0], &with("payment_window", json!(899))).await?;
+    let id = d
+        .propose(&d.council[0], &with("payment_window", json!(899)))
+        .await?;
     assert_eq!(d.status(id).await?, "InProgress");
     assert!(d.act(&d.council[0], id, "VoteApprove").await?.is_success());
     let last = d.act(&d.council[1], id, "VoteApprove").await?;
     // the DAO runs set_params in a callback and reports its panic as the failure of the voting transaction
-    assert!(failure_text(&last).expect("set_params panics").contains("ERR_PARAM_OUT_OF_RANGE: payment_window"), "{:?}", failure_text(&last));
+    assert!(
+        failure_text(&last)
+            .expect("set_params panics")
+            .contains("ERR_PARAM_OUT_OF_RANGE: payment_window"),
+        "{:?}",
+        failure_text(&last)
+    );
     // TC-CT-048-02 expects `Failed`; the pinned sputnikdao2_original.wasm keeps the proposal `Approved` when the
     // call it runs panics. Only the unchanged D7 is the contract's side of the case.
     assert_eq!(d.status(id).await?, "Approved");
@@ -162,12 +272,26 @@ async fn out_of_range_fails_at_execution() -> anyhow::Result<()> {
 #[tokio::test]
 async fn only_the_dao_owns_and_only_council_votes() -> anyhow::Result<()> {
     let d = setup().await?;
-    let direct = d.f.circle.call_as(&d.council[0], "set_params", json!({"params": with("epoch_length", json!(600))})).await?;
-    assert!(failure_text(&direct).expect("refused").contains("ERR_NOT_OWNER"));
+    let direct =
+        d.f.circle
+            .call_as(
+                &d.council[0],
+                "set_params",
+                json!({"params": with("epoch_length", json!(600))}),
+            )
+            .await?;
+    assert!(failure_text(&direct)
+        .expect("refused")
+        .contains("ERR_NOT_OWNER"));
 
-    let id = d.propose(&d.outsider, &with("epoch_length", json!(600))).await?;
+    let id = d
+        .propose(&d.outsider, &with("epoch_length", json!(600)))
+        .await?;
     let vote = d.act(&d.outsider, id, "VoteApprove").await?;
-    assert!(failure_text(&vote).is_some(), "the DAO must refuse a vote from outside the council");
+    assert!(
+        failure_text(&vote).is_some(),
+        "the DAO must refuse a vote from outside the council"
+    );
     assert_eq!(d.status(id).await?, "InProgress");
     Ok(())
 }
@@ -176,7 +300,9 @@ async fn only_the_dao_owns_and_only_council_votes() -> anyhow::Result<()> {
 #[tokio::test]
 async fn rejected_proposal_changes_nothing() -> anyhow::Result<()> {
     let d = setup().await?;
-    let id = d.propose(&d.council[0], &with("epoch_length", json!(600))).await?;
+    let id = d
+        .propose(&d.council[0], &with("epoch_length", json!(600)))
+        .await?;
     assert!(d.act(&d.council[0], id, "VoteReject").await?.is_success());
     let last = d.act(&d.council[1], id, "VoteReject").await?;
     assert!(last.is_success(), "{:?}", failure_text(&last));
@@ -191,14 +317,22 @@ async fn rejected_proposal_changes_nothing() -> anyhow::Result<()> {
 async fn late_vote_does_not_execute() -> anyhow::Result<()> {
     let mut d = setup().await?;
     d.f.circle.max_jump = 600;
-    let id = d.propose(&d.council[0], &with("epoch_length", json!(600))).await?;
-    let submitted = d.proposal(id).await?["submission_time"].as_str().unwrap().parse::<u64>()?;
+    let id = d
+        .propose(&d.council[0], &with("epoch_length", json!(600)))
+        .await?;
+    let submitted = d.proposal(id).await?["submission_time"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()?;
     d.f.circle.advance_to(submitted + 3601 * SEC).await?;
     let late = d.act(&d.council[0], id, "VoteApprove").await?;
     let _ = late;
     assert_ne!(d.status(id).await?, "Approved");
     assert_eq!(d.pending().await?, Value::Null);
-    assert_eq!(d.f.circle.view("get_params", json!({})).await?["epoch_length"], 300);
+    assert_eq!(
+        d.f.circle.view("get_params", json!({})).await?["epoch_length"],
+        300
+    );
     Ok(())
 }
 
@@ -209,17 +343,33 @@ async fn proposal_admits_a_new_member() -> anyhow::Result<()> {
     params["admission"] = json!("dao");
     let mut d = setup_with(params).await?;
     let newbie = d.f.account("newbie").await?;
-    assert!(d.f.join("newbie", Funded::join_deposit()).await?.is_success());
+    assert!(d
+        .f
+        .join("newbie", Funded::join_deposit())
+        .await?
+        .is_success());
 
-    let args = node(&["admit", d.f.circle.contract.id().as_str(), newbie.id().as_str()]);
-    let r = d.council[0].call(d.dao_id(), "add_proposal").args_json(args).deposit(NearToken::from_millinear(100)).gas(Gas::from_tgas(100)).transact().await?;
+    let args = node(&[
+        "admit",
+        d.f.circle.contract.id().as_str(),
+        newbie.id().as_str(),
+    ]);
+    let r = d.council[0]
+        .call(d.dao_id(), "add_proposal")
+        .args_json(args)
+        .deposit(NearToken::from_millinear(100))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
     assert!(r.is_success(), "{:?}", failure_text(&r));
     let id = r.json::<u64>()?;
     assert!(d.act(&d.council[0], id, "VoteApprove").await?.is_success());
     let last = d.act(&d.council[1], id, "VoteApprove").await?;
     assert!(last.is_success(), "{:?}", failure_text(&last));
     assert_eq!(d.status(id).await?, "Approved");
-    assert!(events(&last).iter().any(|(n, data)| n == "member_admitted" && data["account_id"] == newbie.id().as_str()));
+    assert!(events(&last)
+        .iter()
+        .any(|(n, data)| n == "member_admitted" && data["account_id"] == newbie.id().as_str()));
     assert_eq!(d.f.member("newbie").await?["admitted"], true);
 
     assert!(d.f.stake(&newbie, 100 * CREDIT).await?.is_success());
@@ -232,17 +382,39 @@ async fn proposal_admits_a_new_member() -> anyhow::Result<()> {
 async fn proposal_registers_an_asset_class() -> anyhow::Result<()> {
     let d = setup().await?;
     let terms_hash = "ab".repeat(32);
-    let args = node(&["asset-class", d.f.circle.contract.id().as_str(), "near-rpc:access", "B", &terms_hash]);
-    let r = d.council[0].call(d.dao_id(), "add_proposal").args_json(args).deposit(NearToken::from_millinear(100)).gas(Gas::from_tgas(100)).transact().await?;
+    let args = node(&[
+        "asset-class",
+        d.f.circle.contract.id().as_str(),
+        "near-rpc:access",
+        "B",
+        &terms_hash,
+    ]);
+    let r = d.council[0]
+        .call(d.dao_id(), "add_proposal")
+        .args_json(args)
+        .deposit(NearToken::from_millinear(100))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
     assert!(r.is_success(), "{:?}", failure_text(&r));
     let id = r.json::<u64>()?;
-    assert_eq!(d.f.circle.view("get_asset_class", json!({"asset_type": "near-rpc:access"})).await?, Value::Null);
+    assert_eq!(
+        d.f.circle
+            .view("get_asset_class", json!({"asset_type": "near-rpc:access"}))
+            .await?,
+        Value::Null
+    );
     assert!(d.act(&d.council[0], id, "VoteApprove").await?.is_success());
     let last = d.act(&d.council[1], id, "VoteApprove").await?;
     assert!(last.is_success(), "{:?}", failure_text(&last));
     assert_eq!(d.status(id).await?, "Approved");
-    assert!(events(&last).iter().any(|(n, data)| n == "asset_class_set" && data["asset_type"] == "near-rpc:access" && data["class"] == "B"));
-    let entry = d.f.circle.view("get_asset_class", json!({"asset_type": "near-rpc:access"})).await?;
+    assert!(events(&last).iter().any(|(n, data)| n == "asset_class_set"
+        && data["asset_type"] == "near-rpc:access"
+        && data["class"] == "B"));
+    let entry =
+        d.f.circle
+            .view("get_asset_class", json!({"asset_type": "near-rpc:access"}))
+            .await?;
     assert_eq!(entry["terms_hash"], terms_hash.as_str());
     assert_eq!(entry["delivery_methods"], json!(["near_access_key"]));
     Ok(())
@@ -254,11 +426,29 @@ async fn proposal_registers_an_asset_class() -> anyhow::Result<()> {
 #[tokio::test]
 async fn owner_is_the_dao_with_the_demo_policy() -> anyhow::Result<()> {
     let d = setup().await?;
-    assert_eq!(d.f.circle.view("get_owner", json!({})).await?, d.dao_id().as_str());
-    let policy: Value = d.f.circle.worker.view(d.dao_id(), "get_policy").await?.json()?;
+    assert_eq!(
+        d.f.circle.view("get_owner", json!({})).await?,
+        d.dao_id().as_str()
+    );
+    let policy: Value =
+        d.f.circle
+            .worker
+            .view(d.dao_id(), "get_policy")
+            .await?
+            .json()?;
     assert_eq!(policy["proposal_period"], "3600000000000");
-    let council = policy["roles"].as_array().unwrap().iter().find(|r| r["name"] == "council").expect("council role");
-    let mut members: Vec<String> = council["kind"]["Group"].as_array().unwrap().iter().map(|m| m.as_str().unwrap().to_string()).collect();
+    let council = policy["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "council")
+        .expect("council role");
+    let mut members: Vec<String> = council["kind"]["Group"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m.as_str().unwrap().to_string())
+        .collect();
     members.sort();
     let mut expected: Vec<String> = d.council.iter().map(|a| a.id().to_string()).collect();
     expected.sort();

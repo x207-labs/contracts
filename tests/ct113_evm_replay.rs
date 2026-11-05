@@ -16,7 +16,10 @@ fn acc(s: &str) -> AccountId {
 }
 
 fn at(contract: &str) {
-    testing_env!(VMContextBuilder::new().current_account_id(acc(contract)).block_timestamp(NOW_NS).build());
+    testing_env!(VMContextBuilder::new()
+        .current_account_id(acc(contract))
+        .block_timestamp(NOW_NS)
+        .build());
 }
 
 fn key() -> SecretKey {
@@ -29,14 +32,28 @@ fn address() -> String {
 }
 
 fn sign(digest: &[u8; 32]) -> String {
-    let (id, compact) = Secp256k1::new().sign_ecdsa_recoverable(&Message::from_slice(digest).unwrap(), &key()).serialize_compact();
+    let (id, compact) = Secp256k1::new()
+        .sign_ecdsa_recoverable(&Message::from_slice(digest).unwrap(), &key())
+        .serialize_compact();
     let mut bytes = compact.to_vec();
     bytes.push(27 + id.to_i32() as u8);
-    format!("eip712:0x{}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    format!(
+        "eip712:0x{}",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
 }
 
 fn msg<'a>(circle: &'a str, member: &'a str, action: &'a str, nonce: u64) -> ActionMsg<'a> {
-    ActionMsg { circle, member, action, epoch: 0, receiver: "", terms_hash: "", nonce, deadline: DEADLINE }
+    ActionMsg {
+        circle,
+        member,
+        action,
+        epoch: 0,
+        receiver: "",
+        terms_hash: "",
+        nonce,
+        deadline: DEADLINE,
+    }
 }
 
 fn recovered(digest: &[u8; 32], signature: &str) -> Option<String> {
@@ -50,15 +67,39 @@ fn tc_ct_113_01_v014_action_does_not_verify_at_v015() {
     let me = address();
     at("x207-v014.testnet");
     let salt_v014 = domain_salt();
-    let signature = sign(&action_digest(&msg("x207-v014.testnet", &me, "request_exit", 0)));
-    assert_eq!(recovered(&action_digest(&msg("x207-v014.testnet", &me, "request_exit", 0)), &signature), Some(me.clone()), "control: verifies at v014");
+    let signature = sign(&action_digest(&msg(
+        "x207-v014.testnet",
+        &me,
+        "request_exit",
+        0,
+    )));
+    assert_eq!(
+        recovered(
+            &action_digest(&msg("x207-v014.testnet", &me, "request_exit", 0)),
+            &signature
+        ),
+        Some(me.clone()),
+        "control: verifies at v014"
+    );
 
     at("x207-v015.testnet");
     assert_ne!(domain_salt(), salt_v014, "the salt names the contract");
     // the replayer keeps the signed message (circle = v014): the domain differs
-    assert_ne!(recovered(&action_digest(&msg("x207-v014.testnet", &me, "request_exit", 0)), &signature), Some(me.clone()));
+    assert_ne!(
+        recovered(
+            &action_digest(&msg("x207-v014.testnet", &me, "request_exit", 0)),
+            &signature
+        ),
+        Some(me.clone())
+    );
     // the replayer writes the circle of v015 into the message: the message differs
-    assert_ne!(recovered(&action_digest(&msg("x207-v015.testnet", &me, "request_exit", 0)), &signature), Some(me.clone()));
+    assert_ne!(
+        recovered(
+            &action_digest(&msg("x207-v015.testnet", &me, "request_exit", 0)),
+            &signature
+        ),
+        Some(me.clone())
+    );
 }
 
 /// TC-CT-113-02: the domain does not hide behind the `circle` field alone. A signature over (domain of v014, circle = v015)
@@ -68,9 +109,21 @@ fn tc_ct_113_02_domain_and_circle_field_are_both_needed() {
     let me = address();
     at("x207-v014.testnet");
     let mixed = sign(&action_digest(&msg("x207-v015.testnet", &me, "claim", 3)));
-    assert_ne!(recovered(&action_digest(&msg("x207-v014.testnet", &me, "claim", 3)), &mixed), Some(me.clone()));
+    assert_ne!(
+        recovered(
+            &action_digest(&msg("x207-v014.testnet", &me, "claim", 3)),
+            &mixed
+        ),
+        Some(me.clone())
+    );
     at("x207-v015.testnet");
-    assert_ne!(recovered(&action_digest(&msg("x207-v015.testnet", &me, "claim", 3)), &mixed), Some(me.clone()));
+    assert_ne!(
+        recovered(
+            &action_digest(&msg("x207-v015.testnet", &me, "claim", 3)),
+            &mixed
+        ),
+        Some(me.clone())
+    );
 }
 
 /// TC-CT-113-03: `auto_settle` and `auto_settle_off` are different signed messages, so an "off" held by a relayer cannot be
@@ -79,10 +132,36 @@ fn tc_ct_113_02_domain_and_circle_field_are_both_needed() {
 fn tc_ct_113_03_auto_settle_on_and_off_are_not_interchangeable() {
     let me = address();
     at("x207-v015.testnet");
-    let off = sign(&action_digest(&msg("x207-v015.testnet", &me, "auto_settle_off", 4)));
-    assert_eq!(recovered(&action_digest(&msg("x207-v015.testnet", &me, "auto_settle_off", 4)), &off), Some(me.clone()), "control");
-    assert_ne!(recovered(&action_digest(&msg("x207-v015.testnet", &me, "auto_settle", 4)), &off), Some(me.clone()), "off as on");
-    assert_ne!(recovered(&action_digest(&msg("x207-v015.testnet", &me, "auto_settle_off", 5)), &off), Some(me.clone()), "off at the next nonce");
+    let off = sign(&action_digest(&msg(
+        "x207-v015.testnet",
+        &me,
+        "auto_settle_off",
+        4,
+    )));
+    assert_eq!(
+        recovered(
+            &action_digest(&msg("x207-v015.testnet", &me, "auto_settle_off", 4)),
+            &off
+        ),
+        Some(me.clone()),
+        "control"
+    );
+    assert_ne!(
+        recovered(
+            &action_digest(&msg("x207-v015.testnet", &me, "auto_settle", 4)),
+            &off
+        ),
+        Some(me.clone()),
+        "off as on"
+    );
+    assert_ne!(
+        recovered(
+            &action_digest(&msg("x207-v015.testnet", &me, "auto_settle_off", 5)),
+            &off
+        ),
+        Some(me.clone()),
+        "off at the next nonce"
+    );
 }
 
 /// TC-CT-113-04 (documents the property that CAN be abused): the signature has no network word other than the salt, and the salt

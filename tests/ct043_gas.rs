@@ -21,7 +21,11 @@ fn tgas(result: &ExecutionFinalResult) -> f64 {
 
 fn report(label: &str, tgas: f64) {
     println!("GAS {label}: {tgas:.1} Tgas");
-    assert!(tgas < LIMIT_TGAS * MARGIN, "{label} uses {tgas:.1} Tgas, more than {} Tgas", LIMIT_TGAS * MARGIN);
+    assert!(
+        tgas < LIMIT_TGAS * MARGIN,
+        "{label} uses {tgas:.1} Tgas, more than {} Tgas",
+        LIMIT_TGAS * MARGIN
+    );
 }
 
 fn name(i: usize) -> String {
@@ -41,18 +45,30 @@ async fn members(f: &mut Funded, n: usize) -> anyhow::Result<()> {
 }
 
 async fn storage_usage(f: &Funded) -> anyhow::Result<u64> {
-    Ok(f.circle.worker.view_account(f.circle.contract.id()).await?.storage_usage)
+    Ok(f.circle
+        .worker
+        .view_account(f.circle.contract.id())
+        .await?
+        .storage_usage)
 }
 
 /// Ring edges `i -> (i + k) % n` for `k` in `1..=offsets`, one voucher each of 1 credit.
-async fn register_ring(f: &mut Funded, n: usize, offsets: usize) -> anyhow::Result<(f64, Vec<Value>)> {
+async fn register_ring(
+    f: &mut Funded,
+    n: usize,
+    offsets: usize,
+) -> anyhow::Result<(f64, Vec<Value>)> {
     let mut first = None;
     let mut edges = Vec::new();
     for k in 1..=offsets {
         for i in 0..n {
             let (payer, payee) = (name(i), name((i + k) % n));
             let r = f.circle.register(&payer, &payee, 1, CREDIT).await?;
-            assert!(r.is_success(), "register {payer}->{payee}: {:?}", failure_text(&r));
+            assert!(
+                r.is_success(),
+                "register {payer}->{payee}: {:?}",
+                failure_text(&r)
+            );
             first.get_or_insert(tgas(&r));
             edges.push(edge(&payer, &payee, CREDIT));
         }
@@ -60,7 +76,10 @@ async fn register_ring(f: &mut Funded, n: usize, offsets: usize) -> anyhow::Resu
     Ok((first.unwrap(), edges))
 }
 
-async fn close_submit_commit(f: &Funded, edges: Option<Vec<Value>>) -> anyhow::Result<(Option<f64>, f64)> {
+async fn close_submit_commit(
+    f: &Funded,
+    edges: Option<Vec<Value>>,
+) -> anyhow::Result<(Option<f64>, f64)> {
     let c = &f.circle;
     let solver = c.worker.dev_create_account().await?;
     c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
@@ -68,11 +87,18 @@ async fn close_submit_commit(f: &Funded, edges: Option<Vec<Value>>) -> anyhow::R
     assert!(close.is_success(), "{:?}", failure_text(&close));
     let mut submit_gas = None;
     if let Some(edges) = edges {
-        let r = c.call_as(&solver, "submit_clearing", json!({"epoch": 1, "edges": edges})).await?;
+        let r = c
+            .call_as(
+                &solver,
+                "submit_clearing",
+                json!({"epoch": 1, "edges": edges}),
+            )
+            .await?;
         assert!(r.is_success(), "submit: {:?}", failure_text(&r));
         submit_gas = Some(tgas(&r));
     }
-    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
+    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?)
+        .await?;
     let commit = c.call_keeper("commit_epoch", json!({"epoch": 1})).await?;
     assert!(commit.is_success(), "commit: {:?}", failure_text(&commit));
     Ok((submit_gas, tgas(&commit)))
@@ -93,7 +119,10 @@ async fn ring(n: usize, offsets: usize) -> anyhow::Result<()> {
     }
     let (submit, commit) = close_submit_commit(&f, Some(edges)).await?;
     report(&format!("submit_clearing {count} edges"), submit.unwrap());
-    report(&format!("commit_epoch {count} edges, {n} participants"), commit);
+    report(
+        &format!("commit_epoch {count} edges, {n} participants"),
+        commit,
+    );
     Ok(())
 }
 
@@ -126,10 +155,16 @@ async fn gas_finalize_with_max_members() -> anyhow::Result<()> {
         assert!(r.is_success(), "{:?}", failure_text(&r));
     }
     let (_, commit) = close_submit_commit(&f, None).await?;
-    report(&format!("commit_epoch 63 edges, {MAX_MEMBERS} participants"), commit);
+    report(
+        &format!("commit_epoch 63 edges, {MAX_MEMBERS} participants"),
+        commit,
+    );
     let fin = finalize(&f.circle).await?;
     assert!(fin.is_success(), "{:?}", failure_text(&fin));
-    report(&format!("finalize_epoch {MAX_MEMBERS} members, 63 defaults"), tgas(&fin));
+    report(
+        &format!("finalize_epoch {MAX_MEMBERS} members, 63 defaults"),
+        tgas(&fin),
+    );
     Ok(())
 }
 
@@ -137,7 +172,8 @@ async fn gas_finalize_with_max_members() -> anyhow::Result<()> {
 #[tokio::test]
 async fn gas_claim() -> anyhow::Result<()> {
     for destination in ["near", "intents"] {
-        let f = s1_committed_on(Funded::deploy_with_intents(Some(Funded::params_short())).await?).await?;
+        let f = s1_committed_on(Funded::deploy_with_intents(Some(Funded::params_short())).await?)
+            .await?;
         let fin = finalize(&f.circle).await?;
         assert!(fin.is_success(), "{:?}", failure_text(&fin));
         let r = f.accounts["gpu"]
@@ -147,10 +183,20 @@ async fn gas_claim() -> anyhow::Result<()> {
             .gas(Gas::from_tgas(100))
             .transact()
             .await?;
-        assert!(r.is_success(), "claim {destination} with 100 Tgas: {:?}", failure_text(&r));
+        assert!(
+            r.is_success(),
+            "claim {destination} with 100 Tgas: {:?}",
+            failure_text(&r)
+        );
         assert!(r.failures().is_empty(), "{:?}", r.failures());
-        assert!(events_include_claim(&r), "{destination}: no residual_claimed in the log");
-        report(&format!("claim {destination} incl. callback (prepaid 100 Tgas)"), tgas(&r));
+        assert!(
+            events_include_claim(&r),
+            "{destination}: no residual_claimed in the log"
+        );
+        report(
+            &format!("claim {destination} incl. callback (prepaid 100 Tgas)"),
+            tgas(&r),
+        );
     }
     Ok(())
 }
@@ -162,7 +208,10 @@ fn events_include_claim(r: &ExecutionFinalResult) -> bool {
 // TC-CT-043-06: cost of one voucher against the nominal of 0.02 USD
 #[tokio::test]
 async fn cost_per_voucher() -> anyhow::Result<()> {
-    let near_usd: f64 = std::env::var("NEAR_USD").ok().and_then(|v| v.parse().ok()).unwrap_or(3.0);
+    let near_usd: f64 = std::env::var("NEAR_USD")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3.0);
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
     members(&mut f, 2).await?;
     let (first, _) = register_ring(&mut f, 2, 1).await?;
@@ -171,7 +220,10 @@ async fn cost_per_voucher() -> anyhow::Result<()> {
     let near = gas * 1e8 / 1e24; // sandbox gas price: 1e8 yocto per gas
     let usd = near * near_usd;
     println!("GAS cost per voucher (continuing): {:.2} Tgas = {near:.6} NEAR = {usd:.6} USD at {near_usd} USD/NEAR; {:.2}% of a 0.02 USD payment (first voucher {first:.1} Tgas)", gas / 1e12, usd / 0.02 * 100.0);
-    assert!(usd < 0.02, "a voucher must cost less than the payment it covers");
+    assert!(
+        usd < 0.02,
+        "a voucher must cost less than the payment it covers"
+    );
     Ok(())
 }
 
@@ -188,10 +240,17 @@ async fn storage_per_entry() -> anyhow::Result<()> {
     assert!(f.join("m01", Funded::join_deposit()).await?.is_success());
     let s2 = storage_usage(&f).await?;
     let member_bytes = s2 - s1;
-    println!("GAS storage: member {member_bytes} bytes (first join {} bytes incl. the member index)", s1 - s0);
+    println!(
+        "GAS storage: member {member_bytes} bytes (first join {} bytes incl. the member index)",
+        s1 - s0
+    );
     let per_byte = 10_000_000_000_000_000_000u128; // 1e19 yocto per byte
     let member_cost = member_bytes as u128 * per_byte;
-    assert!(member_cost <= Funded::join_deposit().as_yoctonear(), "a member costs {member_cost} yocto, the join deposit is {}", Funded::join_deposit().as_yoctonear());
+    assert!(
+        member_cost <= Funded::join_deposit().as_yoctonear(),
+        "a member costs {member_cost} yocto, the join deposit is {}",
+        Funded::join_deposit().as_yoctonear()
+    );
     for n in ["m00", "m01"] {
         let account = f.accounts[n].clone();
         assert!(f.stake(&account, 100 * CREDIT).await?.is_success());

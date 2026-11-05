@@ -76,7 +76,15 @@ pub mod circle {
     }
 
     /// Spec 3.3, written byte by byte and independent of `canonical.rs`.
-    pub fn signing_hash(circle: &str, payer: &str, payee: &str, epoch: u64, seq: u64, cumulative: &str, resource: &str) -> [u8; 32] {
+    pub fn signing_hash(
+        circle: &str,
+        payer: &str,
+        payee: &str,
+        epoch: u64,
+        seq: u64,
+        cumulative: &str,
+        resource: &str,
+    ) -> [u8; 32] {
         let message = format!(
             r#"{{"circle":"{circle}","payer":"{payer}","payee":"{payee}","epoch":{epoch},"seq":{seq},"cumulativeAmount":"{cumulative}","unit":"credit","resource":"{resource}"}}"#
         );
@@ -98,7 +106,10 @@ pub mod circle {
     }
 
     fn pubkey_of(key: &SigningKey) -> String {
-        format!("ed25519:{}", near_sdk::bs58::encode(key.verifying_key().to_bytes()).into_string())
+        format!(
+            "ed25519:{}",
+            near_sdk::bs58::encode(key.verifying_key().to_bytes()).into_string()
+        )
     }
 
     impl Circle {
@@ -110,7 +121,9 @@ pub mod circle {
         /// Same, with `usdt` as the token account the contract accepts.
         pub async fn deploy_with(params: Value, usdt: String) -> anyhow::Result<Circle> {
             let worker = near_workspaces::sandbox().await?;
-            let contract = worker.dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?).await?;
+            let contract = worker
+                .dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?)
+                .await?;
             contract
                 .call("new")
                 .args_json(json!({
@@ -121,12 +134,24 @@ pub mod circle {
                 .await?
                 .into_result()?;
             let keeper = worker.dev_create_account().await?;
-            Ok(Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new(), max_jump: 4000, keeper })
+            Ok(Circle {
+                worker,
+                contract,
+                keys: BTreeMap::new(),
+                seqs: BTreeMap::new(),
+                max_jump: 4000,
+                keeper,
+            })
         }
 
         /// Writes an `active` member straight into contract storage (D1, prefix `m`) with a
         /// voucher key of its own. Stands in for `join` plus stake, which are separate items.
-        pub async fn seed_member(&mut self, name: &str, stake: u128, limit: u128) -> anyhow::Result<()> {
+        pub async fn seed_member(
+            &mut self,
+            name: &str,
+            stake: u128,
+            limit: u128,
+        ) -> anyhow::Result<()> {
             let key = voucher_key(name);
             let id: AccountId = account_of(name).parse()?;
             let member = Member {
@@ -146,25 +171,58 @@ pub mod circle {
             };
             let mut storage_key = b"m".to_vec();
             storage_key.extend(borsh::to_vec(&id)?);
-            self.worker.patch_state(self.contract.id(), &storage_key, &borsh::to_vec(&member)?).await?;
+            self.worker
+                .patch_state(self.contract.id(), &storage_key, &borsh::to_vec(&member)?)
+                .await?;
             self.keys.insert(name.to_string(), key);
             Ok(())
         }
 
         /// `register_cumulative` for the next `seq` of the pair in `epoch`. May fail; the caller checks.
-        pub async fn register(&mut self, payer: &str, payee: &str, epoch: u64, cumulative: u128) -> anyhow::Result<ExecutionFinalResult> {
-            let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);
+        pub async fn register(
+            &mut self,
+            payer: &str,
+            payee: &str,
+            epoch: u64,
+            cumulative: u128,
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            let seq = self
+                .seqs
+                .entry((payer.into(), payee.into(), epoch))
+                .or_insert(0);
             *seq += 1;
             let seq = *seq;
             self.register_at(payer, payee, epoch, seq, cumulative).await
         }
 
         /// `register_cumulative` with an explicit `seq` (cumulative mode allows gaps).
-        pub async fn register_at(&self, payer: &str, payee: &str, epoch: u64, seq: u64, cumulative: u128) -> anyhow::Result<ExecutionFinalResult> {
+        pub async fn register_at(
+            &self,
+            payer: &str,
+            payee: &str,
+            epoch: u64,
+            seq: u64,
+            cumulative: u128,
+        ) -> anyhow::Result<ExecutionFinalResult> {
             let resource = "https://example.test/api";
-            let (circle, payer_id, payee_id) = (self.contract.id().to_string(), account_of(payer), account_of(payee));
-            let hash = signing_hash(&circle, &payer_id, &payee_id, epoch, seq, &cumulative.to_string(), resource);
-            let signature = format!("ed25519:{}", near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string());
+            let (circle, payer_id, payee_id) = (
+                self.contract.id().to_string(),
+                account_of(payer),
+                account_of(payee),
+            );
+            let hash = signing_hash(
+                &circle,
+                &payer_id,
+                &payee_id,
+                epoch,
+                seq,
+                &cumulative.to_string(),
+                resource,
+            );
+            let signature = format!(
+                "ed25519:{}",
+                near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string()
+            );
             let voucher = json!({
                 "circle": circle, "payer": payer_id, "payee": payee_id, "epoch": epoch, "seq": seq,
                 "cumulativeAmount": cumulative.to_string(), "unit": "credit", "resource": resource
@@ -179,14 +237,38 @@ pub mod circle {
         }
 
         /// A voucher of the next `seq` of the pair and its signature, for methods that take them as arguments (CT-075).
-        pub fn next_voucher(&mut self, payer: &str, payee: &str, epoch: u64, cumulative: u128) -> (Value, String) {
-            let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);
+        pub fn next_voucher(
+            &mut self,
+            payer: &str,
+            payee: &str,
+            epoch: u64,
+            cumulative: u128,
+        ) -> (Value, String) {
+            let seq = self
+                .seqs
+                .entry((payer.into(), payee.into(), epoch))
+                .or_insert(0);
             *seq += 1;
             let seq = *seq;
             let resource = "https://example.test/api";
-            let (circle, payer_id, payee_id) = (self.contract.id().to_string(), account_of(payer), account_of(payee));
-            let hash = signing_hash(&circle, &payer_id, &payee_id, epoch, seq, &cumulative.to_string(), resource);
-            let signature = format!("ed25519:{}", near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string());
+            let (circle, payer_id, payee_id) = (
+                self.contract.id().to_string(),
+                account_of(payer),
+                account_of(payee),
+            );
+            let hash = signing_hash(
+                &circle,
+                &payer_id,
+                &payee_id,
+                epoch,
+                seq,
+                &cumulative.to_string(),
+                resource,
+            );
+            let signature = format!(
+                "ed25519:{}",
+                near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string()
+            );
             let voucher = json!({
                 "circle": circle, "payer": payer_id, "payee": payee_id, "epoch": epoch, "seq": seq,
                 "cumulativeAmount": cumulative.to_string(), "unit": "credit", "resource": resource
@@ -195,14 +277,39 @@ pub mod circle {
         }
 
         /// `register_in_bundle` for the next `seq` of the pair (CT-064).
-        pub async fn register_in_bundle(&mut self, bundle_id: u64, payer: &str, payee: &str, epoch: u64, cumulative: u128) -> anyhow::Result<ExecutionFinalResult> {
-            let seq = self.seqs.entry((payer.into(), payee.into(), epoch)).or_insert(0);
+        pub async fn register_in_bundle(
+            &mut self,
+            bundle_id: u64,
+            payer: &str,
+            payee: &str,
+            epoch: u64,
+            cumulative: u128,
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            let seq = self
+                .seqs
+                .entry((payer.into(), payee.into(), epoch))
+                .or_insert(0);
             *seq += 1;
             let seq = *seq;
             let resource = "https://example.test/api";
-            let (circle, payer_id, payee_id) = (self.contract.id().to_string(), account_of(payer), account_of(payee));
-            let hash = signing_hash(&circle, &payer_id, &payee_id, epoch, seq, &cumulative.to_string(), resource);
-            let signature = format!("ed25519:{}", near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string());
+            let (circle, payer_id, payee_id) = (
+                self.contract.id().to_string(),
+                account_of(payer),
+                account_of(payee),
+            );
+            let hash = signing_hash(
+                &circle,
+                &payer_id,
+                &payee_id,
+                epoch,
+                seq,
+                &cumulative.to_string(),
+                resource,
+            );
+            let signature = format!(
+                "ed25519:{}",
+                near_sdk::bs58::encode(self.keys[payer].sign(&hash).to_bytes()).into_string()
+            );
             let voucher = json!({
                 "circle": circle, "payer": payer_id, "payee": payee_id, "epoch": epoch, "seq": seq,
                 "cumulativeAmount": cumulative.to_string(), "unit": "credit", "resource": resource
@@ -210,7 +317,9 @@ pub mod circle {
             Ok(self
                 .keeper
                 .call(self.contract.id(), "register_in_bundle")
-                .args_json(json!({"bundle_id": bundle_id, "voucher": voucher, "signature": signature}))
+                .args_json(
+                    json!({"bundle_id": bundle_id, "voucher": voucher, "signature": signature}),
+                )
                 .gas(Gas::from_tgas(100))
                 .transact()
                 .await?)
@@ -220,10 +329,21 @@ pub mod circle {
         /// written byte by byte and independent of `bundle.rs`). Legs are `(payer, payee, max_amount)` by name.
         pub fn bundle_terms(&self, epoch: u64, legs: &[(&str, &str, u128)]) -> (String, [u8; 32]) {
             let circle = self.contract.id().to_string();
-            let mut named: Vec<(String, String, u128)> = legs.iter().map(|(a, b, m)| (account_of(a), account_of(b), *m)).collect();
-            named.sort_by(|x, y| (x.0.as_bytes(), x.1.as_bytes()).cmp(&(y.0.as_bytes(), y.1.as_bytes())));
-            let legs_json: Vec<String> = named.iter().map(|(a, b, m)| format!(r#"{{"payer":"{a}","payee":"{b}","max_amount":"{m}"}}"#)).collect();
-            let message = format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]}}"#, legs_json.join(","));
+            let mut named: Vec<(String, String, u128)> = legs
+                .iter()
+                .map(|(a, b, m)| (account_of(a), account_of(b), *m))
+                .collect();
+            named.sort_by(|x, y| {
+                (x.0.as_bytes(), x.1.as_bytes()).cmp(&(y.0.as_bytes(), y.1.as_bytes()))
+            });
+            let legs_json: Vec<String> = named
+                .iter()
+                .map(|(a, b, m)| format!(r#"{{"payer":"{a}","payee":"{b}","max_amount":"{m}"}}"#))
+                .collect();
+            let message = format!(
+                r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]}}"#,
+                legs_json.join(",")
+            );
             let hash: [u8; 32] = Sha256::digest(message.as_bytes()).into();
             (message, hash)
         }
@@ -243,7 +363,12 @@ pub mod circle {
                 plain
             } else {
                 let cut = plain.len() - 1;
-                format!(r#"{},"search_leg":{{"payer":"{}","payee":"{}"}}}}"#, &plain[..cut], account_of(search.0), account_of(search.1))
+                format!(
+                    r#"{},"search_leg":{{"payer":"{}","payee":"{}"}}}}"#,
+                    &plain[..cut],
+                    account_of(search.0),
+                    account_of(search.1)
+                )
             };
             let hash: [u8; 32] = Sha256::digest(message.as_bytes()).into();
             let signatures: Vec<serde_json::Value> =
@@ -251,7 +376,11 @@ pub mod circle {
             let legs_json: Vec<serde_json::Value> =
                 legs.iter().map(|(a, b, m)| json!({"payer": account_of(a), "payee": account_of(b), "max_amount": m.to_string()})).collect();
             let bundle = json!({"epoch": epoch, "legs": legs_json, "search_leg": {"payer": account_of(search.0), "payee": account_of(search.1)}});
-            self.call_keeper("commit_bundle", json!({"bundle": bundle, "signatures": signatures})).await
+            self.call_keeper(
+                "commit_bundle",
+                json!({"bundle": bundle, "signatures": signatures}),
+            )
+            .await
         }
 
         /// CT-094: like `commit_bundle` for a swap whose signed terms name an arbiter: `deal` = `(arbiter account id, agreement_hash, confirm_by in ns)`. The three keys come
@@ -265,8 +394,16 @@ pub mod circle {
         ) -> anyhow::Result<ExecutionFinalResult> {
             let (plain, _) = self.bundle_terms(epoch, legs);
             let cut = plain.len() - 1;
-            let agreement = deal.1.map(|h| format!(r#","agreement_hash":"{h}""#)).unwrap_or_default();
-            let message = format!(r#"{},"arbiter":"{}"{agreement},"confirm_by":"{}"}}"#, &plain[..cut], deal.0, deal.2);
+            let agreement = deal
+                .1
+                .map(|h| format!(r#","agreement_hash":"{h}""#))
+                .unwrap_or_default();
+            let message = format!(
+                r#"{},"arbiter":"{}"{agreement},"confirm_by":"{}"}}"#,
+                &plain[..cut],
+                deal.0,
+                deal.2
+            );
             let hash: [u8; 32] = Sha256::digest(message.as_bytes()).into();
             let signatures: Vec<serde_json::Value> =
                 signers.iter().map(|s| json!({"account_id": account_of(s), "signature": self.sign_terms(s, &message, hash)})).collect();
@@ -276,7 +413,11 @@ pub mod circle {
             if let Some(h) = deal.1 {
                 bundle["agreement_hash"] = json!(h);
             }
-            self.call_keeper("commit_bundle", json!({"bundle": bundle, "signatures": signatures})).await
+            self.call_keeper(
+                "commit_bundle",
+                json!({"bundle": bundle, "signatures": signatures}),
+            )
+            .await
         }
 
         pub fn sign_terms(&self, signer: &str, message: &str, terms_hash: [u8; 32]) -> String {
@@ -290,22 +431,37 @@ pub mod circle {
             payload.extend_from_slice(circle.as_bytes());
             payload.push(0);
             let digest: [u8; 32] = Sha256::digest(&payload).into();
-            format!("ed25519:{}", near_sdk::bs58::encode(self.keys[signer].sign(&digest).to_bytes()).into_string())
+            format!(
+                "ed25519:{}",
+                near_sdk::bs58::encode(self.keys[signer].sign(&digest).to_bytes()).into_string()
+            )
         }
 
         /// `commit_bundle` by the keeper with signatures from `signers` over the terms.
-        pub async fn commit_bundle(&self, epoch: u64, legs: &[(&str, &str, u128)], signers: &[&str]) -> anyhow::Result<ExecutionFinalResult> {
+        pub async fn commit_bundle(
+            &self,
+            epoch: u64,
+            legs: &[(&str, &str, u128)],
+            signers: &[&str],
+        ) -> anyhow::Result<ExecutionFinalResult> {
             let (message, hash) = self.bundle_terms(epoch, legs);
             let signatures: Vec<serde_json::Value> =
                 signers.iter().map(|s| json!({"account_id": account_of(s), "signature": self.sign_terms(s, &message, hash)})).collect();
             let legs_json: Vec<serde_json::Value> =
                 legs.iter().map(|(a, b, m)| json!({"payer": account_of(a), "payee": account_of(b), "max_amount": m.to_string()})).collect();
-            self.call_keeper("commit_bundle", json!({"bundle": {"epoch": epoch, "legs": legs_json}, "signatures": signatures})).await
+            self.call_keeper(
+                "commit_bundle",
+                json!({"bundle": {"epoch": epoch, "legs": legs_json}, "signatures": signatures}),
+            )
+            .await
         }
 
         /// The voucher public key of `name`, created on first use.
         pub fn key_for(&mut self, name: &str) -> String {
-            let key = self.keys.entry(name.to_string()).or_insert_with(|| voucher_key(name));
+            let key = self
+                .keys
+                .entry(name.to_string())
+                .or_insert_with(|| voucher_key(name));
             pubkey_of(key)
         }
 
@@ -325,22 +481,47 @@ pub mod circle {
         pub async fn advance_to(&self, target_ns: u64) -> anyhow::Result<()> {
             while self.now_ns().await? < target_ns {
                 let missing_s = (target_ns - self.now_ns().await?).div_ceil(SEC);
-                self.worker.fast_forward(missing_s.clamp(20, self.max_jump.max(20))).await?;
+                self.worker
+                    .fast_forward(missing_s.clamp(20, self.max_jump.max(20)))
+                    .await?;
             }
             Ok(())
         }
 
         /// A timestamp field of `get_epoch` as nanoseconds.
         pub async fn epoch_ts(&self, epoch: u64, field: &str) -> anyhow::Result<u64> {
-            Ok(self.epoch(epoch).await?[field].as_str().expect(field).parse()?)
+            Ok(self.epoch(epoch).await?[field]
+                .as_str()
+                .expect(field)
+                .parse()?)
         }
 
-        pub async fn call_as(&self, who: &Account, method: &str, args: Value) -> anyhow::Result<ExecutionFinalResult> {
-            Ok(who.call(self.contract.id(), method).args_json(args).gas(Gas::from_tgas(200)).transact().await?)
+        pub async fn call_as(
+            &self,
+            who: &Account,
+            method: &str,
+            args: Value,
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            Ok(who
+                .call(self.contract.id(), method)
+                .args_json(args)
+                .gas(Gas::from_tgas(200))
+                .transact()
+                .await?)
         }
 
-        pub async fn call_keeper(&self, method: &str, args: Value) -> anyhow::Result<ExecutionFinalResult> {
-            Ok(self.keeper.call(self.contract.id(), method).args_json(args).gas(Gas::from_tgas(200)).transact().await?)
+        pub async fn call_keeper(
+            &self,
+            method: &str,
+            args: Value,
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            Ok(self
+                .keeper
+                .call(self.contract.id(), method)
+                .args_json(args)
+                .gas(Gas::from_tgas(200))
+                .transact()
+                .await?)
         }
     }
 
@@ -356,7 +537,12 @@ pub mod circle {
             .iter()
             .filter_map(|l| l.strip_prefix("EVENT_JSON:"))
             .map(|body| serde_json::from_str::<Value>(body).expect("event json"))
-            .map(|v| (v["event"].as_str().unwrap().to_string(), v["data"][0].clone()))
+            .map(|v| {
+                (
+                    v["event"].as_str().unwrap().to_string(),
+                    v["data"][0].clone(),
+                )
+            })
             .collect()
     }
 
@@ -388,11 +574,15 @@ pub mod funded {
         pub accounts: BTreeMap<String, Account>,
     }
 
-    async fn circle_worker_keeper(worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>) -> anyhow::Result<Account> {
+    async fn circle_worker_keeper(
+        worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>,
+    ) -> anyhow::Result<Account> {
         Ok(worker.dev_create_account().await?)
     }
 
-    async fn token(circle_worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>) -> anyhow::Result<Contract> {
+    async fn token(
+        circle_worker: &near_workspaces::Worker<near_workspaces::network::Sandbox>,
+    ) -> anyhow::Result<Contract> {
         let wasm = std::fs::read(super::probe_wasm("mock_ft"))?;
         let ft = circle_worker.dev_deploy(&wasm).await?;
         ft.call("new").transact().await?.into_result()?;
@@ -417,13 +607,17 @@ pub mod funded {
             let wasm = std::fs::read("target/near/x207_circle.wasm")?;
             let contract = worker.dev_deploy(&wasm).await?;
             let intents = if with_intents {
-                let mock = worker.dev_deploy(&std::fs::read(super::probe_wasm("mock_intents"))?).await?;
+                let mock = worker
+                    .dev_deploy(&std::fs::read(super::probe_wasm("mock_intents"))?)
+                    .await?;
                 mock.call("new").transact().await?.into_result()?;
                 Some(mock)
             } else {
                 None
             };
-            let intents_id = intents.as_ref().map_or_else(|| account_of("intents"), |m| m.id().to_string());
+            let intents_id = intents
+                .as_ref()
+                .map_or_else(|| account_of("intents"), |m| m.id().to_string());
             contract
                 .call("new")
                 .args_json(json!({
@@ -434,8 +628,21 @@ pub mod funded {
                 .await?
                 .into_result()?;
             let keeper = circle_worker_keeper(&worker).await?;
-            let circle = Circle { worker, contract, keys: BTreeMap::new(), seqs: BTreeMap::new(), max_jump: 4000, keeper };
-            Ok(Funded { circle, usdt, palsu, intents, accounts: BTreeMap::new() })
+            let circle = Circle {
+                worker,
+                contract,
+                keys: BTreeMap::new(),
+                seqs: BTreeMap::new(),
+                max_jump: 4000,
+                keeper,
+            };
+            Ok(Funded {
+                circle,
+                usdt,
+                palsu,
+                intents,
+                accounts: BTreeMap::new(),
+            })
         }
 
         pub fn params_short() -> Value {
@@ -448,16 +655,31 @@ pub mod funded {
                 return Ok(a.clone());
             }
             let root = self.circle.worker.root_account()?;
-            let account = root.create_subaccount(name).initial_balance(NearToken::from_near(20)).transact().await?.into_result()?;
+            let account = root
+                .create_subaccount(name)
+                .initial_balance(NearToken::from_near(20))
+                .transact()
+                .await?
+                .into_result()?;
             for ft in [&self.usdt, &self.palsu] {
-                ft.call("mint").args_json(json!({"account_id": account.id(), "amount": (1000 * CREDIT).to_string()})).transact().await?.into_result()?;
+                ft.call("mint")
+                    .args_json(
+                        json!({"account_id": account.id(), "amount": (1000 * CREDIT).to_string()}),
+                    )
+                    .transact()
+                    .await?
+                    .into_result()?;
             }
             self.accounts.insert(name.to_string(), account.clone());
             Ok(account)
         }
 
         /// `join` with `deposit` and the voucher key of `name`.
-        pub async fn join(&mut self, name: &str, deposit: NearToken) -> anyhow::Result<ExecutionFinalResult> {
+        pub async fn join(
+            &mut self,
+            name: &str,
+            deposit: NearToken,
+        ) -> anyhow::Result<ExecutionFinalResult> {
             let account = self.account(name).await?;
             let pubkey = self.circle.key_for(name);
             Ok(account
@@ -474,7 +696,13 @@ pub mod funded {
         }
 
         /// `token.ft_transfer_call(contract, amount, msg)` from `who`; the result value is the used amount.
-        pub async fn transfer_call(&self, token: &Contract, who: &Account, amount: u128, msg: &str) -> anyhow::Result<ExecutionFinalResult> {
+        pub async fn transfer_call(
+            &self,
+            token: &Contract,
+            who: &Account,
+            amount: u128,
+            msg: &str,
+        ) -> anyhow::Result<ExecutionFinalResult> {
             Ok(who
                 .call(token.id(), "ft_transfer_call")
                 .args_json(json!({"receiver_id": self.circle.contract.id(), "amount": amount.to_string(), "memo": null, "msg": msg}))
@@ -484,17 +712,32 @@ pub mod funded {
                 .await?)
         }
 
-        pub async fn stake(&self, who: &Account, amount: u128) -> anyhow::Result<ExecutionFinalResult> {
-            self.transfer_call(&self.usdt, who, amount, r#"{"action":"stake"}"#).await
+        pub async fn stake(
+            &self,
+            who: &Account,
+            amount: u128,
+        ) -> anyhow::Result<ExecutionFinalResult> {
+            self.transfer_call(&self.usdt, who, amount, r#"{"action":"stake"}"#)
+                .await
         }
 
-        pub async fn balance(&self, token: &Contract, account: &near_workspaces::AccountId) -> anyhow::Result<u128> {
-            let value: String = token.view("ft_balance_of").args_json(json!({"account_id": account})).await?.json()?;
+        pub async fn balance(
+            &self,
+            token: &Contract,
+            account: &near_workspaces::AccountId,
+        ) -> anyhow::Result<u128> {
+            let value: String = token
+                .view("ft_balance_of")
+                .args_json(json!({"account_id": account}))
+                .await?
+                .json()?;
             Ok(value.parse()?)
         }
 
         pub async fn member(&self, name: &str) -> anyhow::Result<Value> {
-            self.circle.view("member", json!({"account_id": account_of(name)})).await
+            self.circle
+                .view("member", json!({"account_id": account_of(name)}))
+                .await
         }
 
         /// I-04 (`assert_d6`): the five components sum to the USDT balance of the contract, and
@@ -503,10 +746,25 @@ pub mod funded {
             let pool = self.circle.view("get_pool", json!({})).await?;
             let balance = self.balance(&self.usdt, self.circle.contract.id()).await?;
             let accounted: u128 = pool["accounted"].as_str().unwrap().parse()?;
-            assert_eq!(accounted, balance, "accounted {accounted} != USDT balance {balance}");
-            let members = self.circle.view("list_members", json!({"from_index": 0, "limit": 100})).await?;
-            let stake: u128 = members.as_array().unwrap().iter().map(|m| m["stake"].as_str().unwrap().parse::<u128>().unwrap()).sum();
-            assert_eq!(pool["total_stake"].as_str().unwrap().parse::<u128>()?, stake, "total_stake != sum of stakes");
+            assert_eq!(
+                accounted, balance,
+                "accounted {accounted} != USDT balance {balance}"
+            );
+            let members = self
+                .circle
+                .view("list_members", json!({"from_index": 0, "limit": 100}))
+                .await?;
+            let stake: u128 = members
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m["stake"].as_str().unwrap().parse::<u128>().unwrap())
+                .sum();
+            assert_eq!(
+                pool["total_stake"].as_str().unwrap().parse::<u128>()?,
+                stake,
+                "total_stake != sum of stakes"
+            );
             Ok(())
         }
     }
@@ -543,15 +801,31 @@ pub mod flow {
             let join = f.join(name, Funded::join_deposit()).await?;
             assert!(join.is_success(), "join {name}: {:?}", failure_text(&join));
             let stake = f.stake(&account, 100 * CREDIT).await?;
-            assert!(stake.is_success(), "stake {name}: {:?}", failure_text(&stake));
+            assert!(
+                stake.is_success(),
+                "stake {name}: {:?}",
+                failure_text(&stake)
+            );
         }
-        for (payer, payee, amount) in [("scraper", "gpu", 60), ("gpu", "translator", 25), ("translator", "scraper", 25)] {
+        for (payer, payee, amount) in [
+            ("scraper", "gpu", 60),
+            ("gpu", "translator", 25),
+            ("translator", "scraper", 25),
+        ] {
             let result = f.circle.register(payer, payee, 1, amount * CREDIT).await?;
-            assert!(result.is_success(), "register {payer}->{payee}: {:?}", failure_text(&result));
+            assert!(
+                result.is_success(),
+                "register {payer}->{payee}: {:?}",
+                failure_text(&result)
+            );
         }
         for name in exiters {
             let exit = request_exit(&f, name).await?;
-            assert!(exit.is_success(), "request_exit {name}: {:?}", failure_text(&exit));
+            assert!(
+                exit.is_success(),
+                "request_exit {name}: {:?}",
+                failure_text(&exit)
+            );
         }
         let c = &f.circle;
         // The solver account is created first: the proposal window is only 60 s of block time.
@@ -559,22 +833,38 @@ pub mod flow {
         c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
         let close = c.call_keeper("close_epoch", json!({"epoch": 1})).await?;
         assert!(close.is_success(), "{:?}", failure_text(&close));
-        let edges = json!([edge("scraper", "gpu", 25 * CREDIT), edge("gpu", "translator", 25 * CREDIT), edge("translator", "scraper", 25 * CREDIT)]);
-        let submit = c.call_as(&solver, "submit_clearing", json!({"epoch": 1, "edges": edges})).await?;
+        let edges = json!([
+            edge("scraper", "gpu", 25 * CREDIT),
+            edge("gpu", "translator", 25 * CREDIT),
+            edge("translator", "scraper", 25 * CREDIT)
+        ]);
+        let submit = c
+            .call_as(
+                &solver,
+                "submit_clearing",
+                json!({"epoch": 1, "edges": edges}),
+            )
+            .await?;
         assert!(submit.is_success(), "{:?}", failure_text(&submit));
-        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
+        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?)
+            .await?;
         let commit = c.call_keeper("commit_epoch", json!({"epoch": 1})).await?;
         assert!(commit.is_success(), "{:?}", failure_text(&commit));
         Ok(f)
     }
 
-
-    pub async fn finalize(c: &Circle) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-        c.advance_to(c.epoch_ts(1, "payment_deadline").await?).await?;
+    pub async fn finalize(
+        c: &Circle,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        c.advance_to(c.epoch_ts(1, "payment_deadline").await?)
+            .await?;
         c.call_keeper("finalize_epoch", json!({"epoch": 1})).await
     }
 
-    pub async fn request_exit(f: &Funded, name: &str) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    pub async fn request_exit(
+        f: &Funded,
+        name: &str,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
         Ok(f.accounts[name]
             .call(f.circle.contract.id(), "request_exit")
             .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
@@ -583,7 +873,10 @@ pub mod flow {
             .await?)
     }
 
-    pub async fn withdraw_stake(f: &Funded, name: &str) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    pub async fn withdraw_stake(
+        f: &Funded,
+        name: &str,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
         Ok(f.accounts[name]
             .call(f.circle.contract.id(), "withdraw_stake")
             .deposit(near_workspaces::types::NearToken::from_yoctonear(1))
@@ -595,13 +888,22 @@ pub mod flow {
     /// CT-099 (B8-F1): `prune_epoch` waits for `prune_delay_epochs` (2): closes the running epochs until epoch 3 runs, so that epoch 1 may be pruned.
     pub async fn pass_prune_delay(c: &Circle) -> anyhow::Result<()> {
         loop {
-            let running = c.view("get_epoch", json!({})).await?["epoch"].as_u64().unwrap();
+            let running = c.view("get_epoch", json!({})).await?["epoch"]
+                .as_u64()
+                .unwrap();
             if running >= 3 {
                 return Ok(());
             }
-            c.advance_to(c.epoch_ts(running, "cutoff_at").await?).await?;
-            let close = c.call_keeper("close_epoch", json!({"epoch": running})).await?;
-            assert!(close.is_success(), "close_epoch {running}: {:?}", failure_text(&close));
+            c.advance_to(c.epoch_ts(running, "cutoff_at").await?)
+                .await?;
+            let close = c
+                .call_keeper("close_epoch", json!({"epoch": running}))
+                .await?;
+            assert!(
+                close.is_success(),
+                "close_epoch {running}: {:?}",
+                failure_text(&close)
+            );
         }
     }
 
@@ -609,9 +911,16 @@ pub mod flow {
     pub async fn idle_epoch_finalized(f: &Funded) -> anyhow::Result<()> {
         let c = &f.circle;
         c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
-        assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
-        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
-        assert!(c.call_keeper("commit_epoch", json!({"epoch": 1})).await?.is_success());
+        assert!(c
+            .call_keeper("close_epoch", json!({"epoch": 1}))
+            .await?
+            .is_success());
+        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?)
+            .await?;
+        assert!(c
+            .call_keeper("commit_epoch", json!({"epoch": 1}))
+            .await?
+            .is_success());
         let fin = finalize(c).await?;
         assert!(fin.is_success(), "{:?}", failure_text(&fin));
         Ok(())

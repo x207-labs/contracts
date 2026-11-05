@@ -446,7 +446,7 @@ mod register_tests {
     }
 
     fn reg(c: &mut X207Circle, voucher: Voucher) -> U128 {
-        let sig = sig_with(&voucher.payer.as_str().trim_end_matches(".near").to_string(), &voucher);
+        let sig = sig_with(voucher.payer.as_str().trim_end_matches(".near"), &voucher);
         c.register_cumulative(voucher, sig)
     }
 
@@ -697,7 +697,7 @@ mod register_tests {
     }
 
     fn reg_demo(c: &mut X207Circle, voucher: Voucher) -> U128 {
-        let sig = sig_with(&voucher.payer.as_str().trim_end_matches(".near").to_string(), &voucher);
+        let sig = sig_with(voucher.payer.as_str().trim_end_matches(".near"), &voucher);
         c.register_voucher(voucher, sig)
     }
 

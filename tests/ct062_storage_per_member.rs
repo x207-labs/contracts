@@ -47,12 +47,22 @@ async fn what_one_member_can_make_the_contract_store() -> anyhow::Result<()> {
     assert!(f.stake(&grantor, CREDIT).await?.is_success());
     assert!(f.stake(&buyer, CREDIT).await?.is_success());
     let staked = usage(&f).await?;
-    println!("STORAGE stake of 1 unit each (changes the member rows): {} bytes", staked as i64 - before_join as i64);
+    println!(
+        "STORAGE stake of 1 unit each (changes the member rows): {} bytes",
+        staked as i64 - before_join as i64
+    );
 
     // 64 intents
     let intents_from = usage(&f).await?;
     for n in 0..64u8 {
-        let r = f.circle.call_as(&grantor, "post_intent", json!({"intent_hash": near_sdk::bs58::encode([n; 32]).into_string()})).await?;
+        let r = f
+            .circle
+            .call_as(
+                &grantor,
+                "post_intent",
+                json!({"intent_hash": near_sdk::bs58::encode([n; 32]).into_string()}),
+            )
+            .await?;
         assert!(r.is_success());
     }
     let intents = usage(&f).await? - intents_from;
@@ -61,8 +71,24 @@ async fn what_one_member_can_make_the_contract_store() -> anyhow::Result<()> {
     // 16 open grants of class B with a scope of 1024 bytes, the longest asset_type, an operator, and all accepted by the other member (its index grows too)
     let long = format!("{}:{}", "p".repeat(64), "k".repeat(64));
     let entry = |t: &str, class: &str, method: &str| json!({"asset_type": t, "class": class, "delivery_methods": [method], "accepted_proofs": ["rpc_access_key"], "terms_hash": "ab".repeat(32)});
-    assert!(f.circle.call_as(&dao, "set_asset_class", json!({"asset_type": long, "entry": entry(&long, "B", "near_access_key")})).await?.is_success());
-    assert!(f.circle.call_as(&dao, "set_asset_class", json!({"asset_type": "nft:ticket", "entry": entry("nft:ticket", "A", "escrow_nft")})).await?.is_success());
+    assert!(f
+        .circle
+        .call_as(
+            &dao,
+            "set_asset_class",
+            json!({"asset_type": long, "entry": entry(&long, "B", "near_access_key")})
+        )
+        .await?
+        .is_success());
+    assert!(f
+        .circle
+        .call_as(
+            &dao,
+            "set_asset_class",
+            json!({"asset_type": "nft:ticket", "entry": entry("nft:ticket", "A", "escrow_nft")})
+        )
+        .await?
+        .is_success());
     let expires = f.circle.now_ns().await? + 3_600_000_000_000;
     let operator = format!("{}.near", "o".repeat(59));
     let grants_from = usage(&f).await?;
@@ -71,19 +97,54 @@ async fn what_one_member_can_make_the_contract_store() -> anyhow::Result<()> {
             "limits": {"scope": padded_scope(json!({"receiver_id": "api.near", "method_names": ["get"], "allowance": "1"})), "quota": "340282366920938463463374607431768211455", "expires_at": expires.to_string()},
             "unit": "minute", "unit_price": "340282366920938463463374607431768211455", "operator": operator, "proof_hash": "ab".repeat(32), "proof_kind": "rpc_access_key"}});
         let r = f.circle.call_as(&grantor, "offer_grant", input).await?;
-        assert!(r.is_success(), "{}", common::circle::failure_text(&r).map(|t| t.find("ERR_").map_or(t.chars().take(200).collect(), |i| t[i..].chars().take(160).collect::<String>())).unwrap_or_default());
+        assert!(
+            r.is_success(),
+            "{}",
+            common::circle::failure_text(&r)
+                .map(|t| t
+                    .find("ERR_")
+                    .map_or(t.chars().take(200).collect(), |i| t[i..]
+                        .chars()
+                        .take(160)
+                        .collect::<String>()))
+                .unwrap_or_default()
+        );
     }
     let class_b = usage(&f).await? - grants_from;
     println!("STORAGE 8 open grants of class B (longest asset_type, scope 1024 bytes, operator, proof): {class_b} bytes = {}", near(class_b));
     for id in 1..=8u64 {
-        let r = f.circle.call_as(&buyer, "accept_grant", json!({"grant_id": id, "delivery_pubkey": null})).await?;
-        assert!(r.is_success(), "{}", common::circle::failure_text(&r).map(|t| t.find("ERR_").map_or(t.chars().take(200).collect(), |i| t[i..].chars().take(160).collect::<String>())).unwrap_or_default());
+        let r = f
+            .circle
+            .call_as(
+                &buyer,
+                "accept_grant",
+                json!({"grant_id": id, "delivery_pubkey": null}),
+            )
+            .await?;
+        assert!(
+            r.is_success(),
+            "{}",
+            common::circle::failure_text(&r)
+                .map(|t| t
+                    .find("ERR_")
+                    .map_or(t.chars().take(200).collect(), |i| t[i..]
+                        .chars()
+                        .take(160)
+                        .collect::<String>()))
+                .unwrap_or_default()
+        );
     }
     let accepted = usage(&f).await? - grants_from - class_b;
-    println!("STORAGE the 8 grants accepted (index of the other member, pubkey none): {accepted} bytes");
+    println!(
+        "STORAGE the 8 grants accepted (index of the other member, pubkey none): {accepted} bytes"
+    );
 
     // 8 grants of class A, each with an NFT in the escrow (token id of 128 bytes)
-    let nft = f.circle.worker.dev_deploy(&std::fs::read(common::probe_wasm("mock_nft"))?).await?;
+    let nft = f
+        .circle
+        .worker
+        .dev_deploy(&std::fs::read(common::probe_wasm("mock_nft"))?)
+        .await?;
     nft.call("new").transact().await?.into_result()?;
     let escrow_from = usage(&f).await?;
     for n in 0..8u64 {
@@ -92,9 +153,24 @@ async fn what_one_member_can_make_the_contract_store() -> anyhow::Result<()> {
             "limits": {"scope": padded_scope(json!({"nft_contract": nft.id(), "token_id": token})), "quota": null, "expires_at": expires.to_string()},
             "unit": "once", "unit_price": "340282366920938463463374607431768211455", "operator": operator, "proof_hash": null, "proof_kind": null}});
         let r = f.circle.call_as(&grantor, "offer_grant", input).await?;
-        assert!(r.is_success(), "{}", common::circle::failure_text(&r).map(|t| t.find("ERR_").map_or(t.chars().take(200).collect(), |i| t[i..].chars().take(160).collect::<String>())).unwrap_or_default());
+        assert!(
+            r.is_success(),
+            "{}",
+            common::circle::failure_text(&r)
+                .map(|t| t
+                    .find("ERR_")
+                    .map_or(t.chars().take(200).collect(), |i| t[i..]
+                        .chars()
+                        .take(160)
+                        .collect::<String>()))
+                .unwrap_or_default()
+        );
         let id = r.json::<u64>()?;
-        nft.call("nft_mint").args_json(json!({"token_id": token, "owner_id": grantor.id()})).transact().await?.into_result()?;
+        nft.call("nft_mint")
+            .args_json(json!({"token_id": token, "owner_id": grantor.id()}))
+            .transact()
+            .await?
+            .into_result()?;
         let deposit = grantor
             .call(nft.id(), "nft_transfer_call")
             .args_json(json!({"receiver_id": f.circle.contract.id(), "token_id": token, "msg": json!({"grant_id": id}).to_string()}))
@@ -135,33 +211,82 @@ async fn what_bonds_and_a_freeze_add_to_the_worst_case_of_one_member() -> anyhow
     }
     let dao = f.account("dao").await?;
     // eight bundles of the same legs, each with a different amount so that the terms differ; first without a deal
-    let legs = |n: u128| [(pa.as_str(), pb.as_str(), (10 + n) * CREDIT), (pb.as_str(), pa.as_str(), (9 + n) * CREDIT)];
+    let legs = |n: u128| {
+        [
+            (pa.as_str(), pb.as_str(), (10 + n) * CREDIT),
+            (pb.as_str(), pa.as_str(), (9 + n) * CREDIT),
+        ]
+    };
     let plain_from = usage(&f).await?;
     for n in 0..8u128 {
-        let r = f.circle.commit_bundle(1, &legs(n), &[pa.as_str(), pb.as_str()]).await?;
-        assert!(r.is_success(), "{:?}", r.failures().iter().map(|f| format!("{f:?}")).collect::<Vec<_>>());
+        let r = f
+            .circle
+            .commit_bundle(1, &legs(n), &[pa.as_str(), pb.as_str()])
+            .await?;
+        assert!(
+            r.is_success(),
+            "{:?}",
+            r.failures()
+                .iter()
+                .map(|f| format!("{f:?}"))
+                .collect::<Vec<_>>()
+        );
     }
     let plain = usage(&f).await? - plain_from;
     let now = f.circle.now_ns().await?;
     let deal_from = usage(&f).await?;
     for n in 8..16u128 {
         let hash = "ab".repeat(32);
-        let r = f.circle.commit_bundle_with_deal(1, &legs(n), (arb.id().as_str(), Some(hash.as_str()), now + 24 * HOUR), &[pa.as_str(), pb.as_str()]).await?;
-        assert!(r.is_success(), "{:?}", r.failures().iter().map(|f| format!("{f:?}")).collect::<Vec<_>>());
+        let r = f
+            .circle
+            .commit_bundle_with_deal(
+                1,
+                &legs(n),
+                (arb.id().as_str(), Some(hash.as_str()), now + 24 * HOUR),
+                &[pa.as_str(), pb.as_str()],
+            )
+            .await?;
+        assert!(
+            r.is_success(),
+            "{:?}",
+            r.failures()
+                .iter()
+                .map(|f| format!("{f:?}"))
+                .collect::<Vec<_>>()
+        );
     }
     let with_deal = usage(&f).await? - deal_from;
     let per_deal = (with_deal.saturating_sub(plain)) / 8;
     println!("STORAGE 8 bundles without a deal: {plain} bytes; with a deal (arbiter and parties of 64 characters, agreement hash): {with_deal} bytes; extra per open deal: {per_deal} bytes");
 
     let freeze_from = usage(&f).await?;
-    let r = f.circle.call_as(&dao, "propose_freeze", json!({"account_id": format!("{pa}.test.near"), "reason_hash": "cd".repeat(32)})).await?;
+    let r = f
+        .circle
+        .call_as(
+            &dao,
+            "propose_freeze",
+            json!({"account_id": format!("{pa}.test.near"), "reason_hash": "cd".repeat(32)}),
+        )
+        .await?;
     assert!(r.is_success());
     let freeze = usage(&f).await? - freeze_from;
     println!("STORAGE one freeze record of an account with a 64 character name and a reason hash: {freeze} bytes");
     let extra = 8 * per_deal + freeze;
-    println!("STORAGE extra of 0.0.12 for one member: 8 deals {} + freeze {freeze} = {extra} bytes = {}", 8 * per_deal, near(extra));
-    println!("STORAGE worst case with 0.0.12: 31282 + {extra} = {} bytes = {}", 31_282 + extra, near(31_282 + extra));
-    assert!((31_282 + extra) as u128 * BYTE_COST <= x207_circle::member::JOIN_STORAGE_DEPOSIT.as_yoctonear(), "the join deposit does not cover the worst case of 0.0.12");
+    println!(
+        "STORAGE extra of 0.0.12 for one member: 8 deals {} + freeze {freeze} = {extra} bytes = {}",
+        8 * per_deal,
+        near(extra)
+    );
+    println!(
+        "STORAGE worst case with 0.0.12: 31282 + {extra} = {} bytes = {}",
+        31_282 + extra,
+        near(31_282 + extra)
+    );
+    assert!(
+        (31_282 + extra) as u128 * BYTE_COST
+            <= x207_circle::member::JOIN_STORAGE_DEPOSIT.as_yoctonear(),
+        "the join deposit does not cover the worst case of 0.0.12"
+    );
     assert!(extra < 6_000, "the extra storage of 0.0.12 is larger than the estimate of docs/rules-0.0.12.md by a wide margin: {extra} bytes");
     Ok(())
 }

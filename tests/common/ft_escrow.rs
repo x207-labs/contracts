@@ -26,10 +26,22 @@ pub async fn world() -> anyhow::Result<World> {
     }
     let dao = f.account("dao").await?;
     let entry = json!({"asset_type": "rwa:bond", "class": "A", "delivery_methods": ["escrow_ft"], "accepted_proofs": [], "terms_hash": "5a".repeat(32)});
-    assert!(f.circle.call_as(&dao, "set_asset_class", json!({"asset_type": "rwa:bond", "entry": entry})).await?.is_success());
+    assert!(f
+        .circle
+        .call_as(
+            &dao,
+            "set_asset_class",
+            json!({"asset_type": "rwa:bond", "entry": entry})
+        )
+        .await?
+        .is_success());
     let rwa = deploy_rwa(&f).await?;
     let (alice, bob) = (f.accounts["alice"].clone(), f.accounts["bob"].clone());
-    rwa.call("mint").args_json(json!({"account_id": alice.id(), "amount": (10 * AMOUNT).to_string()})).transact().await?.into_result()?;
+    rwa.call("mint")
+        .args_json(json!({"account_id": alice.id(), "amount": (10 * AMOUNT).to_string()}))
+        .transact()
+        .await?
+        .into_result()?;
     Ok(World { f, rwa, alice, bob })
 }
 
@@ -51,10 +63,25 @@ pub fn offer(expires_at: u64, ft: &str, amount: u128) -> Value {
 impl World {
     pub async fn offer(&mut self, expires_in_ns: u64) -> anyhow::Result<u64> {
         let expires = self.f.circle.now_ns().await? + expires_in_ns;
-        Ok(self.f.circle.call_as(&self.alice, "offer_grant", offer(expires, self.rwa.id().as_str(), AMOUNT)).await?.json::<u64>()?)
+        Ok(self
+            .f
+            .circle
+            .call_as(
+                &self.alice,
+                "offer_grant",
+                offer(expires, self.rwa.id().as_str(), AMOUNT),
+            )
+            .await?
+            .json::<u64>()?)
     }
 
-    pub async fn deposit_with(&self, token: &Contract, from: &Account, amount: u128, msg: &str) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+    pub async fn deposit_with(
+        &self,
+        token: &Contract,
+        from: &Account,
+        amount: u128,
+        msg: &str,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
         Ok(from
             .call(token.id(), "ft_transfer_call")
             .args_json(json!({"receiver_id": self.f.circle.contract.id(), "amount": amount.to_string(), "memo": null, "msg": msg}))
@@ -64,12 +91,28 @@ impl World {
             .await?)
     }
 
-    pub async fn deposit(&self, from: &Account, amount: u128, grant_id: u64) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-        self.deposit_with(&self.rwa, from, amount, &json!({"action": "escrow", "grant_id": grant_id}).to_string()).await
+    pub async fn deposit(
+        &self,
+        from: &Account,
+        amount: u128,
+        grant_id: u64,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        self.deposit_with(
+            &self.rwa,
+            from,
+            amount,
+            &json!({"action": "escrow", "grant_id": grant_id}).to_string(),
+        )
+        .await
     }
 
     pub async fn balance(&self, token: &Contract, who: &str) -> anyhow::Result<u128> {
-        Ok(token.view("ft_balance_of").args_json(json!({"account_id": who})).await?.json::<String>()?.parse()?)
+        Ok(token
+            .view("ft_balance_of")
+            .args_json(json!({"account_id": who}))
+            .await?
+            .json::<String>()?
+            .parse()?)
     }
 
     pub async fn rwa_of(&self, who: &Account) -> anyhow::Result<u128> {
@@ -77,38 +120,90 @@ impl World {
     }
 
     pub async fn in_circle_of(&self, token: &Contract) -> anyhow::Result<u128> {
-        self.balance(token, self.f.circle.contract.id().as_str()).await
+        self.balance(token, self.f.circle.contract.id().as_str())
+            .await
     }
 
     pub async fn rwa_in_circle(&self) -> anyhow::Result<u128> {
-        self.balance(&self.rwa, self.f.circle.contract.id().as_str()).await
+        self.balance(&self.rwa, self.f.circle.contract.id().as_str())
+            .await
     }
 
     pub async fn epoch(&self) -> anyhow::Result<u64> {
-        Ok(self.f.circle.view("get_epoch", json!({})).await?["epoch"].as_u64().unwrap())
+        Ok(self.f.circle.view("get_epoch", json!({})).await?["epoch"]
+            .as_u64()
+            .unwrap())
     }
 
-    pub async fn buy(&mut self, buyer: &str, epoch: u64, cumulative: u128, grant_id: u64) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-        let (voucher, signature) = self.f.circle.next_voucher(buyer, "alice", epoch, cumulative);
+    pub async fn buy(
+        &mut self,
+        buyer: &str,
+        epoch: u64,
+        cumulative: u128,
+        grant_id: u64,
+    ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
+        let (voucher, signature) = self
+            .f
+            .circle
+            .next_voucher(buyer, "alice", epoch, cumulative);
         let account = self.f.accounts[buyer].clone();
-        Ok(self.f.circle.call_as(&account, "complete_escrow", json!({"grant_id": grant_id, "voucher": voucher, "signature": signature})).await?)
+        self.f
+            .circle
+            .call_as(
+                &account,
+                "complete_escrow",
+                json!({"grant_id": grant_id, "voucher": voucher, "signature": signature}),
+            )
+            .await
     }
 
     pub async fn whitelist(&self, accounts: &[&str]) -> anyhow::Result<()> {
-        self.rwa.call("set_whitelist_on").args_json(json!({"on": true})).transact().await?.into_result()?;
+        self.rwa
+            .call("set_whitelist_on")
+            .args_json(json!({"on": true}))
+            .transact()
+            .await?
+            .into_result()?;
         for a in accounts {
-            self.rwa.call("set_whitelisted").args_json(json!({"account_id": a, "whitelisted": true})).transact().await?.into_result()?;
+            self.rwa
+                .call("set_whitelisted")
+                .args_json(json!({"account_id": a, "whitelisted": true}))
+                .transact()
+                .await?
+                .into_result()?;
         }
         Ok(())
     }
 
     /// Nothing of a buyer's payment is left: no obligation, no debt, the escrow is held again and the grant is offered.
-    pub async fn assert_clean_after_failure(&self, id: u64, epoch: u64, who: &str) -> anyhow::Result<()> {
+    pub async fn assert_clean_after_failure(
+        &self,
+        id: u64,
+        epoch: u64,
+        who: &str,
+    ) -> anyhow::Result<()> {
         assert_eq!(self.f.circle.view("obligation", json!({"epoch": epoch, "debtor": account_of(who), "creditor": account_of("alice")})).await?, Value::Null);
-        assert_eq!(self.f.circle.view("outstanding_debt", json!({"account_id": account_of(who)})).await?, "0");
-        assert_eq!(self.f.circle.view("get_ft_escrow", json!({"grant_id": id})).await?["state"], "held");
-        assert_eq!(self.f.circle.view("get_grant", json!({"grant_id": id})).await?["status"], "offered");
+        assert_eq!(
+            self.f
+                .circle
+                .view("outstanding_debt", json!({"account_id": account_of(who)}))
+                .await?,
+            "0"
+        );
+        assert_eq!(
+            self.f
+                .circle
+                .view("get_ft_escrow", json!({"grant_id": id}))
+                .await?["state"],
+            "held"
+        );
+        assert_eq!(
+            self.f
+                .circle
+                .view("get_grant", json!({"grant_id": id}))
+                .await?["status"],
+            "offered"
+        );
         Ok(())
     }
 }
-

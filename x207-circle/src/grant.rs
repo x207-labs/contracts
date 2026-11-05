@@ -351,7 +351,7 @@ impl X207Circle {
                 && near_sdk::serde_json::from_str::<near_sdk::serde_json::Value>(&input.limits.scope).is_ok(),
             "ERR_BAD_GRANT: scope must be JSON text of at most 1024 bytes"
         );
-        require!(input.limits.quota.map_or(true, |q| q.0 > 0), "ERR_BAD_GRANT: quota must be above 0 or null");
+        require!(input.limits.quota.map_or(true, |q| q.0 > 0),"ERR_BAD_GRANT: quota must be above 0 or null");
         if entry.class == AssetClass::A {
             match class_a_asset(&input.limits.scope) {
                 Err(reason) => env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}}, {{\"ft_contract\": ..., \"amount\": \"...\"}} or {{\"mt_contract\": ..., \"token_id\": ..., \"amount\": \"...\"}}: {reason}")),
@@ -472,7 +472,7 @@ fn borsh_vec(list: &[String]) -> Vec<u8> {
     near_sdk::borsh::to_vec(&list.to_vec()).expect("borsh")
 }
 
-#[cfg(test)]
+#[cfg(test)] #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 

@@ -7,7 +7,13 @@ async fn deploys_to_sandbox() -> anyhow::Result<()> {
     let wasm = std::fs::read("target/near/x207_circle.wasm")?;
     let contract = worker.dev_deploy(&wasm).await?;
     assert_eq!(contract.view_code().await?.len(), wasm.len());
-    let err = contract.view("interface_version").await.expect_err("not initialized yet");
-    assert!(format!("{err:?}").contains("The contract is not initialized"), "{err:?}");
+    let err = contract
+        .view("interface_version")
+        .await
+        .expect_err("not initialized yet");
+    assert!(
+        format!("{err:?}").contains("The contract is not initialized"),
+        "{err:?}"
+    );
     Ok(())
 }

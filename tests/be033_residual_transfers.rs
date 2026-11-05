@@ -18,10 +18,21 @@ use tokio::io::AsyncWriteExt;
 
 const BACKEND: &str = "../backend/dist/index.js";
 
-fn spawn_indexer(rpc: &str, contract: &str, start: u64, db: &Path, accounts: &[String]) -> anyhow::Result<tokio::process::Child> {
+fn spawn_indexer(
+    rpc: &str,
+    contract: &str,
+    start: u64,
+    db: &Path,
+    accounts: &[String],
+) -> anyhow::Result<tokio::process::Child> {
     Ok(tokio::process::Command::new("node")
         .arg("tests/e2e/scenario_chain.mjs")
-        .args([rpc.to_string(), contract.to_string(), start.to_string(), "agents-main".into()])
+        .args([
+            rpc.to_string(),
+            contract.to_string(),
+            start.to_string(),
+            "agents-main".into(),
+        ])
         .args(accounts)
         .env("X207_DB", db)
         .stdin(std::process::Stdio::piped())
@@ -33,18 +44,27 @@ fn spawn_indexer(rpc: &str, contract: &str, start: u64, db: &Path, accounts: &[S
 async fn stop(mut child: tokio::process::Child) -> anyhow::Result<Value> {
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     // a halted indexer has already left: the broken pipe is then not the interesting error
-    let _ = child.stdin.take().expect("stdin").write_all(b"stop\n").await;
+    let _ = child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(b"stop\n")
+        .await;
     let output = child.wait_with_output().await?;
-    assert!(output.status.success(), "indexer failed: {}\n{}", String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout));
+    assert!(
+        output.status.success(),
+        "indexer failed: {}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
     let out: Value = serde_json::from_slice(&output.stdout)?;
-    assert!(out["haltError"].is_null(), "the indexer halted: {}", out["haltError"]);
+    assert!(
+        out["haltError"].is_null(),
+        "the indexer halted: {}",
+        out["haltError"]
+    );
     Ok(out)
 }
-
-fn items<'a>(v: &'a Value) -> &'a Vec<Value> {
-    v["body"]["items"].as_array().unwrap_or_else(|| panic!("no items in {v}"))
-}
-
 
 async fn usdt(f: &Funded, name: &str) -> anyhow::Result<u128> {
     let id: AccountId = account_of(name).parse()?;
@@ -61,20 +81,36 @@ async fn run(pays: bool) -> anyhow::Result<(Value, Vec<&'static str>)> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
     f.circle.max_jump = 25;
     let start_block = f.circle.worker.view_block().await?.height();
-    let rpc = format!("http://{}", f.circle.worker.rpc_addr().trim_start_matches("http://"));
+    let rpc = format!(
+        "http://{}",
+        f.circle.worker.rpc_addr().trim_start_matches("http://")
+    );
     let accounts: Vec<String> = names.iter().map(|n| account_of(n)).collect();
     let db_dir = std::env::temp_dir().join(format!("x207-be033-{}-{pays}", std::process::id()));
     std::fs::create_dir_all(&db_dir)?;
-    let indexer = spawn_indexer(&rpc, f.circle.contract.id().as_str(), start_block, &db_dir.join("d9.sqlite"), &accounts)?;
+    let indexer = spawn_indexer(
+        &rpc,
+        f.circle.contract.id().as_str(),
+        start_block,
+        &db_dir.join("d9.sqlite"),
+        &accounts,
+    )?;
 
-    let mut f = s1_committed_on(f).await?;
+    let f = s1_committed_on(f).await?;
     let mut before = Vec::new();
     for n in names {
         before.push(usdt(&f, n).await?);
     }
     if pays {
         let scraper = f.accounts["scraper"].clone();
-        let pay = f.transfer_call(&f.usdt, &scraper, 35 * CREDIT, r#"{"action":"settle","epoch":1}"#).await?;
+        let pay = f
+            .transfer_call(
+                &f.usdt,
+                &scraper,
+                35 * CREDIT,
+                r#"{"action":"settle","epoch":1}"#,
+            )
+            .await?;
         assert!(pay.is_success(), "{:?}", failure_text(&pay));
     }
     let fin = finalize(&f.circle).await?;
@@ -106,8 +142,17 @@ async fn only_nonzero_net_positions_move_usdt() -> anyhow::Result<()> {
     if out.is_null() {
         return Ok(());
     }
-    assert_eq!(moved, vec!["scraper", "gpu"], "translator has a zero net position and moves nothing");
-    assert_eq!(out["metrics"]["body"]["residualTransfers"], moved.len(), "{}", out["metrics"]);
+    assert_eq!(
+        moved,
+        vec!["scraper", "gpu"],
+        "translator has a zero net position and moves nothing"
+    );
+    assert_eq!(
+        out["metrics"]["body"]["residualTransfers"],
+        moved.len(),
+        "{}",
+        out["metrics"]
+    );
     let rows = out["report"]["1"]["body"]["members"].as_array().unwrap();
     for m in rows {
         assert_eq!(m["status"], 200, "{m}");
@@ -124,10 +169,19 @@ async fn default_moves_only_the_claim() -> anyhow::Result<()> {
     }
     assert_eq!(moved, vec!["gpu"]);
     let rows = out["report"]["1"]["body"]["members"].as_array().unwrap();
-    let scraper = rows.iter().find(|m| m["account"] == account_of("scraper").as_str()).unwrap();
+    let scraper = rows
+        .iter()
+        .find(|m| m["account"] == account_of("scraper").as_str())
+        .unwrap();
     assert_eq!(scraper["status"], 409);
-    let gpu = rows.iter().find(|m| m["account"] == account_of("gpu").as_str()).unwrap();
-    assert_eq!((gpu["status"].as_u64(), gpu["settlement"].as_str()), (Some(200), Some("claimed")));
+    let gpu = rows
+        .iter()
+        .find(|m| m["account"] == account_of("gpu").as_str())
+        .unwrap();
+    assert_eq!(
+        (gpu["status"].as_u64(), gpu["settlement"].as_str()),
+        (Some(200), Some("claimed"))
+    );
     Ok(())
 }
 
@@ -139,15 +193,31 @@ async fn six_agents_three_transfers() -> anyhow::Result<()> {
         eprintln!("skipped: {BACKEND} not found (build the backend with `npm run build`)");
         return Ok(());
     }
-    let names = ["scraper", "cleaner", "gpu", "translator", "summarizer", "image"];
+    let names = [
+        "scraper",
+        "cleaner",
+        "gpu",
+        "translator",
+        "summarizer",
+        "image",
+    ];
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
     f.circle.max_jump = 25;
     let start_block = f.circle.worker.view_block().await?.height();
-    let rpc = format!("http://{}", f.circle.worker.rpc_addr().trim_start_matches("http://"));
+    let rpc = format!(
+        "http://{}",
+        f.circle.worker.rpc_addr().trim_start_matches("http://")
+    );
     let accounts: Vec<String> = names.iter().map(|n| account_of(n)).collect();
     let db_dir = std::env::temp_dir().join(format!("x207-be033-six-{}", std::process::id()));
     std::fs::create_dir_all(&db_dir)?;
-    let indexer = spawn_indexer(&rpc, f.circle.contract.id().as_str(), start_block, &db_dir.join("d9.sqlite"), &accounts)?;
+    let indexer = spawn_indexer(
+        &rpc,
+        f.circle.contract.id().as_str(),
+        start_block,
+        &db_dir.join("d9.sqlite"),
+        &accounts,
+    )?;
 
     for name in names {
         let account = f.account(name).await?;
@@ -155,21 +225,45 @@ async fn six_agents_three_transfers() -> anyhow::Result<()> {
         assert!(f.stake(&account, 100 * CREDIT).await?.is_success());
     }
     for (payer, payee, amount) in [
-        ("scraper", "gpu", 30), ("cleaner", "gpu", 20),
-        ("translator", "summarizer", 10), ("summarizer", "image", 10), ("image", "translator", 10),
+        ("scraper", "gpu", 30),
+        ("cleaner", "gpu", 20),
+        ("translator", "summarizer", 10),
+        ("summarizer", "image", 10),
+        ("image", "translator", 10),
     ] {
         let r = f.circle.register(payer, payee, 1, amount * CREDIT).await?;
-        assert!(r.is_success(), "register {payer}->{payee}: {:?}", failure_text(&r));
+        assert!(
+            r.is_success(),
+            "register {payer}->{payee}: {:?}",
+            failure_text(&r)
+        );
     }
     let c = &f.circle;
     let solver = c.worker.dev_create_account().await?;
     c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
-    assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
-    let edges = json!([edge("translator", "summarizer", 10 * CREDIT), edge("summarizer", "image", 10 * CREDIT), edge("image", "translator", 10 * CREDIT)]);
-    let submit = c.call_as(&solver, "submit_clearing", json!({"epoch": 1, "edges": edges})).await?;
+    assert!(c
+        .call_keeper("close_epoch", json!({"epoch": 1}))
+        .await?
+        .is_success());
+    let edges = json!([
+        edge("translator", "summarizer", 10 * CREDIT),
+        edge("summarizer", "image", 10 * CREDIT),
+        edge("image", "translator", 10 * CREDIT)
+    ]);
+    let submit = c
+        .call_as(
+            &solver,
+            "submit_clearing",
+            json!({"epoch": 1, "edges": edges}),
+        )
+        .await?;
     assert!(submit.is_success(), "{:?}", failure_text(&submit));
-    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
-    assert!(c.call_keeper("commit_epoch", json!({"epoch": 1})).await?.is_success());
+    c.advance_to(c.epoch_ts(1, "proposal_deadline").await?)
+        .await?;
+    assert!(c
+        .call_keeper("commit_epoch", json!({"epoch": 1}))
+        .await?
+        .is_success());
 
     let mut before = Vec::new();
     for n in names {
@@ -177,7 +271,14 @@ async fn six_agents_three_transfers() -> anyhow::Result<()> {
     }
     for (name, amount) in [("scraper", 30), ("cleaner", 20)] {
         let who = f.accounts[name].clone();
-        let pay = f.transfer_call(&f.usdt, &who, amount * CREDIT, r#"{"action":"settle","epoch":1}"#).await?;
+        let pay = f
+            .transfer_call(
+                &f.usdt,
+                &who,
+                amount * CREDIT,
+                r#"{"action":"settle","epoch":1}"#,
+            )
+            .await?;
         assert!(pay.is_success(), "{name}: {:?}", failure_text(&pay));
     }
     let fin = finalize(&f.circle).await?;
@@ -199,8 +300,16 @@ async fn six_agents_three_transfers() -> anyhow::Result<()> {
     }
     let out = stop(indexer).await?;
     let _ = std::fs::remove_dir_all(&db_dir);
-    assert_eq!(moved, vec!["scraper", "cleaner", "gpu"], "translator, summarizer and image move nothing");
-    assert_eq!(out["metrics"]["body"]["residualTransfers"], 3, "{}", out["metrics"]);
+    assert_eq!(
+        moved,
+        vec!["scraper", "cleaner", "gpu"],
+        "translator, summarizer and image move nothing"
+    );
+    assert_eq!(
+        out["metrics"]["body"]["residualTransfers"], 3,
+        "{}",
+        out["metrics"]
+    );
     for m in out["report"]["1"]["body"]["members"].as_array().unwrap() {
         assert_eq!(m["status"], 200, "{m}");
     }
@@ -219,26 +328,61 @@ async fn underpayment_is_refunded_and_d9_stays_due() -> anyhow::Result<()> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
     f.circle.max_jump = 25;
     let start_block = f.circle.worker.view_block().await?.height();
-    let rpc = format!("http://{}", f.circle.worker.rpc_addr().trim_start_matches("http://"));
+    let rpc = format!(
+        "http://{}",
+        f.circle.worker.rpc_addr().trim_start_matches("http://")
+    );
     let accounts: Vec<String> = names.iter().map(|n| account_of(n)).collect();
     let db_dir = std::env::temp_dir().join(format!("x207-be029-{}", std::process::id()));
     std::fs::create_dir_all(&db_dir)?;
-    let indexer = spawn_indexer(&rpc, f.circle.contract.id().as_str(), start_block, &db_dir.join("d9.sqlite"), &accounts)?;
+    let indexer = spawn_indexer(
+        &rpc,
+        f.circle.contract.id().as_str(),
+        start_block,
+        &db_dir.join("d9.sqlite"),
+        &accounts,
+    )?;
 
     let f = s1_committed_on(f).await?;
     let before = usdt(&f, "scraper").await?;
     let scraper = f.accounts["scraper"].clone();
-    let short = f.transfer_call(&f.usdt, &scraper, 30 * CREDIT, r#"{"action":"settle","epoch":1}"#).await?;
+    let short = f
+        .transfer_call(
+            &f.usdt,
+            &scraper,
+            30 * CREDIT,
+            r#"{"action":"settle","epoch":1}"#,
+        )
+        .await?;
     let _ = short; // the token call itself may succeed; what counts is the refund and the state
-    assert_eq!(usdt(&f, "scraper").await?, before, "the whole 30 is refunded");
+    assert_eq!(
+        usdt(&f, "scraper").await?,
+        before,
+        "the whole 30 is refunded"
+    );
     f.circle.worker.fast_forward(10).await?;
     let out = stop(indexer).await?;
     let _ = std::fs::remove_dir_all(&db_dir);
 
-    let names_seen: Vec<&str> = out["eventNames"].as_array().unwrap().iter().map(|e| e.as_str().unwrap()).collect();
+    let names_seen: Vec<&str> = out["eventNames"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.as_str().unwrap())
+        .collect();
     assert!(!names_seen.contains(&"residual_paid"), "{names_seen:?}");
     let rows = out["report"]["1"]["body"]["members"].as_array().unwrap();
-    let scraper_row = rows.iter().find(|m| m["account"] == account_of("scraper").as_str()).unwrap();
-    assert_eq!((scraper_row["status"].as_u64(), scraper_row["settlement"].as_str(), scraper_row["amount"].as_str()), (Some(402), Some("due"), Some("35000000")));
+    let scraper_row = rows
+        .iter()
+        .find(|m| m["account"] == account_of("scraper").as_str())
+        .unwrap();
+    assert_eq!(
+        (
+            scraper_row["status"].as_u64(),
+            scraper_row["settlement"].as_str(),
+            scraper_row["amount"].as_str()
+        ),
+        (Some(402), Some("due"), Some("35000000"))
+    );
     Ok(())
 }

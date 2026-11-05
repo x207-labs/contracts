@@ -18,43 +18,114 @@ const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
 const CHANGE_METHODS: [&str; 52] = [
-    "new", "join", "ft_on_transfer", "register_cumulative", "register_voucher", "close_epoch", "submit_clearing",
-    "commit_epoch", "finalize_epoch", "claim", "on_claim_resolved", "set_params", "request_exit", "withdraw_stake",
+    "new",
+    "join",
+    "ft_on_transfer",
+    "register_cumulative",
+    "register_voucher",
+    "close_epoch",
+    "submit_clearing",
+    "commit_epoch",
+    "finalize_epoch",
+    "claim",
+    "on_claim_resolved",
+    "set_params",
+    "request_exit",
+    "withdraw_stake",
     "on_withdraw_resolved",
     // 0.0.2: CT-018 and CT-052; 0.0.3: CT-055 (`migrate` is called on the new code by `apply_upgrade`)
-    "admit_member", "claim_solver_fee", "on_solver_fee_resolved", "propose_upgrade", "apply_upgrade", "migrate",
+    "admit_member",
+    "claim_solver_fee",
+    "on_solver_fee_resolved",
+    "propose_upgrade",
+    "apply_upgrade",
+    "migrate",
     // 0.0.4: CT-062, CT-063, CT-064 (F5 barter bundle)
-    "post_intent", "commit_bundle", "register_in_bundle",
+    "post_intent",
+    "commit_bundle",
+    "register_in_bundle",
     // 0.0.6: F8 (CT-069)
     "set_asset_class",
     // CT-070
-    "offer_grant", "accept_grant",
+    "offer_grant",
+    "accept_grant",
     // CT-071
     "revoke_grant",
     // 0.0.7: CT-075 (class A escrow)
-    "nft_on_transfer", "complete_escrow", "cancel_escrow", "on_escrow_resolved",
+    "nft_on_transfer",
+    "complete_escrow",
+    "cancel_escrow",
+    "on_escrow_resolved",
     // 0.0.8: security review F2 and CT-085 (prune_epoch)
-    "remove_intent", "prune_epoch",
+    "remove_intent",
+    "prune_epoch",
     // 0.0.9: BE-034 (NEP-245 receiver)
-    "mt_on_transfer", "withdraw_intents_balance", "on_intents_withdrawn",
+    "mt_on_transfer",
+    "withdraw_intents_balance",
+    "on_intents_withdrawn",
     // 0.0.12: CT-095 (freeze_member)
-    "propose_freeze", "apply_freeze", "cancel_freeze", "unfreeze_member",
+    "propose_freeze",
+    "apply_freeze",
+    "cancel_freeze",
+    "unfreeze_member",
     // 0.0.12: CT-096 (official contracts)
     "set_asset_contracts",
     // 0.0.12: CT-094 (bond with an arbiter)
-    "confirm_deal", "dispute_deal", "rule_deal", "settle_deal",
+    "confirm_deal",
+    "dispute_deal",
+    "rule_deal",
+    "settle_deal",
     // 0.0.14: CT-104 and CT-105 (EVM agents)
-    "join_evm", "claim_evm", "request_exit_evm", "withdraw_stake_evm",
+    "join_evm",
+    "claim_evm",
+    "request_exit_evm",
+    "withdraw_stake_evm",
     // 0.0.15: CT-108 (settlement from the stake, opt-in)
-    "set_auto_settle", "set_auto_settle_evm",
+    "set_auto_settle",
+    "set_auto_settle_evm",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
 const VIEWS: [&str; 39] = [
-    "interface_version", "get_circle", "get_owner", "get_params", "get_pending_params", "member", "list_members",
-    "limit", "headroom", "outstanding_debt", "last_seq", "obligation", "list_obligations", "get_epoch",
-    "simulate_clearing", "get_clearing_proposal", "net_position", "list_positions", "get_pool", "solver_fee_balance", "get_upgrade", "get_bundle", "get_intent",
-    "get_asset_class", "list_asset_classes", "get_grant", "grants_of", "get_escrow", "get_ft_escrow", "get_mt_escrow", "intents_balance", "get_freeze", "is_frozen", "get_asset_contracts", "get_deal", "bond_locked", "get_proposal", "evm_signer", "is_auto_settle",
+    "interface_version",
+    "get_circle",
+    "get_owner",
+    "get_params",
+    "get_pending_params",
+    "member",
+    "list_members",
+    "limit",
+    "headroom",
+    "outstanding_debt",
+    "last_seq",
+    "obligation",
+    "list_obligations",
+    "get_epoch",
+    "simulate_clearing",
+    "get_clearing_proposal",
+    "net_position",
+    "list_positions",
+    "get_pool",
+    "solver_fee_balance",
+    "get_upgrade",
+    "get_bundle",
+    "get_intent",
+    "get_asset_class",
+    "list_asset_classes",
+    "get_grant",
+    "grants_of",
+    "get_escrow",
+    "get_ft_escrow",
+    "get_mt_escrow",
+    "intents_balance",
+    "get_freeze",
+    "is_frozen",
+    "get_asset_contracts",
+    "get_deal",
+    "bond_locked",
+    "get_proposal",
+    "evm_signer",
+    "is_auto_settle",
 ];
 
 const P1_P2_METHODS: [&str; 0] = [];
@@ -156,7 +227,54 @@ const SIGNATURES: [&str; 91] = [
 ];
 
 const EVENTS: [&str; 48] = [
-    "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted", "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated", "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested", "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed", "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied", "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "bond_locked", "deal_confirmed", "deal_disputed", "deal_ruled", "bond_slashed", "bond_released", "mt_escrow_held", "escrow_failed", "bundle_committed", "intents_withdrawn", "intent_removed", "auto_settle_set", "auto_settled",
+    "member_joined",
+    "stake_added",
+    "voucher_registered",
+    "epoch_cutoff",
+    "clearing_submitted",
+    "clearing_applied",
+    "epoch_committed",
+    "residual_paid",
+    "member_defaulted",
+    "limits_updated",
+    "epoch_finalized",
+    "residual_claimed",
+    "residual_claim_failed",
+    "params_updated",
+    "exit_requested",
+    "stake_withdrawn",
+    "stake_withdraw_failed",
+    "member_admitted",
+    "member_reactivated",
+    "solver_fee_claimed",
+    "solver_fee_claim_failed",
+    "upgrade_proposed",
+    "upgrade_applied",
+    "intent_posted",
+    "asset_class_set",
+    "grant_offered",
+    "grant_activated",
+    "grant_revoked",
+    "escrow_held",
+    "ft_escrow_held",
+    "freeze_proposed",
+    "member_frozen",
+    "freeze_cancelled",
+    "member_unfrozen",
+    "asset_contracts_set",
+    "bond_locked",
+    "deal_confirmed",
+    "deal_disputed",
+    "deal_ruled",
+    "bond_slashed",
+    "bond_released",
+    "mt_escrow_held",
+    "escrow_failed",
+    "bundle_committed",
+    "intents_withdrawn",
+    "intent_removed",
+    "auto_settle_set",
+    "auto_settled",
 ];
 
 fn strip_descriptions(value: &mut Value) {
@@ -178,7 +296,12 @@ fn sort_keys(value: Value) -> Value {
         Value::Object(map) => {
             let mut entries: Vec<(String, Value)> = map.into_iter().collect();
             entries.sort_by(|a, b| a.0.cmp(&b.0));
-            Value::Object(entries.into_iter().map(|(k, v)| (k, sort_keys(v))).collect())
+            Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(k, v)| (k, sort_keys(v)))
+                    .collect(),
+            )
         }
         Value::Array(items) => Value::Array(items.into_iter().map(sort_keys).collect()),
         other => other,
@@ -187,7 +310,10 @@ fn sort_keys(value: Value) -> Value {
 
 /// The document committed as `abi.json`.
 fn build_document() -> Value {
-    let built: Value = serde_json::from_str(&std::fs::read_to_string(BUILT_ABI).expect("run cargo near build first")).unwrap();
+    let built: Value = serde_json::from_str(
+        &std::fs::read_to_string(BUILT_ABI).expect("run cargo near build first"),
+    )
+    .unwrap();
     let mut functions: Vec<Value> = built["body"]["functions"]
         .as_array()
         .unwrap()
@@ -222,17 +348,31 @@ fn build_document() -> Value {
 
 fn schema_name(schema: &Value) -> String {
     if let Some(reference) = schema.get("$ref") {
-        return reference.as_str().unwrap().rsplit('/').next().unwrap().to_string();
+        return reference
+            .as_str()
+            .unwrap()
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_string();
     }
     if let Some(parts) = schema.get("anyOf").or_else(|| schema.get("oneOf")) {
         let mut names: Vec<String> = parts.as_array().unwrap().iter().map(schema_name).collect();
         names.sort();
         return names.join("|");
     }
-    let format = schema.get("format").and_then(Value::as_str).map(|f| format!(":{f}")).unwrap_or_default();
+    let format = schema
+        .get("format")
+        .and_then(Value::as_str)
+        .map(|f| format!(":{f}"))
+        .unwrap_or_default();
     match &schema["type"] {
         Value::Array(types) => {
-            let base: Vec<&str> = types.iter().filter_map(Value::as_str).filter(|t| *t != "null").collect();
+            let base: Vec<&str> = types
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|t| *t != "null")
+                .collect();
             format!("{}{format}|null", base.join("|"))
         }
         Value::String(t) if t == "array" => format!("array<{}>", schema_name(&schema["items"])),
@@ -244,11 +384,32 @@ fn schema_name(schema: &Value) -> String {
 fn signature(function: &Value) -> String {
     let args: Vec<String> = function["params"]["args"]
         .as_array()
-        .map(|args| args.iter().map(|a| format!("{}:{}", a["name"].as_str().unwrap(), schema_name(&a["type_schema"]))).collect())
+        .map(|args| {
+            args.iter()
+                .map(|a| {
+                    format!(
+                        "{}:{}",
+                        a["name"].as_str().unwrap(),
+                        schema_name(&a["type_schema"])
+                    )
+                })
+                .collect()
+        })
         .unwrap_or_default();
-    let result = function.get("result").map(|r| schema_name(&r["type_schema"])).unwrap_or_default();
-    let modifiers: Vec<&str> = function["modifiers"].as_array().map(|m| m.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
-    format!("{}({})->{result} [{}]", function["name"].as_str().unwrap(), args.join(","), modifiers.join(","))
+    let result = function
+        .get("result")
+        .map(|r| schema_name(&r["type_schema"]))
+        .unwrap_or_default();
+    let modifiers: Vec<&str> = function["modifiers"]
+        .as_array()
+        .map(|m| m.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    format!(
+        "{}({})->{result} [{}]",
+        function["name"].as_str().unwrap(),
+        args.join(","),
+        modifiers.join(",")
+    )
 }
 
 fn functions(document: &Value) -> Vec<Value> {
@@ -256,7 +417,11 @@ fn functions(document: &Value) -> Vec<Value> {
 }
 
 fn names(document: &Value, kind: &str) -> Vec<String> {
-    functions(document).iter().filter(|f| f["kind"] == kind).map(|f| f["name"].as_str().unwrap().to_string()).collect()
+    functions(document)
+        .iter()
+        .filter(|f| f["kind"] == kind)
+        .map(|f| f["name"].as_str().unwrap().to_string())
+        .collect()
 }
 
 fn sorted(items: &[&str]) -> Vec<String> {
@@ -270,9 +435,17 @@ fn sorted(items: &[&str]) -> Vec<String> {
 fn all_p0_change_methods_exist_and_p1_p2_do_not() {
     let document = build_document();
     let calls = names(&document, "call");
-    assert_eq!(calls, sorted(&CHANGE_METHODS), "change methods differ from spec sections 4 and 14");
+    assert_eq!(
+        calls,
+        sorted(&CHANGE_METHODS),
+        "change methods differ from spec sections 4 and 14"
+    );
     for name in P1_P2_METHODS {
-        assert!(!names(&document, "call").contains(&name.to_string()) && !names(&document, "view").contains(&name.to_string()), "{name} is P1/P2 and must not be in the ABI yet");
+        assert!(
+            !names(&document, "call").contains(&name.to_string())
+                && !names(&document, "view").contains(&name.to_string()),
+            "{name} is P1/P2 and must not be in the ABI yet"
+        );
     }
 }
 
@@ -281,8 +454,12 @@ fn all_p0_change_methods_exist_and_p1_p2_do_not() {
 fn all_19_p0_views_exist() {
     let document = build_document();
     assert_eq!(names(&document, "view"), sorted(&VIEWS));
-    for name in ["get_upgrade_history"] {
-        assert!(!names(&document, "view").contains(&name.to_string()), "{name}");
+    {
+        let name = "get_upgrade_history";
+        assert!(
+            !names(&document, "view").contains(&name.to_string()),
+            "{name}"
+        );
     }
 }
 
@@ -295,7 +472,12 @@ fn signatures_modifiers_and_returns_match_the_spec() {
 
     // The voucher keeps camelCase on the wire, as in the x402 payload.
     let voucher = &document["body"]["root_schema"]["definitions"]["Voucher"];
-    let properties: Vec<&str> = voucher["properties"].as_object().unwrap().keys().map(String::as_str).collect();
+    let properties: Vec<&str> = voucher["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     assert!(properties.contains(&"cumulativeAmount") && !properties.contains(&"cumulative_amount"));
     assert_eq!(voucher["properties"]["cumulativeAmount"]["type"], "string");
 }
@@ -309,7 +491,9 @@ async fn version_is_consistent_everywhere() -> anyhow::Result<()> {
     assert_eq!(env!("CARGO_PKG_VERSION"), INTERFACE_VERSION);
 
     let worker = near_workspaces::sandbox().await?;
-    let contract = worker.dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?).await?;
+    let contract = worker
+        .dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?)
+        .await?;
     contract
         .call("new")
         .args_json(json!({"owner_id": "dao.test.near", "circle_id": "agents-main", "usdt_token_id": "usdt.test.near", "intents_id": "intents.test.near", "params": null}))
@@ -330,7 +514,8 @@ fn committed_abi_matches_build() {
         std::fs::write(COMMITTED_ABI, &text).unwrap();
         return;
     }
-    let committed = std::fs::read_to_string(COMMITTED_ABI).expect("abi.json is committed at the repo root");
+    let committed =
+        std::fs::read_to_string(COMMITTED_ABI).expect("abi.json is committed at the repo root");
     assert!(
         committed == text,
         "the interface changed without a new abi.json. Bump the version (Cargo.toml and INTERFACE_VERSION), regenerate with \
@@ -341,8 +526,14 @@ fn committed_abi_matches_build() {
 // TC-CT-068-07
 #[test]
 fn committed_event_list_is_frozen() {
-    let committed: Value = serde_json::from_str(&std::fs::read_to_string(COMMITTED_ABI).unwrap()).unwrap();
-    let events: Vec<&str> = committed["events"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+    let committed: Value =
+        serde_json::from_str(&std::fs::read_to_string(COMMITTED_ABI).unwrap()).unwrap();
+    let events: Vec<&str> = committed["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
     assert_eq!(events, EVENTS);
     for event in committed["events"].as_array().unwrap() {
         assert!(!event["fields"].as_array().unwrap().is_empty());

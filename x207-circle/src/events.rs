@@ -221,8 +221,8 @@ event!("clearing_submitted", ClearingSubmitted {
     replaced_cleared_total: Option<U128>,
 });
 
-/// CT-099 (interface 0.0.13): a summary of fixed size. The edges are not in the log (300 edges with long names are more than the 16 KiB that a receipt may log in
-/// total): they are read from the view `get_proposal` before the commit and from `list_obligations` (`cleared`) after it, and `edges_hash` checks them.
+// CT-099 (interface 0.0.13): a summary of fixed size. The edges are not in the log (300 edges with long names are more than the 16 KiB that a receipt may log in
+// total): they are read from the view `get_proposal` before the commit and from `list_obligations` (`cleared`) after it, and `edges_hash` checks them.
 event!("clearing_applied", ClearingApplied {
     epoch: EpochId,
     solver: Option<AccountId>,
@@ -246,9 +246,9 @@ pub struct PositionEntry {
     pub outstanding_debt: U128,
 }
 
-/// CT-099 (interface 0.0.13): all positions in one log, no chunks. At most `MAX_MEMBERS` (64) entries; with account names of 64 characters and amounts of 12 digits
-/// (`limit_cap` is at most 1e11) the log is about 12.6 KB, which is under the 16 KiB of a receipt with a margin of about 20 percent (a sandbox test keeps it so).
-/// `positions_hash` is the hash of the same positions, so that a reader can check them against the state at the commit.
+// CT-099 (interface 0.0.13): all positions in one log, no chunks. At most `MAX_MEMBERS` (64) entries; with account names of 64 characters and amounts of 12 digits
+// (`limit_cap` is at most 1e11) the log is about 12.6 KB, which is under the 16 KiB of a receipt with a margin of about 20 percent (a sandbox test keeps it so).
+// `positions_hash` is the hash of the same positions, so that a reader can check them against the state at the commit.
 event!("epoch_committed", EpochCommitted {
     epoch: EpochId,
     committed_at: U64,

@@ -1407,8 +1407,7 @@ mod finalize_tests {
     fn tc_ct_034_07_uses_snapshot_params_of_the_epoch() {
         let mut c = s1();
         c.epochs.get_mut(&1).unwrap().params.limit_growth = 2_000;
-        let mut next = Params::default();
-        next.limit_growth = 0;
+        let next = Params { limit_growth: 0, ..Params::default() };
         c.epochs.insert(2, Epoch::open(2, T_COMMIT, 9_999 * SEC, next));
         c.current_epoch = 2;
         pay(&mut c, "scraper", 35 * CREDIT);

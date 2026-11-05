@@ -16,16 +16,36 @@ fn names(log: &[(String, Value)]) -> Vec<&str> {
 async fn cash_settlement_raises_limit_after_finalize() -> anyhow::Result<()> {
     let f = s1_committed().await?;
     let scraper = f.accounts["scraper"].clone();
-    let pay = f.transfer_call(&f.usdt, &scraper, 35 * CREDIT, r#"{"action":"settle","epoch":1}"#).await?;
+    let pay = f
+        .transfer_call(
+            &f.usdt,
+            &scraper,
+            35 * CREDIT,
+            r#"{"action":"settle","epoch":1}"#,
+        )
+        .await?;
     assert!(pay.is_success(), "{:?}", failure_text(&pay));
-    assert_eq!(f.member("scraper").await?["limit"], "80000000", "the limit changes only at finalize (K-14)");
+    assert_eq!(
+        f.member("scraper").await?["limit"],
+        "80000000",
+        "the limit changes only at finalize (K-14)"
+    );
 
     let result = finalize(&f.circle).await?;
     assert!(result.is_success(), "{:?}", failure_text(&result));
     let log = events(&result);
     assert_eq!(names(&log), ["limits_updated", "epoch_finalized"]);
-    assert_eq!(log[0].1["changes"], json!([{"account_id": "scraper.test.near", "old_limit": "80000000", "new_limit": "83500000", "status": "active"}]));
-    assert_eq!((log[1].1["defaulted_count"].as_u64(), log[1].1["pool"].as_str()), (Some(0), Some("35000000")));
+    assert_eq!(
+        log[0].1["changes"],
+        json!([{"account_id": "scraper.test.near", "old_limit": "80000000", "new_limit": "83500000", "status": "active"}])
+    );
+    assert_eq!(
+        (
+            log[1].1["defaulted_count"].as_u64(),
+            log[1].1["pool"].as_str()
+        ),
+        (Some(0), Some("35000000"))
+    );
 
     assert_eq!(f.member("scraper").await?["limit"], "83500000");
     assert_eq!(f.member("scraper").await?["status"], "active");

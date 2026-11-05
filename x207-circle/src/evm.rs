@@ -595,18 +595,18 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // claim signed for agent.testnet cannot pay thief.testnet
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.claim_evm(id.clone(), 5, acc("thief.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("thief.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // another epoch
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.claim_evm(id.clone(), 6, acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 6, acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // the claim signature is not a withdraw signature
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // nothing moved the nonce
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 0);
         // the Intents contract is no receiver of a stake withdrawal
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.withdraw_stake_evm(id.clone(), acc("intents.near"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("intents.near"), 0, 1_900_000_000_000, sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_RECEIVER"), "{text}");
     }
 
@@ -617,7 +617,7 @@ mod tests {
         active(&mut c, 0);
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         let id = acc(&address());
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.claim_evm(id.clone(), 5, acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
         assert!(!text.contains("ERR_BAD_EVM_SIG") && !text.contains("ERR_EVM_NONCE"), "{text}");
     }
 
