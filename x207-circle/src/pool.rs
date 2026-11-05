@@ -86,6 +86,12 @@ impl X207Circle {
         self.pool_up(epoch, amount);
     }
 
+    /// CT-117: a relayer fee that could not be returned to an exited member stays in the contract as reserve.
+    pub fn d6_in_flight_to_reserve(&mut self, amount: u128) {
+        self.in_flight = sub(self.in_flight, amount);
+        self.reserve = add(self.reserve, amount);
+    }
+
     /// Default: reserve covers what stake could not.
     pub fn d6_reserve_to_pool(&mut self, epoch: EpochId, amount: u128) {
         self.reserve = sub(self.reserve, amount);

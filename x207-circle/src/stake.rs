@@ -9,7 +9,9 @@ use near_sdk::serde_json::json;
 use near_sdk::{assert_one_yocto, env, near, serde_json, AccountId, Gas, NearToken, Promise, PromiseOrValue};
 
 use crate::clearing::EpochPhase;
-use crate::events::{ExitRequested, MemberAdmitted, MemberReactivated, StakeAdded, StakeWithdrawFailed, StakeWithdrawn, X207Event};
+use crate::events::{
+    ExitRequested, MemberAdmitted, MemberReactivated, RelayerFeeFailed, RelayerFeePaid, StakeAdded, StakeWithdrawFailed, StakeWithdrawn, X207Event,
+};
 use crate::member::MemberStatus;
 use crate::params::Admission;
 use crate::risk::{assert_limit_invariant, compute_limit};
@@ -208,7 +210,69 @@ impl X207Circle {
     pub fn withdraw_stake(&mut self) -> PromiseOrValue<bool> {
         assert_one_yocto();
         let account = env::predecessor_account_id();
-        self.withdraw_stake_for(account.clone(), account)
+        self.withdraw_stake_for(account.clone(), account, None)
+    }
+
+    /// Callback of a withdrawal with a relayer fee (CT-117). `amount` is the whole stake that went in flight; result 0 is the payout
+    /// (`amount - fee`) to `receiver`, result 1 the fee to the relayer. Never panics. Payout and fee settle on their own:
+    /// - payout ok: the member is `exited`. A fee that failed is sent on to `receiver` (the member keeps it), see `on_fee_refund_resolved`.
+    /// - payout failed: the stake comes back (plus the fee if that failed too) and the member may retry; a fee that was paid stays paid.
+    #[private]
+    pub fn on_withdraw_resolved_fee(&mut self, account_id: AccountId, amount: U128, fee: U128, relayer: AccountId, receiver: AccountId) -> bool {
+        let payout = amount.0 - fee.0;
+        let payout_ok = env::promise_result_checked(0, 64).is_ok();
+        let fee_ok = env::promise_result_checked(1, 16).is_ok();
+        let epoch_params = self.epochs.get(&self.current_epoch).map(|e| e.params.clone());
+        let Some(member) = self.members.get_mut(&account_id) else { return false };
+        if !member.withdraw_pending {
+            return false;
+        }
+        member.withdraw_pending = false;
+        if fee_ok {
+            self.d6_in_flight_out(fee.0);
+            RelayerFeePaid { account_id: account_id.clone(), relayer: relayer.clone(), action: "withdraw_stake".into(), epoch: 0, amount: fee }.emit();
+        } else {
+            RelayerFeeFailed { account_id: account_id.clone(), relayer, action: "withdraw_stake".into(), epoch: 0, amount: fee }.emit();
+        }
+        let member = self.members.get_mut(&account_id).expect("member checked above");
+        if payout_ok {
+            member.status = MemberStatus::Exited;
+            self.d6_in_flight_out(payout);
+            crate::evm::refund_sponsor(&account_id);
+            StakeWithdrawn { account_id: account_id.clone(), amount: U128(payout) }.emit();
+            if !fee_ok {
+                // `fee` is still in flight: send it to the member's receiver; the second callback books the outcome.
+                let _ = Promise::new(self.usdt_token_id.clone())
+                    .function_call(
+                        "ft_transfer".to_string(),
+                        json!({"receiver_id": receiver, "amount": fee, "memo": null}).to_string().into_bytes(),
+                        NearToken::from_yoctonear(1),
+                        WITHDRAW_TRANSFER_GAS,
+                    )
+                    .then(Self::ext(env::current_account_id()).with_static_gas(WITHDRAW_CALLBACK_GAS).on_fee_refund_resolved(account_id, fee));
+            }
+            return true;
+        }
+        let back = payout + if fee_ok { 0 } else { fee.0 };
+        member.stake = back;
+        if let (MemberStatus::Active, Some(params)) = (member.status, epoch_params) {
+            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account_id);
+        }
+        self.d6_in_flight_to_stake(back);
+        StakeWithdrawFailed { account_id, amount: U128(back) }.emit();
+        false
+    }
+
+    /// Books the transfer of a failed relayer fee on to the receiver of an exited member (CT-117). Success: the amount leaves. Failure:
+    /// the amount moves to the reserve (it belongs to the circle; nobody can claim it) and an event says so.
+    #[private]
+    pub fn on_fee_refund_resolved(&mut self, account_id: AccountId, amount: U128) {
+        if env::promise_result_checked(0, 64).is_ok() {
+            self.d6_in_flight_out(amount.0);
+        } else {
+            self.d6_in_flight_to_reserve(amount.0);
+            RelayerFeeFailed { account_id: account_id.clone(), relayer: account_id, action: "refund".into(), epoch: 0, amount }.emit();
+        }
     }
 
     /// Callback of the exit transfer. Never panics. Success: `exited`. Failure: the stake and the
@@ -254,7 +318,13 @@ impl X207Circle {
     }
 
     /// Body of `withdraw_stake`, shared with `withdraw_stake_evm`; the stake goes to `receiver`.
-    pub(crate) fn withdraw_stake_for(&mut self, account: AccountId, receiver: AccountId) -> PromiseOrValue<bool> {
+    /// `relayer` is `Some((relayer account, max_fee signed by the member))` for `withdraw_stake_evm` (CT-117).
+    pub(crate) fn withdraw_stake_for(
+        &mut self,
+        account: AccountId,
+        receiver: AccountId,
+        relayer: Option<(AccountId, u128)>,
+    ) -> PromiseOrValue<bool> {
         crate::deal::assert_no_bond(&account);
         let Some(member) = self.members.get(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
         if member.status == MemberStatus::Exited {
@@ -287,12 +357,27 @@ impl X207Circle {
         member.limit = 0;
         member.withdraw_pending = true;
         self.d6_stake_to_in_flight(amount);
+        let fee = relayer.as_ref().map_or(0, |(_, max_fee)| crate::evm::relayer_fee_for(amount, *max_fee));
         let transfer = Promise::new(self.usdt_token_id.clone()).function_call(
             "ft_transfer".to_string(),
-            json!({"receiver_id": receiver, "amount": U128(amount), "memo": null}).to_string().into_bytes(),
+            json!({"receiver_id": receiver, "amount": U128(amount - fee), "memo": null}).to_string().into_bytes(),
             NearToken::from_yoctonear(1),
             WITHDRAW_TRANSFER_GAS,
         );
+        if let (Some((relayer_id, _)), true) = (relayer, fee > 0) {
+            // CT-117: the fee is its own transfer, joined with the payout in one callback (see `claim_for`).
+            let fee_transfer = Promise::new(self.usdt_token_id.clone()).function_call(
+                "ft_transfer".to_string(),
+                json!({"receiver_id": relayer_id, "amount": U128(fee), "memo": null}).to_string().into_bytes(),
+                NearToken::from_yoctonear(1),
+                WITHDRAW_TRANSFER_GAS,
+            );
+            return PromiseOrValue::Promise(transfer.and(fee_transfer).then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(WITHDRAW_CALLBACK_GAS)
+                    .on_withdraw_resolved_fee(account, U128(amount), U128(fee), relayer_id, receiver),
+            ));
+        }
         PromiseOrValue::Promise(transfer.then(
             Self::ext(env::current_account_id()).with_static_gas(WITHDRAW_CALLBACK_GAS).on_withdraw_resolved(account, U128(amount)),
         ))

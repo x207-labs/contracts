@@ -7,7 +7,7 @@
 //! separates circles. Since the audit C55 the domain also has `salt = keccak256("near:<network>:<contract id>")`. Signature string: `eip712:0x<130 hex>` = r || s || v. The test vectors in
 //! `tests/fixtures/evm-eip712.json` come from viem and win over this code.
 
-use near_sdk::json_types::U64;
+use near_sdk::json_types::{U128, U64};
 use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId, NearToken, Promise, PromiseOrValue, PublicKey};
 
@@ -25,7 +25,10 @@ const VOUCHER_TYPE: &str =
     "Voucher(string circle,string payer,string payee,uint64 epoch,uint64 seq,uint256 cumulativeAmount,string unit,string resource)";
 const BUNDLE_TYPE: &str = "Bundle(string circle,string message,string termsHash)";
 const ACTION_TYPE: &str =
-    "Action(string circle,string member,string action,uint64 epoch,string receiver,string termsHash,uint64 nonce,uint64 deadline)";
+    "Action(string circle,string member,string action,uint64 epoch,string receiver,string termsHash,uint64 nonce,uint64 deadline,uint256 maxFee)";
+
+/// CT-117 (R1a): an `Action` may not carry a `deadline` further than this after the block time (24 hours).
+pub const MAX_EVM_DEADLINE_MS: u64 = 86_400_000;
 
 /// Placeholder in `Member.pubkey_voucher` of an EVM member. It is never used to verify anything, and it must not decode to a
 /// curve point: 32 zero bytes is a small-order point that verifies forged signatures (security review M2).
@@ -162,6 +165,8 @@ pub struct ActionMsg<'a> {
     pub terms_hash: &'a str,
     pub nonce: u64,
     pub deadline: u64,
+    /// The most the member lets the relayer take (CT-117). 0 for every action but `claim` and `withdraw_stake`.
+    pub max_fee: u128,
 }
 
 pub fn action_digest(a: &ActionMsg) -> [u8; 32] {
@@ -176,6 +181,7 @@ pub fn action_digest(a: &ActionMsg) -> [u8; 32] {
             word_str(a.terms_hash),
             word_u64(a.nonce),
             word_u64(a.deadline),
+            word_u128(a.max_fee),
         ]
         .concat(),
     ))
@@ -223,19 +229,44 @@ pub(crate) fn refund_sponsor(account: &AccountId) {
     }
 }
 
+/// `ERR_EVM_EXPIRED` when the deadline has passed, `ERR_EVM_DEADLINE_TOO_FAR` when it is more than `MAX_EVM_DEADLINE_MS` ahead (CT-117, R1a).
+fn check_deadline(deadline: u64) {
+    let now_ms = env::block_timestamp_ms();
+    require!(now_ms <= deadline, format!("ERR_EVM_EXPIRED: deadline {deadline} now {now_ms}"));
+    require!(
+        deadline - now_ms <= MAX_EVM_DEADLINE_MS,
+        format!("ERR_EVM_DEADLINE_TOO_FAR: deadline {deadline} now {now_ms} limit {MAX_EVM_DEADLINE_MS} ms")
+    );
+}
+
+/// The fee that the relayer takes from `base` (a payout or a stake): the DAO `relayer_fee`, at most what the member signed (`max_fee`),
+/// at most half of `base` so the member always receives something and the payout leg is never 0 (CT-117, D4).
+pub(crate) fn relayer_fee_for(base: u128, max_fee: u128) -> u128 {
+    crate::params::current_relayer_fee().min(max_fee).min(base / 2)
+}
+
 /// Checks the signer, deadline, nonce and signature of one `*_evm` action, then bumps the nonce. Order of checks:
-/// `ERR_NOT_EVM_MEMBER`, `ERR_EVM_EXPIRED`, `ERR_EVM_NONCE`, `ERR_BAD_EVM_SIG`. A later panic of the same
+/// `ERR_NOT_EVM_MEMBER`, `ERR_EVM_EXPIRED`, `ERR_EVM_DEADLINE_TOO_FAR`, `ERR_EVM_NONCE`, `ERR_BAD_EVM_SIG`. A later panic of the same
 /// transaction reverts the bump.
-pub(crate) fn authorize(account: &AccountId, action: &str, epoch: u64, receiver: &str, nonce: u64, deadline: u64, signature: &str) {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn authorize(
+    account: &AccountId,
+    action: &str,
+    epoch: u64,
+    receiver: &str,
+    nonce: u64,
+    deadline: u64,
+    max_fee: u128,
+    signature: &str,
+) {
     let mut signers = evm_signers();
     let Some(mut signer) = looks_evm(account).then(|| signers.get(account).cloned()).flatten() else {
         env::panic_str(&format!("ERR_NOT_EVM_MEMBER: {account}"))
     };
-    let now_ms = env::block_timestamp_ms();
-    require!(now_ms <= deadline, format!("ERR_EVM_EXPIRED: deadline {deadline} now {now_ms}"));
+    check_deadline(deadline);
     require!(nonce == signer.nonce, format!("ERR_EVM_NONCE: nonce {nonce} expected {}", signer.nonce));
     let circle = env::current_account_id();
-    let message = ActionMsg { circle: circle.as_str(), member: account.as_str(), action, epoch, receiver, terms_hash: "", nonce, deadline };
+    let message = ActionMsg { circle: circle.as_str(), member: account.as_str(), action, epoch, receiver, terms_hash: "", nonce, deadline, max_fee };
     let ok = recover(&action_digest(&message), signature) == Some(signer.address);
     require!(ok, "ERR_BAD_EVM_SIG: eip712 verification failed");
     signer.nonce += 1;
@@ -270,8 +301,7 @@ impl X207Circle {
         if self.member_count >= MAX_MEMBERS {
             env::panic_str(&format!("ERR_MAX_MEMBERS: {MAX_MEMBERS}"));
         }
-        let now_ms = env::block_timestamp_ms();
-        require!(now_ms <= deadline, format!("ERR_EVM_EXPIRED: deadline {deadline} now {now_ms}"));
+        check_deadline(deadline);
         let circle = env::current_account_id();
         let message = ActionMsg {
             circle: circle.as_str(),
@@ -282,6 +312,7 @@ impl X207Circle {
             terms_hash: &terms_hash,
             nonce: 0,
             deadline,
+            max_fee: 0,
         };
         require!(recover(&action_digest(&message), &signature) == Some(raw), "ERR_BAD_EVM_SIG: eip712 verification failed");
 
@@ -337,28 +368,52 @@ impl X207Circle {
     /// payout goes to `receiver`, which the member signed. When `receiver` is the Intents contract the payout is a
     /// `ft_transfer_call` that credits the `0x` id at Intents (destination `intents`); otherwise it is a plain
     /// `ft_transfer` to `receiver`.
-    pub fn claim_evm(&mut self, member: AccountId, epoch: EpochId, receiver: AccountId, nonce: u64, deadline: u64, signature: String) -> Promise {
-        authorize(&member, "claim", epoch, receiver.as_str(), nonce, deadline, &signature);
+    ///
+    /// CT-117: the relayer (the caller) may take `min(relayer_fee, max_fee, payout / 2)` of the payout; `max_fee` is signed. The fee is a
+    /// separate transfer: if it fails, the member keeps that part as a claimable balance and the payout is not affected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn claim_evm(
+        &mut self,
+        member: AccountId,
+        epoch: EpochId,
+        receiver: AccountId,
+        nonce: u64,
+        deadline: u64,
+        max_fee: U128,
+        signature: String,
+    ) -> Promise {
+        authorize(&member, "claim", epoch, receiver.as_str(), nonce, deadline, max_fee.0, &signature);
+        let relayer = Some((env::predecessor_account_id(), max_fee.0));
         if receiver == self.intents_id {
-            self.claim_for(member, epoch, ClaimDestination::Intents, None)
+            self.claim_for(member, epoch, ClaimDestination::Intents, None, relayer)
         } else {
-            self.claim_for(member, epoch, ClaimDestination::Near, Some(receiver))
+            self.claim_for(member, epoch, ClaimDestination::Near, Some(receiver), relayer)
         }
     }
 
     /// `request_exit` for an EVM member (CT-105).
     pub fn request_exit_evm(&mut self, member: AccountId, nonce: u64, deadline: u64, signature: String) {
-        authorize(&member, "request_exit", 0, "", nonce, deadline, &signature);
+        authorize(&member, "request_exit", 0, "", nonce, deadline, 0, &signature);
         self.request_exit_for(member);
     }
 
     /// `withdraw_stake` for an EVM member (CT-105): the stake goes to `receiver` with a plain `ft_transfer`. The Intents
     /// contract is refused as receiver (`ERR_BAD_EVM_RECEIVER`): a plain transfer there would credit nobody. The join
     /// deposit goes back to the sponsor once the exit has completed.
-    pub fn withdraw_stake_evm(&mut self, member: AccountId, receiver: AccountId, nonce: u64, deadline: u64, signature: String) -> PromiseOrValue<bool> {
+    ///
+    /// CT-117: the relayer may take `min(relayer_fee, max_fee, stake / 2)` of the stake, as a separate transfer (see `claim_evm`).
+    pub fn withdraw_stake_evm(
+        &mut self,
+        member: AccountId,
+        receiver: AccountId,
+        nonce: u64,
+        deadline: u64,
+        max_fee: U128,
+        signature: String,
+    ) -> PromiseOrValue<bool> {
         require!(receiver != self.intents_id, "ERR_BAD_EVM_RECEIVER: the Intents contract cannot receive a stake withdrawal");
-        authorize(&member, "withdraw_stake", 0, receiver.as_str(), nonce, deadline, &signature);
-        self.withdraw_stake_for(member, receiver)
+        authorize(&member, "withdraw_stake", 0, receiver.as_str(), nonce, deadline, max_fee.0, &signature);
+        self.withdraw_stake_for(member, receiver, Some((env::predecessor_account_id(), max_fee.0)))
     }
 }
 
@@ -372,7 +427,7 @@ mod tests {
     use crate::clearing::EpochPhase;
     use crate::params::Params;
 
-    const NOW_NS: u64 = 1_800_000_000_000_000_000; // 1.8e12 ms, before every deadline of the fixture (1.9e12)
+    const NOW_NS: u64 = 1_899_996_400_000_000_000; // one hour before every deadline of the fixture (1.9e12 ms)
 
     fn fixture() -> Value {
         near_sdk::serde_json::from_str(include_str!("../../tests/fixtures/evm-eip712.json")).unwrap()
@@ -462,14 +517,16 @@ mod tests {
     fn tc_ct_104_02_action_digests_match_viem() {
         let _c = circle();
         let a = address();
-        let mk = |action: &'static str, epoch, receiver: &'static str, terms: &'static str, nonce| {
-            action_digest(&ActionMsg { circle: "x207-v014.testnet", member: Box::leak(a.clone().into_boxed_str()), action, epoch, receiver, terms_hash: terms, nonce, deadline: 1_900_000_000_000 })
+        let mk = |action: &'static str, epoch, receiver: &'static str, terms: &'static str, nonce, max_fee| {
+            action_digest(&ActionMsg { circle: "x207-v014.testnet", member: Box::leak(a.clone().into_boxed_str()), action, epoch, receiver, terms_hash: terms, nonce, deadline: 1_900_000_000_000, max_fee })
         };
         let join_terms: &'static str = Box::leak("a".repeat(64).into_boxed_str());
-        assert_eq!(mk("join", 0, "", join_terms, 0), hex32(v("join")["digest"].as_str().unwrap()));
-        assert_eq!(mk("claim", 5, "agent.testnet", "", 0), hex32(v("claim")["digest"].as_str().unwrap()));
-        assert_eq!(mk("request_exit", 0, "", "", 1), hex32(v("request_exit")["digest"].as_str().unwrap()));
-        assert_eq!(mk("withdraw_stake", 0, "agent.testnet", "", 2), hex32(v("withdraw_stake")["digest"].as_str().unwrap()));
+        assert_eq!(mk("join", 0, "", join_terms, 0, 0), hex32(v("join")["digest"].as_str().unwrap()));
+        assert_eq!(mk("claim", 5, "agent.testnet", "", 0, 250_000), hex32(v("claim")["digest"].as_str().unwrap()));
+        assert_eq!(mk("request_exit", 0, "", "", 1, 0), hex32(v("request_exit")["digest"].as_str().unwrap()));
+        assert_eq!(mk("withdraw_stake", 0, "agent.testnet", "", 2, 100_000), hex32(v("withdraw_stake")["digest"].as_str().unwrap()));
+        // the signed fee ceiling is part of the digest: another maxFee is another message
+        assert_ne!(mk("claim", 5, "agent.testnet", "", 0, 250_001), hex32(v("claim")["digest"].as_str().unwrap()));
     }
 
     // a changed field, a high-s twin, a wrong prefix and a bad v are all refused
@@ -595,18 +652,18 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // claim signed for agent.testnet cannot pay thief.testnet
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("thief.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("thief.testnet"), 0, 1_900_000_000_000, U128(250_000), sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // another epoch
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 6, acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 6, acc("agent.testnet"), 0, 1_900_000_000_000, U128(250_000), sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // the claim signature is not a withdraw signature
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 0, 1_900_000_000_000, U128(100_000), sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // nothing moved the nonce
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 0);
         // the Intents contract is no receiver of a stake withdrawal
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("intents.near"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("intents.near"), 0, 1_900_000_000_000, U128(100_000), sig("claim")); }));
         assert!(text.contains("ERR_BAD_EVM_RECEIVER"), "{text}");
     }
 
@@ -617,7 +674,7 @@ mod tests {
         active(&mut c, 0);
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         let id = acc(&address());
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("agent.testnet"), 0, 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("agent.testnet"), 0, 1_900_000_000_000, U128(250_000), sig("claim")); }));
         assert!(!text.contains("ERR_BAD_EVM_SIG") && !text.contains("ERR_EVM_NONCE"), "{text}");
     }
 
@@ -630,7 +687,7 @@ mod tests {
         c.members.get_mut(&id).unwrap().exit_requested_epoch = Some(1);
         c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Finalized;
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        let out = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 2, 1_900_000_000_000, sig("withdraw_stake"));
+        let out = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 2, 1_900_000_000_000, U128(100_000), sig("withdraw_stake"));
         assert!(matches!(out, PromiseOrValue::Value(true)));
         assert_eq!(c.members.get(&id).unwrap().status, MemberStatus::Exited);
         assert_eq!(c.evm_signer(id).unwrap().nonce.0, 3);

@@ -43,10 +43,11 @@
         "receiver": "",
         "termsHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "nonce": "0",
-        "deadline": "1900000000000"
+        "deadline": "1900000000000",
+        "maxFee": "0"
       },
-      "digest": "0x116e8194a5d292c7c148c72de4b497ccd90aac607dff304d9e662942b98e738a",
-      "signature": "0x6e798a70fab920f3247fb7cd3608685057b8ff7693a636857a2f1f3d924ae40b2d452b568972df02343d68a8a78acd8e068036128d50c2cf71c314175eb73f6a1b"
+      "digest": "0x1db951d98c6102a7c10fb7ad7d772df46d2ba36527b408237eaaf56938330f68",
+      "signature": "0xe6163fca7fd53755a26fe7cd2b78c6a80d904575e7bea52292e7cbd4a9f9e5146dd5a0e2204d9bc9a254de5c3337f872e16910818978db99f7fdfa174c751b6c1b"
     },
     "claim": {
       "primaryType": "Action",
@@ -58,10 +59,11 @@
         "receiver": "agent.testnet",
         "termsHash": "",
         "nonce": "0",
-        "deadline": "1900000000000"
+        "deadline": "1900000000000",
+        "maxFee": "250000"
       },
-      "digest": "0x2049fa5313dddf7bb9548a1ce4d2952ff4e34b69309f26b53bae2b1251fc5c65",
-      "signature": "0x376183b500b6ce6dbac71566d607603ea4320b061988050e9e73d7b5cce18ab024a077a1c35eb05f6309878c88f236907309c2eec04540daa262c89f3e94ab921c"
+      "digest": "0xaaf42aaf2091af48243b70093c2f672f1c4fad91c89fcfa623e9106a0d84a6a2",
+      "signature": "0xfeb3f12ebb2d42bb9ab990d52ca175e7f4f747a915e8ca3c927c1ddf6f89effd3f463dbef5d0989dc8fefc0c7a0e6e099afacb90cbc65e422521b31c111ad7a61c"
     },
     "request_exit": {
       "primaryType": "Action",
@@ -73,10 +75,11 @@
         "receiver": "",
         "termsHash": "",
         "nonce": "1",
-        "deadline": "1900000000000"
+        "deadline": "1900000000000",
+        "maxFee": "0"
       },
-      "digest": "0x332410242f1b756df2a5a2fba4e219650c2cdbbbfa277920b7aa3ee3708259a4",
-      "signature": "0x172eaa2596dba305a4ce959c7a750f0b3627db93b736b90be937851dab73507018a76ed911f8e9fc2a04e18b915440f9a6a1deaa8981bc6342ddba0a4fdccc2f1b"
+      "digest": "0xca13ad1534c3b63a79e799335926364c4e50456daf5230a9d7b1d27862af88cd",
+      "signature": "0xdb3a9c07caa53e4cb197dbf7a3973cff40200ee1e9cc995dcd227fc1de09d36748363f66ba9652d10d9b40f009e758cd98de29c0d4186a8b331e9936c9ca32971b"
     },
     "auto_settle": {
       "primaryType": "Action",
@@ -88,10 +91,11 @@
         "receiver": "",
         "termsHash": "",
         "nonce": "3",
-        "deadline": "1900000000000"
+        "deadline": "1900000000000",
+        "maxFee": "0"
       },
-      "digest": "0xe408703f85336d15fd2316161f122ab3f8c602cc7a9b324bfc25a69857656176",
-      "signature": "0x26f707c4b3172544cafd9847027e7a976ba1ad0aabb6ffcfa0f62b105f83cd2b484cfcc622f452ad3d65d7fbe2bb598977cb4d841873488ef5ea0729d6fcbf4f1c"
+      "digest": "0x7cd5a13ead8c52851e2ba0c62c20f21ac177289b8c16d78cdce2f5a1688bd86b",
+      "signature": "0x21734310d279e6413df17bab365bbf02e4fc87c29d7a3136cb2bb33f0945821133ce57bc30f4727bfc886f2853319a33d9dccf6b21fb5325b849721611b15c581c"
     },
     "auto_settle_off": {
       "primaryType": "Action",
@@ -103,10 +107,11 @@
         "receiver": "",
         "termsHash": "",
         "nonce": "4",
-        "deadline": "1900000000000"
+        "deadline": "1900000000000",
+        "maxFee": "0"
       },
-      "digest": "0xa73d1d930cb2d2001efa242b89bacfd72a249aff63481faa124df534a35deb0e",
-      "signature": "0xa515a5d9e4929707800ee378c0234696d81fcaff77e34d5318f5902889d05c58576a652639893c9b1b0f7ef1b9c55a54754b7783740e58a46121b8180898078e1b"
+      "digest": "0xebf97acd2cbaaabe8f3b413f19bcae7500754660602356f852664dfd56b9543d",
+      "signature": "0x5c8aa95f87ed6f99c331a142d610c6428b3c1f90c8595e5f788e9bbe25e6ec8956b16c355764596e8ecf521643bf4d1c36bbd67751f4fb97b32256fb762716a11c"
     },
     "withdraw_stake": {
       "primaryType": "Action",
@@ -118,10 +123,11 @@
         "receiver": "agent.testnet",
         "termsHash": "",
         "nonce": "2",
-        "deadline": "1900000000000"
+        "deadline": "1900000000000",
+        "maxFee": "100000"
       },
-      "digest": "0x88421465b213700f6b653592d06ce67d9b5d180f54869aed68977d698ee1e3b2",
-      "signature": "0x8bda8269f321ed2d5ea401e7a71800b65a3a69bd0d8633eb5afb2b6b965424f054477d6d7af05f59651af171de2f523518edb1f33c8f6d65c3fd55ef777f55151c"
+      "digest": "0x83ca0322cf516f3f625fcf0117429a782ba14398e680417c53502e1c934cbce7",
+      "signature": "0xdc556a2fecde7f71a33f1adb65d8ac6d42fde5a923e5d76d5634148c56a0560d2939995ee72d45faefd779115aee1de04c4e92c6d5f51c200dbfc2099e165d851c"
     }
   },
   "crossContract": {

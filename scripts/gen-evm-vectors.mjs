@@ -33,7 +33,7 @@ const types = {
   Action: [
     { name: 'circle', type: 'string' }, { name: 'member', type: 'string' }, { name: 'action', type: 'string' },
     { name: 'epoch', type: 'uint64' }, { name: 'receiver', type: 'string' }, { name: 'termsHash', type: 'string' },
-    { name: 'nonce', type: 'uint64' }, { name: 'deadline', type: 'uint64' },
+    { name: 'nonce', type: 'uint64' }, { name: 'deadline', type: 'uint64' }, { name: 'maxFee', type: 'uint256' },
   ],
 };
 
@@ -61,12 +61,12 @@ const out = {
   vectors: {
     voucher: await entry('Voucher', { circle: CIRCLE, payer: address, payee, epoch: 4n, seq: 2n, cumulativeAmount: 12345678901234567890123n, unit: 'credit', resource: '/api/translate?lang=id' }),
     bundle: { termsMessage, ...(await entry('Bundle', { circle: CIRCLE, message: termsMessage, termsHash })) },
-    join: await entry('Action', { circle: CIRCLE, member: address, action: 'join', epoch: 0n, receiver: '', termsHash: joinTerms, nonce: 0n, deadline: 1900000000000n }),
-    claim: await entry('Action', { circle: CIRCLE, member: address, action: 'claim', epoch: 5n, receiver: 'agent.testnet', termsHash: '', nonce: 0n, deadline: 1900000000000n }),
-    request_exit: await entry('Action', { circle: CIRCLE, member: address, action: 'request_exit', epoch: 0n, receiver: '', termsHash: '', nonce: 1n, deadline: 1900000000000n }),
-    auto_settle: await entry('Action', { circle: CIRCLE, member: address, action: 'auto_settle', epoch: 0n, receiver: '', termsHash: '', nonce: 3n, deadline: 1900000000000n }),
-    auto_settle_off: await entry('Action', { circle: CIRCLE, member: address, action: 'auto_settle_off', epoch: 0n, receiver: '', termsHash: '', nonce: 4n, deadline: 1900000000000n }),
-    withdraw_stake: await entry('Action', { circle: CIRCLE, member: address, action: 'withdraw_stake', epoch: 0n, receiver: 'agent.testnet', termsHash: '', nonce: 2n, deadline: 1900000000000n }),
+    join: await entry('Action', { circle: CIRCLE, member: address, action: 'join', epoch: 0n, receiver: '', termsHash: joinTerms, nonce: 0n, deadline: 1900000000000n, maxFee: 0n }),
+    claim: await entry('Action', { circle: CIRCLE, member: address, action: 'claim', epoch: 5n, receiver: 'agent.testnet', termsHash: '', nonce: 0n, deadline: 1900000000000n, maxFee: 250000n }),
+    request_exit: await entry('Action', { circle: CIRCLE, member: address, action: 'request_exit', epoch: 0n, receiver: '', termsHash: '', nonce: 1n, deadline: 1900000000000n, maxFee: 0n }),
+    auto_settle: await entry('Action', { circle: CIRCLE, member: address, action: 'auto_settle', epoch: 0n, receiver: '', termsHash: '', nonce: 3n, deadline: 1900000000000n, maxFee: 0n }),
+    auto_settle_off: await entry('Action', { circle: CIRCLE, member: address, action: 'auto_settle_off', epoch: 0n, receiver: '', termsHash: '', nonce: 4n, deadline: 1900000000000n, maxFee: 0n }),
+    withdraw_stake: await entry('Action', { circle: CIRCLE, member: address, action: 'withdraw_stake', epoch: 0n, receiver: 'agent.testnet', termsHash: '', nonce: 2n, deadline: 1900000000000n, maxFee: 100000n }),
   },
 };
 out.vectors.bundle.termsHash = termsHash;

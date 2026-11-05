@@ -100,7 +100,7 @@ impl X207Circle {
     /// `action` = `auto_settle` when `enabled`, `auto_settle_off` when not).
     pub fn set_auto_settle_evm(&mut self, member: AccountId, enabled: bool, nonce: u64, deadline: u64, signature: String) {
         let action = if enabled { "auto_settle" } else { "auto_settle_off" };
-        crate::evm::authorize(&member, action, 0, "", nonce, deadline, &signature);
+        crate::evm::authorize(&member, action, 0, "", nonce, deadline, 0, &signature);
         self.set_auto_settle_for(member, enabled);
     }
 

@@ -91,7 +91,7 @@ fn action_sig(
     nonce: u64,
     deadline: u64,
 ) -> String {
-    let type_hash = ws("Action(string circle,string member,string action,uint64 epoch,string receiver,string termsHash,uint64 nonce,uint64 deadline)");
+    let type_hash = ws("Action(string circle,string member,string action,uint64 epoch,string receiver,string termsHash,uint64 nonce,uint64 deadline,uint256 maxFee)");
     let hash = k(&[
         type_hash,
         ws(contract),
@@ -102,6 +102,7 @@ fn action_sig(
         ws(terms),
         w64(nonce),
         w64(deadline),
+        w64(0), // maxFee
     ]
     .concat());
     sign(secret, digest(contract, hash))
@@ -144,7 +145,7 @@ async fn an_opted_in_evm_member_who_does_not_pay_stays_active() -> anyhow::Resul
     let contract = f.circle.contract.id().to_string();
     let secret = SecretKey::from_slice(&[7u8; 32])?;
     let member = address(&secret);
-    let deadline = 4_000_000_000_000u64; // ms, far ahead of the sandbox clock
+    let deadline = f.circle.now_ns().await? / 1_000_000 + 20 * 3_600_000; // ms: 20 hours after the sandbox clock (the contract allows 24)
     let relayer = f.account("relayer").await?;
     let gpu = f.account("gpu").await?;
     assert!(f.join("gpu", Funded::join_deposit()).await?.is_success());

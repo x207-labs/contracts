@@ -350,6 +350,7 @@ mod tests {
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
             prune_delay_epochs: 2,
+            relayer_fee: U128(0),
         }
     }
 
@@ -730,6 +731,7 @@ mod submit_tests {
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
             prune_delay_epochs: 2,
+            relayer_fee: U128(0),
         };
         let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), params, 0);
         for (d, k, v) in [("x", "y", 10), ("y", "z", 10), ("z", "x", 10), ("p", "q", 20), ("q", "p", 20)] {

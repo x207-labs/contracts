@@ -6,7 +6,8 @@ use near_sdk::{assert_one_yocto, env, near, AccountId, Gas, NearToken, Promise, 
 
 use crate::clearing::{ClearingProposal, EpochPhase};
 use crate::events::{
-    chunked_logs, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, ResidualClaimFailed, ResidualClaimed, ResidualPaid, X207Event,
+    chunked_logs, EpochFinalized, LimitChange, LimitsUpdated, MemberDefaulted, RelayerFeeFailed, RelayerFeePaid, ResidualClaimFailed, ResidualClaimed,
+    ResidualPaid, X207Event,
 };
 use crate::member::MemberStatus;
 use crate::risk::{assert_limit_invariant, compute_limit, decay_limit};
@@ -21,6 +22,8 @@ const OMITTED_NOTE_ROOM: usize = 160;
 /// Gas constants of spec 4.6; the final values come from CT-043.
 pub const CLAIM_MIN_GAS: Gas = Gas::from_tgas(100);
 pub const CLAIM_CALLBACK_GAS: Gas = Gas::from_tgas(15);
+/// The callback of a claim with a relayer fee reads two results and emits up to three events.
+pub const CLAIM_FEE_CALLBACK_GAS: Gas = Gas::from_tgas(20);
 pub const FT_TRANSFER_GAS: Gas = Gas::from_tgas(15);
 pub const FT_TRANSFER_CALL_GAS: Gas = Gas::from_tgas(50);
 
@@ -386,13 +389,22 @@ impl X207Circle {
     pub fn claim(&mut self, epoch: EpochId, destination: ClaimDestination) -> Promise {
         assert_one_yocto();
         let account = env::predecessor_account_id();
-        self.claim_for(account, epoch, destination, None)
+        self.claim_for(account, epoch, destination, None, None)
     }
 }
 
 impl X207Circle {
     /// Shared by `claim` and `claim_evm`: `account` holds the position; `receiver` (when set) gets a plain `ft_transfer`.
-    pub(crate) fn claim_for(&mut self, account: AccountId, epoch: EpochId, destination: ClaimDestination, receiver: Option<AccountId>) -> Promise {
+    /// `relayer` is `Some((relayer account, max_fee signed by the member))` for `claim_evm` (CT-117); the relayer then gets a fee as a
+    /// separate transfer that settles in the same callback as the payout (`on_claim_resolved_fee`).
+    pub(crate) fn claim_for(
+        &mut self,
+        account: AccountId,
+        epoch: EpochId,
+        destination: ClaimDestination,
+        receiver: Option<AccountId>,
+        relayer: Option<(AccountId, u128)>,
+    ) -> Promise {
         if env::prepaid_gas() < CLAIM_MIN_GAS {
             env::panic_str(&format!("ERR_GAS_TOO_LOW: need {} TGas", CLAIM_MIN_GAS.as_tgas()));
         }
@@ -428,23 +440,44 @@ impl X207Circle {
             .unwrap_or_else(|reason| env::panic_str(&reason));
         self.d6_pool_to_in_flight(epoch, amount);
 
+        // CT-117: the part of the payout that the relayer takes (0 when there is no relayer or the DAO fee is 0).
+        let fee = relayer.as_ref().map_or(0, |(_, max_fee)| crate::evm::relayer_fee_for(amount, *max_fee));
+        let payout = amount - fee;
         let usdt = self.usdt_token_id.clone();
         let transfer = match destination {
-            ClaimDestination::Near => Promise::new(usdt).function_call(
+            ClaimDestination::Near => Promise::new(usdt.clone()).function_call(
                 "ft_transfer".to_string(),
-                json!({"receiver_id": receiver.unwrap_or_else(|| account.clone()), "amount": U128(amount), "memo": null}).to_string().into_bytes(),
+                json!({"receiver_id": receiver.unwrap_or_else(|| account.clone()), "amount": U128(payout), "memo": null}).to_string().into_bytes(),
                 NearToken::from_yoctonear(1),
                 FT_TRANSFER_GAS,
             ),
-            ClaimDestination::Intents => Promise::new(usdt).function_call(
+            ClaimDestination::Intents => Promise::new(usdt.clone()).function_call(
                 "ft_transfer_call".to_string(),
-                json!({"receiver_id": self.intents_id, "amount": U128(amount), "memo": null, "msg": account.as_str()})
+                json!({"receiver_id": self.intents_id, "amount": U128(payout), "memo": null, "msg": account.as_str()})
                     .to_string()
                     .into_bytes(),
                 NearToken::from_yoctonear(1),
                 FT_TRANSFER_CALL_GAS,
             ),
         };
+        if let (Some((relayer_id, _)), true) = (relayer, fee > 0) {
+            // Two independent transfers, one callback that sees both results: a fee that fails (the relayer has no storage at the token)
+            // cannot undo the payout, and the payout cannot undo the fee.
+            let fee_transfer = Promise::new(usdt).function_call(
+                "ft_transfer".to_string(),
+                json!({"receiver_id": relayer_id, "amount": U128(fee), "memo": null}).to_string().into_bytes(),
+                NearToken::from_yoctonear(1),
+                FT_TRANSFER_GAS,
+            );
+            return transfer.and(fee_transfer).then(Self::ext(env::current_account_id()).with_static_gas(CLAIM_FEE_CALLBACK_GAS).on_claim_resolved_fee(
+                epoch,
+                account,
+                U128(amount),
+                U128(fee),
+                relayer_id,
+                destination,
+            ));
+        }
         transfer.then(Self::ext(env::current_account_id()).with_static_gas(CLAIM_CALLBACK_GAS).on_claim_resolved(
             epoch,
             account,
@@ -456,6 +489,59 @@ impl X207Circle {
 
 #[near]
 impl X207Circle {
+    /// Callback of a claim with a relayer fee (CT-117). `amount` is the whole amount that left the pool (payout plus `fee`); result 0 is the
+    /// payout transfer, result 1 the fee transfer. Never panics. Each leg settles on its own: a payout that fails comes back to the pool
+    /// and the position is claimable again for that part; a fee that fails comes back the same way (the member keeps it, the relayer gets
+    /// nothing). Returns the amount of the payout that arrived.
+    #[private]
+    pub fn on_claim_resolved_fee(
+        &mut self,
+        epoch: EpochId,
+        account_id: AccountId,
+        amount: U128,
+        fee: U128,
+        relayer: AccountId,
+        destination: ClaimDestination,
+    ) -> U128 {
+        let sent = amount.0 - fee.0;
+        let used = match (env::promise_result_checked(0, 64), destination) {
+            (Ok(_), ClaimDestination::Near) => sent,
+            (Ok(bytes), ClaimDestination::Intents) => near_sdk::serde_json::from_slice::<U128>(&bytes).map_or(0, |v| v.0.min(sent)),
+            (Err(_), _) => 0,
+        };
+        let fee_paid = if env::promise_result_checked(1, 16).is_ok() { fee.0 } else { 0 };
+        let key = (epoch, account_id.clone());
+        let block = env::block_height();
+        let in_claimed_state = self.positions.get(&key).is_some_and(|p| p.status == PositionStatus::Claimed);
+        if !in_claimed_state {
+            return U128(0);
+        }
+        let wire = destination_wire(destination).to_string();
+        if used + fee_paid > 0 {
+            self.d6_in_flight_out(used + fee_paid);
+        }
+        if fee_paid > 0 {
+            RelayerFeePaid { account_id: account_id.clone(), relayer: relayer.clone(), action: "claim".into(), epoch, amount: U128(fee_paid) }.emit();
+        }
+        if fee_paid == 0 {
+            RelayerFeeFailed { account_id: account_id.clone(), relayer, action: "claim".into(), epoch, amount: fee }.emit();
+        }
+        let back = (sent - used) + (fee.0 - fee_paid);
+        if back == 0 {
+            ResidualClaimed { epoch, account_id, amount: U128(used), destination: wire, status: "claimed".into() }.emit();
+            return U128(used);
+        }
+        self.d6_in_flight_to_pool(epoch, back);
+        let position = self.positions.get_mut(&key).expect("position checked above");
+        position.amount = position.amount.saturating_sub(used + fee_paid);
+        position.revert_claim(block).unwrap_or_else(|_| unreachable!("checked claimed above"));
+        if used > 0 {
+            ResidualClaimed { epoch, account_id: account_id.clone(), amount: U128(used), destination: wire.clone(), status: "claimed".into() }.emit();
+        }
+        ResidualClaimFailed { epoch, account_id, amount: U128(back), destination: wire, status: "claimable".into() }.emit();
+        U128(used)
+    }
+
     /// Callback of the claim transfer (spec 4.6). Never panics. Returns the amount that arrived.
     #[private]
     pub fn on_claim_resolved(

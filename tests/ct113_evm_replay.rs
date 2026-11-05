@@ -53,6 +53,7 @@ fn msg<'a>(circle: &'a str, member: &'a str, action: &'a str, nonce: u64) -> Act
         terms_hash: "",
         nonce,
         deadline: DEADLINE,
+        max_fee: 0,
     }
 }
 

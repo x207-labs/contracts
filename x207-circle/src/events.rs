@@ -31,7 +31,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 48] = [
+pub const EVENT_SCHEMAS: [EventSchema; 50] = [
     schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
     schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
     schema(
@@ -138,6 +138,9 @@ pub const EVENT_SCHEMAS: [EventSchema; 48] = [
     // 0.0.15: CT-108 (opt-in settlement from the stake)
     schema("auto_settle_set", &["account_id", "enabled"]),
     schema("auto_settled", &["epoch", "account_id", "due", "stake", "status", "position_status", "outstanding_debt"]),
+    // 0.0.16: CT-117 (relayer fee of `claim_evm` and `withdraw_stake_evm`)
+    schema("relayer_fee_paid", &["account_id", "relayer", "action", "epoch", "amount"]),
+    schema("relayer_fee_failed", &["account_id", "relayer", "action", "epoch", "amount"]),
 ];
 
 pub trait X207Event: Serialize {
@@ -342,6 +345,10 @@ impl<P: Serialize> X207Event for ParamsUpdated<P> {
     const NAME: &'static str = "params_updated";
 }
 
+// CT-117 (0.0.16): the relayer of a `claim_evm` or `withdraw_stake_evm` was paid. `epoch` is 0 for a withdrawal.
+event!("relayer_fee_paid", RelayerFeePaid { account_id: AccountId, relayer: AccountId, action: String, epoch: EpochId, amount: U128 });
+// CT-117: the fee transfer failed (the relayer has no storage at the token); `amount` stays with the member.
+event!("relayer_fee_failed", RelayerFeeFailed { account_id: AccountId, relayer: AccountId, action: String, epoch: EpochId, amount: U128 });
 event!("exit_requested", ExitRequested { account_id: AccountId, epoch: EpochId });
 event!("stake_withdrawn", StakeWithdrawn { account_id: AccountId, amount: U128 });
 event!("stake_withdraw_failed", StakeWithdrawFailed { account_id: AccountId, amount: U128 });
@@ -497,6 +504,8 @@ mod tests {
             (IntentRemoved::NAME, IntentRemoved { intent_hash: [3u8; 32].into(), account_id: a.clone() }.to_log()),
             (AutoSettleSet::NAME, AutoSettleSet { account_id: a.clone(), enabled: true }.to_log()),
             (AutoSettled::NAME, AutoSettled { epoch: 42, account_id: a.clone(), due: U128(35), stake: U128(65), status: "active".into(), position_status: "paid".into(), outstanding_debt: U128(0) }.to_log()),
+            (RelayerFeePaid::NAME, RelayerFeePaid { account_id: a.clone(), relayer: a.clone(), action: "claim".into(), epoch: 42, amount: U128(5) }.to_log()),
+            (RelayerFeeFailed::NAME, RelayerFeeFailed { account_id: a.clone(), relayer: a.clone(), action: "claim".into(), epoch: 42, amount: U128(5) }.to_log()),
             (IntentPosted::NAME, IntentPosted { intent_hash: [3u8; 32].into(), account_id: a.clone(), posted_at: t }.to_log()),
             (AssetClassSet::NAME, AssetClassSet { asset_type: "x:y".into(), class: crate::grant::AssetClass::B }.to_log()),
             (GrantOffered::NAME, GrantOffered { grant_id: 1, asset_type: "x:y".into(), grantor: a.clone(), class: crate::grant::AssetClass::B, unit: "call".into(), unit_price: U128(1), expires_at: t }.to_log()),
@@ -765,7 +774,7 @@ mod tests {
                 "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
                 "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
                 "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "bond_locked", "deal_confirmed", "deal_disputed", "deal_ruled", "bond_slashed", "bond_released", "mt_escrow_held", "escrow_failed", "bundle_committed",
-                "intents_withdrawn", "intent_removed", "auto_settle_set", "auto_settled",
+                "intents_withdrawn", "intent_removed", "auto_settle_set", "auto_settled", "relayer_fee_paid", "relayer_fee_failed",
             ]
         );
     }

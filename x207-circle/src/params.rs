@@ -107,6 +107,11 @@ pub struct Params {
     #[borsh(skip)]
     #[serde(default = "default_prune_delay_epochs")]
     pub prune_delay_epochs: u16,
+    /// CT-117 (0.0.16): flat fee in token units that the relayer of a `claim_evm` or `withdraw_stake_evm` takes at most. Own raw key
+    /// like `prune_delay_epochs`, not in the Borsh of `Params`. Default 0; at most `RELAYER_FEE_MAX`.
+    #[borsh(skip)]
+    #[serde(default)]
+    pub relayer_fee: U128,
 }
 
 impl Default for Params {
@@ -125,9 +130,13 @@ impl Default for Params {
             bond_threshold: U128(DEFAULT_BOND_THRESHOLD),
             bond_bps: DEFAULT_BOND_BPS,
             prune_delay_epochs: DEFAULT_PRUNE_DELAY_EPOCHS,
+            relayer_fee: U128(0),
         }
     }
 }
+
+/// CT-117: upper bound of `relayer_fee` that no vote can pass: 1.00 of a token with 6 decimals (the circle token is USDT).
+pub const RELAYER_FEE_MAX: u128 = 1_000_000;
 
 fn require_range<T: PartialOrd>(value: T, min: T, max: T, field: &str) {
     if value < min || value > max {
@@ -151,12 +160,28 @@ pub fn validate_params(p: &Params) {
     require_range(p.bond_threshold.0, BOND_THRESHOLD_MIN, BOND_THRESHOLD_MAX, "bond_threshold");
     require_range(p.bond_bps, BOND_BPS_MIN, BOND_BPS_MAX, "bond_bps");
     require_range(p.prune_delay_epochs, PRUNE_DELAY_EPOCHS_MIN, PRUNE_DELAY_EPOCHS_MAX, "prune_delay_epochs");
+    require_range(p.relayer_fee.0, 0, RELAYER_FEE_MAX, "relayer_fee");
 }
 
 const RULES_KEY: &[u8] = b"x207_rules";
 const PENDING_RULES_KEY: &[u8] = b"x207_rules_pending";
 const PRUNE_DELAY_KEY: &[u8] = b"x207_prune_delay";
 const PENDING_PRUNE_DELAY_KEY: &[u8] = b"x207_prune_delay_pending";
+const RELAYER_FEE_KEY: &[u8] = b"x207_relayer_fee";
+const PENDING_RELAYER_FEE_KEY: &[u8] = b"x207_relayer_fee_pending";
+
+/// `relayer_fee` in force now: the stored value, or 0 for a circle that never set it (also a circle upgraded from 0.0.15).
+pub fn current_relayer_fee() -> u128 {
+    env::storage_read(RELAYER_FEE_KEY).map_or(0, |b| near_sdk::borsh::from_slice::<u128>(&b).expect("relayer fee is valid borsh"))
+}
+
+pub(crate) fn write_relayer_fee(fee: u128) {
+    if fee == 0 {
+        env::storage_remove(RELAYER_FEE_KEY);
+    } else {
+        env::storage_write(RELAYER_FEE_KEY, &near_sdk::borsh::to_vec(&fee).expect("borsh"));
+    }
+}
 
 /// `prune_delay_epochs` in force now: the stored value, or `DEFAULT_PRUNE_DELAY_EPOCHS` for a circle that never set it (also a circle upgraded from 0.0.12).
 pub fn current_prune_delay() -> u16 {
@@ -193,6 +218,7 @@ pub fn with_rules(mut p: Params) -> Params {
     p.bond_threshold = U128(threshold);
     p.bond_bps = bps;
     p.prune_delay_epochs = current_prune_delay();
+    p.relayer_fee = U128(current_relayer_fee());
     p
 }
 
@@ -211,6 +237,13 @@ pub(crate) fn apply_pending_rules(effective_epoch: u64) {
             write_prune_delay(delay);
         }
         env::storage_remove(PENDING_PRUNE_DELAY_KEY);
+    }
+    if let Some(bytes) = env::storage_read(PENDING_RELAYER_FEE_KEY) {
+        let (fee, epoch): (u128, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending relayer fee is valid borsh");
+        if epoch == effective_epoch {
+            write_relayer_fee(fee);
+        }
+        env::storage_remove(PENDING_RELAYER_FEE_KEY);
     }
 }
 
@@ -232,6 +265,7 @@ impl Params {
             ("bond_threshold", self.bond_threshold != other.bond_threshold),
             ("bond_bps", self.bond_bps != other.bond_bps),
             ("prune_delay_epochs", self.prune_delay_epochs != other.prune_delay_epochs),
+            ("relayer_fee", self.relayer_fee != other.relayer_fee),
         ];
         checks.into_iter().filter(|(_, differs)| *differs).map(|(name, _)| name.to_string()).collect()
     }
@@ -249,6 +283,7 @@ impl X207Circle {
         let effective_epoch = self.current_epoch + 1;
         env::storage_write(PENDING_RULES_KEY, &near_sdk::borsh::to_vec(&(params.bond_threshold.0, params.bond_bps, effective_epoch)).expect("borsh"));
         env::storage_write(PENDING_PRUNE_DELAY_KEY, &near_sdk::borsh::to_vec(&(params.prune_delay_epochs, effective_epoch)).expect("borsh"));
+        env::storage_write(PENDING_RELAYER_FEE_KEY, &near_sdk::borsh::to_vec(&(params.relayer_fee.0, effective_epoch)).expect("borsh"));
         let changed = old.changed_fields(&params);
         self.pending_params = Some(PendingParams { params: params.clone(), effective_epoch });
         ParamsUpdated { old, new: params, changed, effective_epoch }.emit();
@@ -268,6 +303,9 @@ impl X207Circle {
             pending.params.prune_delay_epochs = env::storage_read(PENDING_PRUNE_DELAY_KEY).map_or_else(current_prune_delay, |bytes| {
                 near_sdk::borsh::from_slice::<(u16, u64)>(&bytes).expect("pending prune delay is valid borsh").0
             });
+            pending.params.relayer_fee = U128(env::storage_read(PENDING_RELAYER_FEE_KEY).map_or_else(current_relayer_fee, |bytes| {
+                near_sdk::borsh::from_slice::<(u128, u64)>(&bytes).expect("pending relayer fee is valid borsh").0
+            }));
             pending
         })
     }
@@ -312,7 +350,8 @@ mod tests {
                 "limit_decay": 0,
                 "fees": {"clearing_fee_bps": 0, "solver_fee_bps": 0},
                 "admission": "open", "max_search_share_bps": 500,
-                "bond_threshold": "100000000", "bond_bps": 2000, "prune_delay_epochs": 2
+                "bond_threshold": "100000000", "bond_bps": 2000, "prune_delay_epochs": 2,
+                "relayer_fee": "0"
             })
         );
         validate_params(&Params::default());
@@ -322,7 +361,7 @@ mod tests {
     #[test]
     fn tc_ct_007_02_all_fields_present() {
         let json = serde_json::to_value(Params::default()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 13);
+        assert_eq!(json.as_object().unwrap().len(), 14);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 
@@ -432,7 +471,7 @@ mod tests {
         let c = circle(Params::default());
         assert_eq!(c.get_params(), Params::default());
         let json = serde_json::to_value(c.get_params()).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 13);
+        assert_eq!(json.as_object().unwrap().len(), 14);
         assert_eq!(json["fees"].as_object().unwrap().len(), 2);
     }
 

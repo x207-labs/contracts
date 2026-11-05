@@ -226,6 +226,7 @@ mod tests {
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
             prune_delay_epochs: 2,
+            relayer_fee: near_sdk::json_types::U128(0),
         };
         X207Circle::with_config(
             acc("dao.near"),

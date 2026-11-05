@@ -191,6 +191,7 @@ mod tests {
             bond_threshold: near_sdk::json_types::U128(100_000_000),
             bond_bps: 2000,
             prune_delay_epochs: 2,
+            relayer_fee: near_sdk::json_types::U128(0),
             };
             let stake = (next(u64::MAX - 1) as u128) * (next(1_000_000) as u128);
             let history = (next(u64::MAX - 1) as u128) * (next(1_000_000) as u128);
