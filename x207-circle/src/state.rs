@@ -149,6 +149,7 @@ impl X207Circle {
     ) -> Self {
         let mut epochs = LookupMap::new(StorageKey::Epochs);
         crate::params::write_rules(params.bond_threshold.0, params.bond_bps);
+        crate::params::write_relayer_fee(params.relayer_fee.0);
         let cutoff_at = now_ns + params.epoch_length * 1_000_000_000;
         epochs.insert(1, Epoch::open(1, now_ns, cutoff_at, params));
         Self {
