@@ -222,6 +222,39 @@ pub fn with_rules(mut p: Params) -> Params {
     p
 }
 
+/// CT-118: the rules in force when an epoch opened, in a raw key per epoch (the `Epoch` Borsh layout stays as it is, so no migration).
+/// Value: Borsh of `(bond_threshold, bond_bps, prune_delay_epochs, relayer_fee)`. Epochs opened before 0.0.17 have none.
+fn epoch_rules_key(epoch: u64) -> Vec<u8> {
+    let mut key = b"x207_epoch_rules_".to_vec();
+    key.extend_from_slice(&epoch.to_le_bytes());
+    key
+}
+
+/// Writes the snapshot of the rules in force now for `epoch`. Call after `apply_pending_rules`.
+pub(crate) fn snapshot_epoch_rules(epoch: u64) {
+    let (threshold, bps) = current_rules();
+    let value = (threshold, bps, current_prune_delay(), current_relayer_fee());
+    env::storage_write(&epoch_rules_key(epoch), &near_sdk::borsh::to_vec(&value).expect("borsh"));
+}
+
+/// `p` (the stored params of `epoch`) with the rules that were in force when the epoch opened. No snapshot: the running epoch gets the
+/// rules in force now, an older epoch keeps the stored defaults.
+pub(crate) fn with_epoch_rules(mut p: Params, epoch: u64, current_epoch: u64) -> Params {
+    match env::storage_read(&epoch_rules_key(epoch)) {
+        Some(bytes) => {
+            let (t, bps, delay, fee): (u128, u16, u16, u128) =
+                near_sdk::borsh::from_slice(&bytes).expect("epoch rules are valid borsh");
+            p.bond_threshold = U128(t);
+            p.bond_bps = bps;
+            p.prune_delay_epochs = delay;
+            p.relayer_fee = U128(fee);
+            p
+        }
+        None if epoch == current_epoch => with_rules(p),
+        None => p,
+    }
+}
+
 /// Called when a pending `Params` becomes the params of the next epoch: the pending bond rules come with it.
 pub(crate) fn apply_pending_rules(effective_epoch: u64) {
     if let Some(bytes) = env::storage_read(PENDING_RULES_KEY) {

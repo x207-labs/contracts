@@ -26,3 +26,10 @@
 
 - sha256: `4295351f395d0cc31419d43adf10e5b60f3c2a0e546ae0e912c5da4fef5aebe7` (742,662 bytes, base58 `5UusLiFf2xXdgyFGnfrjuhqFNof7TpyBoMGDdsx8Qu8S`). Built twice from the committed ref, byte-identical. It is the code of `x207-v016.testnet` (deployed with `new`, owner `x207v8.sputnikv2.testnet`, `admission` open, `relayer_fee` 250000).
 - Source: contracts commit `93f8d8e` (the ref given to `repro-build.sh`). The commit that adds this file changes only `prebuilt/`.
+
+# Circle 0.0.17 (CT-118)
+
+`x207_circle-0.0.17.wasm` is the **reproducible** build (`scripts/repro-build.sh`) at interface 0.0.17: `get_epoch.params` shows the rules in force when the epoch opened, relayer fee for `request_exit_evm` and `set_auto_settle_evm` from the free stake (new `max_fee` argument), `join_evm` refuses a signed fee (`ERR_EVM_FEE_NOT_ALLOWED`).
+
+- sha256: `cbb8a9108f975ba8fca86dc6f6d470e3e377b91309fce56b2ec18a77ff4a4b97` (751,548 bytes). Built twice from the committed ref, byte-identical. **Not deployed anywhere**; a deploy needs a decision of the owner.
+- Source: contracts commit `83cc5d7` (the ref given to `repro-build.sh`). The commit that adds this file changes only `prebuilt/`.

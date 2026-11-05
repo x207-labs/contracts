@@ -152,6 +152,7 @@ impl X207Circle {
         crate::params::write_relayer_fee(params.relayer_fee.0);
         let cutoff_at = now_ns + params.epoch_length * 1_000_000_000;
         epochs.insert(1, Epoch::open(1, now_ns, cutoff_at, params));
+        crate::params::snapshot_epoch_rules(1);
         Self {
             owner_id,
             circle_id,

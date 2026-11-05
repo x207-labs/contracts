@@ -221,7 +221,12 @@ impl X207Circle {
     /// `cutoff` or `commit` (K-28).
     pub fn get_epoch(&self, epoch: Option<EpochId>) -> Option<EpochView> {
         let id = epoch.unwrap_or(self.current_epoch);
-        self.epochs.get(&id).map(|e| e.to_view(env::block_timestamp()))
+        self.epochs.get(&id).map(|e| {
+            let mut view = e.to_view(env::block_timestamp());
+            // CT-118: the rules in force when the epoch opened, not the skipped defaults
+            view.params = crate::params::with_epoch_rules(view.params, id, self.current_epoch);
+            view
+        })
     }
 
     /// Permissionless. Locks epoch `epoch` (stored phase `clearing`, proposal window opens) and opens
@@ -248,6 +253,7 @@ impl X207Circle {
         };
         let next_cutoff_at = next_cutoff_at(prev_cutoff_at, now, params.epoch_length);
         self.epochs.insert(next, Epoch::open(next, now, next_cutoff_at, params));
+        crate::params::snapshot_epoch_rules(next);
         self.current_epoch = next;
 
         EpochCutoff {

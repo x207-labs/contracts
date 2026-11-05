@@ -1122,6 +1122,15 @@
               "type_schema": {
                 "type": "string"
               }
+            },
+            {
+              "name": "max_fee",
+              "type_schema": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           ],
           "serialization_type": "json"
@@ -1619,6 +1628,54 @@
             "format": "uint64",
             "minimum": 0.0,
             "type": "integer"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "modifiers": [
+          "private"
+        ],
+        "name": "on_action_fee_resolved",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "fee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "limit_before",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "relayer",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "action",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "boolean"
           }
         }
       },
@@ -2151,6 +2208,12 @@
               }
             },
             {
+              "name": "max_fee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
               "name": "signature",
               "type_schema": {
                 "type": "string"
@@ -2158,6 +2221,12 @@
             }
           ],
           "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueBoolean"
+          }
         }
       },
       {
@@ -2303,6 +2372,12 @@
               }
             },
             {
+              "name": "max_fee",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
               "name": "signature",
               "type_schema": {
                 "type": "string"
@@ -2310,6 +2385,12 @@
             }
           ],
           "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/PromiseOrValueBoolean"
+          }
         }
       },
       {
@@ -4375,10 +4456,10 @@
       "name": "relayer_fee_failed"
     }
   ],
-  "interface_version": "0.0.16",
+  "interface_version": "0.0.17",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.16"
+    "version": "0.0.17"
   },
   "schema_version": "0.4.0"
 }

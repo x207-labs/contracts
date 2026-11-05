@@ -274,6 +274,69 @@ pub(crate) fn authorize(
     signers.flush();
 }
 
+impl X207Circle {
+    /// CT-118 (0.0.17): the relayer fee of `request_exit_evm` and `set_auto_settle_evm`, paid from the free stake.
+    /// `free = stake - locked bond - outstanding_debt`; the bond and the open `due` are never touched, so a fee cannot turn an
+    /// auto-settle into a default. `fee = min(relayer_fee, max_fee, free / 2)`; `free = 0` gives fee 0 and the action stands.
+    /// The action has already been applied by the caller; the fee is best effort: stake -> in flight now, `on_action_fee_resolved` books
+    /// the outcome. The limit is lowered with `bound_limit` (stake shrank) and put back by the callback if the transfer fails.
+    pub(crate) fn charge_action_fee(&mut self, account: &AccountId, action: &str, max_fee: u128) -> PromiseOrValue<bool> {
+        let debt = self.outstanding_debt.get(account).copied().unwrap_or(0);
+        let Some(member) = self.members.get_mut(account) else { return PromiseOrValue::Value(false) };
+        let free = member.stake.saturating_sub(crate::deal::bond_locked_of(account)).saturating_sub(debt);
+        let fee = relayer_fee_for(free, max_fee);
+        if fee == 0 {
+            return PromiseOrValue::Value(false);
+        }
+        let limit_before = member.limit;
+        member.stake -= fee;
+        member.limit = crate::deal::bound_limit(member.limit, member.stake, account);
+        self.d6_stake_to_in_flight(fee);
+        let relayer = env::predecessor_account_id();
+        PromiseOrValue::Promise(
+            Promise::new(self.usdt_token_id.clone())
+                .function_call(
+                    "ft_transfer".to_string(),
+                    near_sdk::serde_json::json!({"receiver_id": relayer, "amount": U128(fee), "memo": null}).to_string().into_bytes(),
+                    NearToken::from_yoctonear(1),
+                    crate::stake::WITHDRAW_TRANSFER_GAS,
+                )
+                .then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(crate::stake::WITHDRAW_CALLBACK_GAS)
+                        .on_action_fee_resolved(account.clone(), U128(fee), U128(limit_before), relayer, action.to_string()),
+                ),
+        )
+    }
+}
+
+#[near]
+impl X207Circle {
+    /// Callback of the fee transfer of `request_exit_evm` and `set_auto_settle_evm` (CT-118). Never panics. Success: the fee left the
+    /// contract (`relayer_fee_paid`). Failure: the fee returns to the member stake and the limit that the debit lowered is put back
+    /// (`bound_limit` caps it by the stake), event `relayer_fee_failed`. The reserve is used only if that internal refund cannot be
+    /// made (member unknown, exited or withdrawing; not reachable while the exit waits for a finalized epoch).
+    #[private]
+    pub fn on_action_fee_resolved(&mut self, account_id: AccountId, fee: U128, limit_before: U128, relayer: AccountId, action: String) -> bool {
+        let epoch = self.current_epoch;
+        if env::promise_result_checked(0, 16).is_ok() {
+            self.d6_in_flight_out(fee.0);
+            crate::events::RelayerFeePaid { account_id, relayer, action, epoch, amount: fee }.emit();
+            return true;
+        }
+        crate::events::RelayerFeeFailed { account_id: account_id.clone(), relayer, action, epoch, amount: fee }.emit();
+        match self.members.get_mut(&account_id) {
+            Some(m) if m.status != MemberStatus::Exited && !m.withdraw_pending => {
+                m.stake += fee.0;
+                m.limit = crate::deal::bound_limit(m.limit.max(limit_before.0), m.stake, &account_id);
+                self.d6_in_flight_to_stake(fee.0);
+            }
+            _ => self.d6_in_flight_to_reserve(fee.0),
+        }
+        false
+    }
+}
+
 #[near]
 impl X207Circle {
     /// Registers the EVM address `address` (lowercase `0x`, 42 characters) as a `pending` member. Anyone may call it;
@@ -282,7 +345,12 @@ impl X207Circle {
     /// `ERR_BAD_EVM_ADDRESS`, `ERR_BAD_TERMS_HASH`, `ERR_ALREADY_MEMBER`, `ERR_MAX_MEMBERS`, `ERR_EVM_EXPIRED`,
     /// `ERR_BAD_EVM_SIG`. The first action after a join carries nonce 0.
     #[payable]
-    pub fn join_evm(&mut self, address: String, terms_hash: String, deadline: u64, signature: String) -> MemberView {
+    pub fn join_evm(&mut self, address: String, terms_hash: String, deadline: u64, signature: String, max_fee: Option<U128>) -> MemberView {
+        // CT-118: a join pays no relayer fee (the member has no stake yet; the sponsor is paid in NEAR), so a signed fee ceiling is refused
+        require!(
+            max_fee.map_or(true, |m| m.0 == 0),
+            "ERR_EVM_FEE_NOT_ALLOWED: join_evm carries no relayer fee, sign maxFee 0 or leave max_fee out"
+        );
         let deposit = env::attached_deposit();
         require!(
             deposit >= JOIN_STORAGE_DEPOSIT,
@@ -392,9 +460,13 @@ impl X207Circle {
     }
 
     /// `request_exit` for an EVM member (CT-105).
-    pub fn request_exit_evm(&mut self, member: AccountId, nonce: u64, deadline: u64, signature: String) {
-        authorize(&member, "request_exit", 0, "", nonce, deadline, 0, &signature);
-        self.request_exit_for(member);
+    ///
+    /// CT-118 (0.0.17): the relayer may take `min(relayer_fee, max_fee, free_stake / 2)` from the free stake (see `charge_action_fee`).
+    /// Returns `true` when a fee was sent to the relayer, `false` when none was charged or the transfer failed.
+    pub fn request_exit_evm(&mut self, member: AccountId, nonce: u64, deadline: u64, max_fee: U128, signature: String) -> PromiseOrValue<bool> {
+        authorize(&member, "request_exit", 0, "", nonce, deadline, max_fee.0, &signature);
+        self.request_exit_for(member.clone());
+        self.charge_action_fee(&member, "request_exit", max_fee.0)
     }
 
     /// `withdraw_stake` for an EVM member (CT-105): the stake goes to `receiver` with a plain `ft_transfer`. The Intents
@@ -469,7 +541,7 @@ mod tests {
 
     fn joined(c: &mut X207Circle) {
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
-        c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"));
+        c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), None);
     }
 
     /// Active member with an exit request already made at epoch 1, stake 0, and the signer nonce set.
@@ -565,7 +637,7 @@ mod tests {
     fn tc_ct_104_05_join_evm_creates_member_and_sidecar() {
         let mut c = circle();
         ctx("relayer.testnet", NearToken::from_near(1), NOW_NS);
-        let view = c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"));
+        let view = c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), None);
         assert_eq!(view.account_id.as_str(), address());
         assert_eq!(view.status, MemberStatus::Pending);
         let signer = c.evm_signer(acc(&address())).unwrap();
@@ -584,29 +656,29 @@ mod tests {
         let t = "a".repeat(64);
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
         // wrong signer: the signature of another action
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("claim"), None); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // changed terms_hash
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), "b".repeat(64), 1_900_000_000_000, sig("join")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), "b".repeat(64), 1_900_000_000_000, sig("join"), None); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // changed deadline
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_001, sig("join")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_001, sig("join"), None); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // uppercase letters in the address
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm("0x70997970C51812dc3A010C7d01b50e0d17dc79C8".into(), t.clone(), 1_900_000_000_000, sig("join")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm("0x70997970C51812dc3A010C7d01b50e0d17dc79C8".into(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
         assert!(text.contains("ERR_BAD_EVM_ADDRESS"), "{text}");
         // short deposit
         ctx("relayer.testnet", NearToken::from_millinear(349), NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
         assert!(text.contains("ERR_INSUFFICIENT_STORAGE_DEPOSIT"), "{text}");
         // past the deadline
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, 1_900_000_001_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
         assert!(text.contains("ERR_EVM_EXPIRED"), "{text}");
         // replay of a join
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
-        c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"));
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join")); }));
+        c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None);
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
         assert!(text.contains("ERR_ALREADY_MEMBER"), "{text}");
     }
 
@@ -617,11 +689,11 @@ mod tests {
         let t = "a".repeat(64);
         // 1.9e12 ms is one hour ahead of NOW_NS: fine for the limit. Move the clock 24 h back so the same deadline is 25 h ahead.
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS - 24 * 3_600 * 1_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65)); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65), None); }));
         assert!(text.contains("ERR_EVM_DEADLINE_TOO_FAR"), "{text}");
         // exactly 24 h ahead passes the deadline check (and then fails on the signature)
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS - 23 * 3_600 * 1_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65)); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65), None); }));
         assert!(!text.contains("ERR_EVM_DEADLINE_TOO_FAR") && !text.contains("ERR_EVM_EXPIRED"), "{text}");
     }
 
@@ -645,13 +717,13 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // a nonce that is not the next one
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.request_exit_evm(id.clone(), 2, 1_900_000_000_000, sig("request_exit"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(id.clone(), 2, 1_900_000_000_000, U128(0), sig("request_exit")); }));
         assert!(text.contains("ERR_EVM_NONCE"), "{text}");
-        c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, sig("request_exit"));
+        let _ = c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, U128(0), sig("request_exit"));
         assert_eq!(c.members.get(&id).unwrap().exit_requested_epoch, Some(1));
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 2);
         // replay of the same signature
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, sig("request_exit"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
         assert!(text.contains("ERR_EVM_NONCE"), "{text}");
     }
 
@@ -661,14 +733,14 @@ mod tests {
         active(&mut c, 1);
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), 1_900_000_001_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, sig("request_exit"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
         assert!(text.contains("ERR_EVM_EXPIRED"), "{text}");
         // a NEAR-key member cannot be driven by an EVM signature
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.request_exit_evm(acc("gpu.testnet"), 1, 1_900_000_000_000, sig("request_exit"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(acc("gpu.testnet"), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
         assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
         // and a 0x id that never joined
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.request_exit_evm(acc("0x0000000000000000000000000000000000000001"), 1, 1_900_000_000_000, sig("request_exit"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(acc("0x0000000000000000000000000000000000000001"), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
         assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
     }
 
@@ -827,25 +899,174 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // the "off" signature cannot switch it on, and the other way round
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, sig("auto_settle_off"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle_off")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), false, 3, 1_900_000_000_000, sig("auto_settle"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), false, 3, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
-        c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, sig("auto_settle"));
+        let _ = c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle"));
         assert!(c.is_auto_settle(id.clone()));
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 4);
         // replay
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, sig("auto_settle"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
         assert!(text.contains("ERR_EVM_NONCE"), "{text}");
-        c.set_auto_settle_evm(id.clone(), false, 4, 1_900_000_000_000, sig("auto_settle_off"));
+        let _ = c.set_auto_settle_evm(id.clone(), false, 4, 1_900_000_000_000, U128(0), sig("auto_settle_off"));
         assert!(!c.is_auto_settle(id.clone()));
         // expired
         ctx("anyone.testnet", NearToken::from_yoctonear(0), 1_900_000_001_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(id.clone(), true, 5, 1_900_000_000_000, sig("auto_settle"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), true, 5, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
         assert!(text.contains("ERR_EVM_NONCE") || text.contains("ERR_EVM_EXPIRED"), "{text}");
         // a NEAR-key member is not driven by an EVM signature
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| c.set_auto_settle_evm(acc("gpu.testnet"), true, 3, 1_900_000_000_000, sig("auto_settle"))));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(acc("gpu.testnet"), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
         assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
+    }
+
+    // CT-118: relayer fee for request_exit_evm / set_auto_settle_evm from the free stake
+
+    const CREDIT: u128 = 1_000_000;
+
+    /// Active EVM member with `stake`, a limit equal to it and `debt` owed; DAO relayer fee 250_000.
+    fn funded(stake: u128, debt: u128) -> (X207Circle, AccountId) {
+        let mut c = circle();
+        active(&mut c, 0);
+        let id = acc(&address());
+        let m = c.members.get_mut(&id).unwrap();
+        m.stake = stake;
+        m.limit = stake;
+        c.total_stake = stake;
+        if debt > 0 {
+            c.outstanding_debt.insert(id.clone(), debt);
+        }
+        crate::params::write_relayer_fee(250_000);
+        ctx("relayer.testnet", NearToken::from_yoctonear(0), NOW_NS);
+        (c, id)
+    }
+
+    fn fee_calls() -> Vec<(String, String)> {
+        use near_sdk::mock::MockAction;
+        get_created_receipts()
+            .into_iter()
+            .flat_map(|r| {
+                let receiver = r.receiver_id.to_string();
+                r.actions.into_iter().filter_map(move |a| match a {
+                    MockAction::FunctionCallWeight { method_name, args, .. } => {
+                        Some((receiver.clone(), format!("{} {}", String::from_utf8(method_name).unwrap(), String::from_utf8(args).unwrap())))
+                    }
+                    _ => None,
+                })
+            })
+            .collect()
+    }
+
+    fn resolve_action_fee(c: &mut X207Circle, id: &AccountId, fee: u128, limit_before: u128, result: near_sdk::PromiseResult) -> bool {
+        near_sdk::testing_env!(
+            VMContextBuilder::new().predecessor_account_id(acc("x207-v014.testnet")).current_account_id(acc("x207-v014.testnet")).build(),
+            near_sdk::test_vm_config(),
+            near_sdk::RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![result]
+        );
+        c.on_action_fee_resolved(id.clone(), U128(fee), U128(limit_before), acc("relayer.testnet"), "request_exit".into())
+    }
+
+    #[test]
+    fn ct118_action_fee_from_free_stake() {
+        let (mut c, id) = funded(100 * CREDIT, 0);
+        let r = c.charge_action_fee(&id, "request_exit", 1_000_000);
+        assert!(matches!(r, PromiseOrValue::Promise(_)));
+        drop(r); // a Promise is scheduled when it is dropped
+        assert_eq!(c.members.get(&id).unwrap().stake, 100 * CREDIT - 250_000);
+        assert_eq!(c.total_stake, 100 * CREDIT - 250_000);
+        assert_eq!(c.in_flight, 250_000);
+        assert_eq!(c.members.get(&id).unwrap().limit, 100 * CREDIT - 250_000, "limit follows the stake");
+        let calls = fee_calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].1.starts_with("ft_transfer ") && calls[0].1.contains("relayer.testnet") && calls[0].1.contains("250000"), "{calls:?}");
+        assert!(calls[1].1.starts_with("on_action_fee_resolved "), "{calls:?}");
+        c.assert_d6(None);
+    }
+
+    #[test]
+    fn ct118_action_fee_caps_and_zero() {
+        // signed ceiling
+        let (mut c, id) = funded(100 * CREDIT, 0);
+        let _ = c.charge_action_fee(&id, "request_exit", 100);
+        assert_eq!(c.in_flight, 100);
+        // maxFee 0: no fee, no promise
+        let (mut c, id) = funded(100 * CREDIT, 0);
+        assert!(matches!(c.charge_action_fee(&id, "request_exit", 0), PromiseOrValue::Value(false)));
+        assert_eq!((c.in_flight, c.members.get(&id).unwrap().stake), (0, 100 * CREDIT));
+        // half of the free stake: stake 100 credit, debt 99.4 credit -> free 600_000 -> fee 250_000 (flat) ; debt 99.7 -> free 300_000 -> 150_000
+        let (mut c, id) = funded(100 * CREDIT, 99_700_000);
+        let _ = c.charge_action_fee(&id, "auto_settle", 1_000_000);
+        assert_eq!(c.in_flight, 150_000, "capped at free / 2");
+        // free stake 0 (the whole stake is the due): action stands, no fee
+        let (mut c, id) = funded(100 * CREDIT, 100 * CREDIT);
+        assert!(matches!(c.charge_action_fee(&id, "auto_settle", 1_000_000), PromiseOrValue::Value(false)));
+        assert_eq!(c.members.get(&id).unwrap().stake, 100 * CREDIT, "the due is never touched");
+        // DAO fee 0: no fee
+        let (mut c, id) = funded(100 * CREDIT, 0);
+        crate::params::write_relayer_fee(0);
+        assert!(matches!(c.charge_action_fee(&id, "request_exit", 1_000_000), PromiseOrValue::Value(false)));
+    }
+
+    #[test]
+    fn ct118_action_fee_callback_success_and_failure() {
+        let (mut c, id) = funded(100 * CREDIT, 0);
+        let _ = c.charge_action_fee(&id, "request_exit", 1_000_000);
+        // success: the fee left the contract
+        assert!(resolve_action_fee(&mut c, &id, 250_000, 100 * CREDIT, near_sdk::PromiseResult::Successful(vec![])));
+        assert_eq!((c.in_flight, c.total_stake), (0, 100 * CREDIT - 250_000));
+        c.assert_d6(None);
+        // failure of a second charge: back to the member stake and limit
+        let before = c.members.get(&id).unwrap().limit;
+        ctx("relayer.testnet", NearToken::from_yoctonear(0), NOW_NS);
+        let _ = c.charge_action_fee(&id, "request_exit", 1_000_000);
+        assert!(!resolve_action_fee(&mut c, &id, 250_000, before, near_sdk::PromiseResult::Failed));
+        let m = c.members.get(&id).unwrap();
+        assert_eq!((m.stake, m.limit), (100 * CREDIT - 250_000, before));
+        assert_eq!((c.in_flight, c.reserve, c.total_stake), (0, 0, 100 * CREDIT - 250_000));
+        c.assert_d6(None);
+    }
+
+    #[test]
+    fn ct118_action_fee_failure_reserve_only_when_refund_impossible() {
+        let (mut c, id) = funded(100 * CREDIT, 0);
+        let _ = c.charge_action_fee(&id, "request_exit", 1_000_000);
+        c.members.get_mut(&id).unwrap().status = MemberStatus::Exited;
+        assert!(!resolve_action_fee(&mut c, &id, 250_000, 100 * CREDIT, near_sdk::PromiseResult::Failed));
+        assert_eq!((c.in_flight, c.reserve), (0, 250_000));
+    }
+
+    #[test]
+    fn ct118_join_refuses_signed_fee() {
+        let mut c = circle();
+        ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
+        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), Some(U128(1))); }));
+        assert!(text.contains("ERR_EVM_FEE_NOT_ALLOWED"), "{text}");
+        // Some(0) and None are the same message
+        c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), Some(U128(0)));
+        assert!(c.members.contains_key(&acc(&address())));
+    }
+
+    #[test]
+    fn ct118_epoch_rules_snapshot() {
+        let mut c = circle();
+        crate::params::write_relayer_fee(250_000);
+        // epoch 1 was opened before the fee was set: its snapshot holds 0
+        assert_eq!(c.get_epoch(Some(1)).unwrap().params.relayer_fee.0, 0);
+        crate::params::snapshot_epoch_rules(2);
+        let e2 = crate::clearing::Epoch::open(2, NOW_NS, NOW_NS + 1, Params::default());
+        c.epochs.insert(2, e2);
+        c.current_epoch = 2;
+        assert_eq!(c.get_epoch(Some(2)).unwrap().params.relayer_fee.0, 250_000);
+        assert_eq!(c.get_epoch(Some(1)).unwrap().params.relayer_fee.0, 0, "the past epoch keeps its value");
+        // no snapshot: the running epoch reads the rules in force now, an older epoch the stored defaults
+        crate::params::write_relayer_fee(7);
+        let e3 = crate::clearing::Epoch::open(3, NOW_NS, NOW_NS + 1, Params::default());
+        c.epochs.insert(3, e3);
+        c.current_epoch = 3;
+        assert_eq!(c.get_epoch(Some(3)).unwrap().params.relayer_fee.0, 7);
+        assert_eq!(c.get_epoch(Some(2)).unwrap().params.relayer_fee.0, 250_000);
     }
 }

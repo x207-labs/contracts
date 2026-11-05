@@ -1,6 +1,7 @@
 # ADR: contract 0.0.17 (CT-118)
 
-Status: proposed, not implemented. No code, no deploy. Builds on `adr-relayer-fee.md` (0.0.16) and `security-review-relayer-fee.md`.
+Status: approved by the coordinator; implemented in contracts (not deployed). Decisions: `join_evm` takes an optional `max_fee` and refuses a value above 0 with `ERR_EVM_FEE_NOT_ALLOWED`; a failed fee transfer goes back to the member stake (reserve only if that refund is impossible: member unknown, exited or withdrawing); parts 1 and 2 ship together in one release. Deviation from the text below: the epoch record is not removed by `prune_epoch` (it stays as a finalized view), so the rules snapshot stays with it and is not pruned. The ADR text below is the proposal as reviewed.
+Original status: proposed, not implemented. No code, no deploy. Builds on `adr-relayer-fee.md` (0.0.16) and `security-review-relayer-fee.md`.
 
 Two changes are proposed: (1) `get_epoch.params` shows the rules that were in force; (2) the relayer fee also covers `request_exit_evm` and `set_auto_settle_evm`, paid from the member's free stake. `join_evm` stays sponsor-paid (reason in part 2).
 

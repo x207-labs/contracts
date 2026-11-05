@@ -190,6 +190,7 @@ fn no_method_moves_d6_or_replaces_the_owner() {
             || name == "withdraw_stake_evm"
             || name == "on_withdraw_resolved"
             || name == "on_withdraw_resolved_fee"
+            || name == "on_action_fee_resolved"
         {
             continue; // the member's own exit (CT-077; CT-105 for an EVM member, gated by its signature), not the owner
         }

@@ -6,7 +6,7 @@
 
 use near_sdk::json_types::U128;
 use near_sdk::store::LookupMap;
-use near_sdk::{env, near, AccountId};
+use near_sdk::{env, near, AccountId, PromiseOrValue};
 
 use crate::events::{AutoSettleSet, AutoSettled, X207Event};
 use crate::member::MemberStatus;
@@ -98,10 +98,22 @@ impl X207Circle {
 
     /// `set_auto_settle` for an EVM member: anyone relays, the signature of the member is the gate (`Action` with
     /// `action` = `auto_settle` when `enabled`, `auto_settle_off` when not).
-    pub fn set_auto_settle_evm(&mut self, member: AccountId, enabled: bool, nonce: u64, deadline: u64, signature: String) {
+    ///
+    /// CT-118 (0.0.17): the relayer may take `min(relayer_fee, max_fee, free_stake / 2)` from the free stake. Returns `true` when a fee
+    /// was sent to the relayer.
+    pub fn set_auto_settle_evm(
+        &mut self,
+        member: AccountId,
+        enabled: bool,
+        nonce: u64,
+        deadline: u64,
+        max_fee: U128,
+        signature: String,
+    ) -> PromiseOrValue<bool> {
         let action = if enabled { "auto_settle" } else { "auto_settle_off" };
-        crate::evm::authorize(&member, action, 0, "", nonce, deadline, 0, &signature);
-        self.set_auto_settle_for(member, enabled);
+        crate::evm::authorize(&member, action, 0, "", nonce, deadline, max_fee.0, &signature);
+        self.set_auto_settle_for(member.clone(), enabled);
+        self.charge_action_fee(&member, action, max_fee.0)
     }
 
     pub fn is_auto_settle(&self, account_id: AccountId) -> bool {
