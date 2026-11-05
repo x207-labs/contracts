@@ -10,9 +10,8 @@
 
 `x207_circle-0.0.14.wasm` is the `cargo near build non-reproducible-wasm` build of the circle at interface 0.0.14 (EVM agents, CT-104/CT-105), committed so that the sandbox tests of `sdk` can run without a Rust toolchain: `X207_CIRCLE_WASM=contracts/prebuilt/x207_circle-0.0.14.wasm`.
 
-- sha256: `743109cbf74c266c75b5416f788ed10aad0233ad74d0211bf3daa9c39c8c2a87` (base58 `8pZfS6mGmJWJxMtPgVVVVLET6uMyobsVunmS8wTNkDGi`). It is the code of `x207-v014.testnet`.
-- Not a reproducible build; the release wasm (reproducible) comes with the tag.
-- CT-111: `scripts/repro-build.sh 69b129f` (commit of CT-106) gives sha256 `7d731dfb15db44aa3a1ca95c28616a6e2faecbf11b87de538940991da33d39f9` (709,266 bytes), which differs from the line above. Cause: the prebuilt file holds 27 absolute paths of the build host (`/Users/<name>/.cargo/...`), the container build holds `/home/near/.cargo/...`; same `Cargo.lock`, same toolchain 1.99.1. `x207-v014.testnet` keeps the prebuilt code.
+- sha256: `7d731dfb15db44aa3a1ca95c28616a6e2faecbf11b87de538940991da33d39f9` (709,266 bytes, base58 `9ShmoHDuE6QT3AAj6jYdW2Wo6pr53h5JFfs8ea7pYg6L`). It is the **reproducible** build of commit `69b129f` (`scripts/repro-build.sh`) and the code of `x207-v014.testnet` since 2026-11-05 (redeploy tx `7TiLoPdbBcyksM3XSQ6MKRjBnqTC4V1g1h2DQDfi9zEB`, state unchanged). The SD-090 run happened on the earlier host build, sha256 `743109cbf74c266c75b5416f788ed10aad0233ad74d0211bf3daa9c39c8c2a87` (base58 `8pZfS6mGmJWJxMtPgVVVVLET6uMyobsVunmS8wTNkDGi`).
+- CT-111: the old host build differed from the reproducible one because it held 27 absolute paths of the build host (`/Users/<name>/.cargo/...`) against `/home/near/.cargo/...` in the container; same `Cargo.lock`, same toolchain 1.99.1.
 
 # Circle 0.0.15 (CT-108)
 
