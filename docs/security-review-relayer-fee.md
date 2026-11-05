@@ -27,6 +27,21 @@ Scope: `claim_evm` and `withdraw_stake_evm` take a fee for the relayer (`predece
 | 11 | EIP-712 domain | Version stays `"1"`: the typed-data name `Action` has a new field list, so a 0.0.15 signature cannot verify on 0.0.16, and the circle id is in the salt. Reason in ADR D2. | `evm-eip712.json` (9 fields) and `evm-eip712-v1.json` (8 fields, kept for 0.0.14/0.0.15 clients) |
 | 12 | Gas | `claim_evm` with fee 11.1 Tgas, `withdraw_stake_evm` with fee 12.1 Tgas (sandbox, burnt). The claim callback with fee gets a fixed 20 Tgas (`CLAIM_FEE_CALLBACK_GAS`). | sandbox output of `ct117_relayer_fee` |
 
+## Where the fee goes on every path
+
+`fee` is moved from the pool (claim) or the stake (withdraw) into `in_flight` before the transfers start. The one callback settles it exactly once; a callback that finds the position no longer `claimed` (or `withdraw_pending` false) moves nothing.
+
+| Payout | Fee leg | Claim (`claim_evm`) | Withdraw (`withdraw_stake_evm`) |
+| --- | --- | --- | --- |
+| ok | ok | fee leaves `in_flight` to the relayer; event `relayer_fee_paid` | same |
+| ok | failed (relayer unregistered) | fee returns to the **claimable balance of the member**: `in_flight` -> epoch pool, position `claimable` again for that amount; the relayer gets nothing and nothing is held for it; `relayer_fee_failed` | fee is sent on by a new transfer to the member's **receiver**; if that transfer fails too, `in_flight` -> **reserve** (belongs to the circle, nobody can claim it), `relayer_fee_failed` |
+| failed | ok | payout returns to pool, position `claimable` for the payout part; fee stays paid | payout returns to the member's stake; fee stays paid |
+| failed | failed | whole amount returns to pool, position `claimable` | whole stake returns to the member |
+
+No path loses a fee or counts it twice: each unit leaves `pool`/`stake` once, sits in `in_flight` once, and leaves `in_flight` once (to the relayer, the receiver, the pool, the stake or the reserve). `assert_d6` (accounted == USDT balance) and the `in_flight` value are asserted after every case in the unit tests (`ct117_*`, listed in finding 3 and 4) and in the sandbox tests.
+
+Data from the sandbox with an unregistered relayer (`unregistered_relayer_does_not_block_the_payout`): creditor 20 credit, fee 0.25 credit. The receiver gets 19.75 credit, the relayer 0, the position shows `claimable` with amount 0.25 credit (the member's own balance again, not held for the relayer), `relayer_fee_failed` is emitted, D6 holds. A second `claim_evm` with `maxFee` 0 pays the 0.25 credit to the receiver (total 20 credit), D6 holds. Withdraw (`withdraw_with_unregistered_relayer_sends_the_fee_to_the_receiver`): stake 100 credit, fee 0.25 credit; the receiver gets 100 credit in two transfers.
+
 ## Known limits (not fixed in 0.0.16)
 
 - `join_evm`, `request_exit_evm`, `auto_settle` actions pay no fee: the relayer carries their gas. A fee from free stake is postponed to 0.0.17.
