@@ -400,6 +400,46 @@
       "tx": "FKyRveLsnEzreLDeWzpFNzWMKTpcuCGEqxx15Q7MbQZW",
       "failure": null,
       "value": "1000000"
+    },
+    {
+      "label": "close_epoch 6",
+      "expectOk": true,
+      "ok": true,
+      "tx": "8na5GRjCkkQtCWUzp5FtAe46Fo4vYnxU47FkckcvoRr4",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "commit_epoch 6",
+      "expectOk": true,
+      "ok": true,
+      "tx": "DhoPkrCEWdwX4AJvnHjgWvhN7BJ6N3nfJNEDbK5Ktdrb",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "settle epoch 6 (bob.x207-v18-own.testnet pays 10000000)",
+      "expectOk": true,
+      "ok": true,
+      "tx": "8nvVdKQwGrchdVYtaxqvp3VhG2hpPdntNVWQy1xt82Un",
+      "failure": null,
+      "value": "10000000"
+    },
+    {
+      "label": "settle epoch 6 (dan.x207-v18-p2.testnet pays 1000000)",
+      "expectOk": true,
+      "ok": true,
+      "tx": "GPDd61xbUE9dfajDmqUmw4AXQmGS88yheT7y1dXKuUpf",
+      "failure": null,
+      "value": "1000000"
+    },
+    {
+      "label": "finalize_epoch 6",
+      "expectOk": true,
+      "ok": true,
+      "tx": "HUzhsowabszAxxLaDvRmfRCaQEbNiTQF7ucKdLHt1f4v",
+      "failure": null,
+      "value": null
     }
   ],
   "checks": {
@@ -425,10 +465,10 @@
     "escrow14AfterLock": {
       "grant_id": 2,
       "account_id": "dan.x207-v18-p2.testnet",
-      "state": "held",
-      "buyer": null,
+      "state": "delivered",
+      "buyer": "bob.x207-v18-own.testnet",
       "locked_epoch": 2,
-      "delivery_pubkey": null
+      "delivery_pubkey": "ed25519:6WeRubo6j573SZHe1CCYbqyhfJjh2iQhmeZbaatSVrnm"
     },
     "after11": {
       "keys": [
@@ -466,7 +506,7 @@
         "admitted": false,
         "joined_at": "1794154032568912767",
         "settled_history": "0",
-        "last_active_epoch": 1,
+        "last_active_epoch": 6,
         "exit_requested_epoch": null
       },
       "locker": {
@@ -484,20 +524,126 @@
         "delivery_pubkey": "ed25519:6WeRubo6j573SZHe1CCYbqyhfJjh2iQhmeZbaatSVrnm"
       }
     },
-    "rotationEpoch": 6
+    "rotationEpoch": 6,
+    "positionsEpoch14": [
+      {
+        "epoch": 6,
+        "account_id": "bob.x207-v18-own.testnet",
+        "net": "-10000000",
+        "role": "debtor",
+        "status": "due",
+        "amount": "10000000",
+        "recovered": "0",
+        "payment_deadline": "1794162786576962627",
+        "updated_at_block": 276811313
+      },
+      {
+        "epoch": 6,
+        "account_id": "alice.x207-v18-own.testnet",
+        "net": "11000000",
+        "role": "creditor",
+        "status": "claimable",
+        "amount": "11000000",
+        "recovered": "0",
+        "payment_deadline": "1794162786576962627",
+        "updated_at_block": 276811313
+      },
+      {
+        "epoch": 6,
+        "account_id": "dan.x207-v18-p2.testnet",
+        "net": "-1000000",
+        "role": "debtor",
+        "status": "due",
+        "amount": "1000000",
+        "recovered": "0",
+        "payment_deadline": "1794162786576962627",
+        "updated_at_block": 276811313
+      }
+    ],
+    "epoch14Final": {
+      "epoch": 6,
+      "phase": "finalized",
+      "opened_at": "1794160049535669371",
+      "cutoff_at": "1794161816929531615",
+      "closed_at": "1794161821794243242",
+      "proposal_deadline": "1794161881794243242",
+      "committed_at": "1794161886576962627",
+      "payment_deadline": "1794162786576962627",
+      "finalized_at": "1794162791468964228",
+      "edge_count": 2,
+      "participant_count": 3,
+      "total_obligation": "11000000",
+      "total_cleared": "0",
+      "pool": "11000000",
+      "shortfall": "0",
+      "params": {
+        "epoch_length": 1800,
+        "payment_window": 900,
+        "proposal_window": 60,
+        "base_limit_ratio": 8000,
+        "limit_growth": 1000,
+        "limit_cap": "1000000000",
+        "limit_decay": 0,
+        "fees": {
+          "clearing_fee_bps": 0,
+          "solver_fee_bps": 0
+        },
+        "admission": "open",
+        "max_search_share_bps": 500,
+        "bond_threshold": "100000000",
+        "bond_bps": 2000,
+        "prune_delay_epochs": 2,
+        "relayer_fee": "0"
+      }
+    },
+    "positionsEpoch14After": [
+      {
+        "epoch": 6,
+        "account_id": "bob.x207-v18-own.testnet",
+        "net": "-10000000",
+        "role": "debtor",
+        "status": "paid",
+        "amount": "10000000",
+        "recovered": "0",
+        "payment_deadline": "1794162786576962627",
+        "updated_at_block": 276811321
+      },
+      {
+        "epoch": 6,
+        "account_id": "alice.x207-v18-own.testnet",
+        "net": "11000000",
+        "role": "creditor",
+        "status": "claimable",
+        "amount": "11000000",
+        "recovered": "0",
+        "payment_deadline": "1794162786576962627",
+        "updated_at_block": 276811313
+      },
+      {
+        "epoch": 6,
+        "account_id": "dan.x207-v18-p2.testnet",
+        "net": "-1000000",
+        "role": "debtor",
+        "status": "paid",
+        "amount": "1000000",
+        "recovered": "0",
+        "payment_deadline": "1794162786576962627",
+        "updated_at_block": 276811330
+      }
+    ]
   },
   "closedEpochs": [
     1,
     2,
     3,
     4,
-    5
+    5,
+    6
   ],
   "lockEpoch": 2,
   "grant11": 1,
   "grant14": 2,
   "notCovered": [
-    "the obligation of the #14 voucher (epoch after the lock epoch) is not settled or finalized in this run",
     "cancel_expired on testnet (24 h expiry; covered by sandbox ct127-08 and unit tests)"
   ]
 }

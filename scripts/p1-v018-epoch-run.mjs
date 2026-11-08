@@ -306,6 +306,29 @@ out.checks.after14 = {
   await circleCall("register_voucher of dan with the BUYER key (accepted)", acc("alice"), "register_voucher", rotation(keyOf("buyer14", "delivery").toString()));
   out.checks.rotationEpoch = e.epoch;
 }
-out.notCovered = ["the obligation of the #14 voucher (epoch after the lock epoch) is not settled or finalized in this run", "cancel_expired on testnet (24 h expiry; covered by sandbox ct127-08 and unit tests)"];
+// ---- 8. the obligation of the #14 voucher: close the delivery epoch, commit, every debtor settles, finalize
+{
+  const n = out.checks.currentEpochAtDelivery14;
+  const payers = { [NAMES.bob]: acc("bob"), [NAMES.dan]: accountWith(NAMES.dan, keyOf("buyer14", "delivery")) };
+  let e = await view("get_epoch", { epoch: n });
+  if (e.phase === "open" || e.phase === "cutoff") {
+    await waitUntilMs(nsToMs(e.cutoff_at), `cutoff of epoch ${n}`);
+    await closeEpoch(n);
+  }
+  await finalizeEpoch(n, async () => {
+    const positions = await view("list_positions", { epoch: n, from_index: 0, limit: 50 });
+    out.checks.positionsEpoch14 = positions;
+    save();
+    for (const p of positions) {
+      if (BigInt(p.net) >= 0n) continue;
+      const payer = payers[p.account_id];
+      if (!payer) throw new Error(`debtor ${p.account_id} has no signer in this script`);
+      await send(`settle epoch ${n} (${p.account_id} pays ${p.amount})`, payer, USDT, { method: "ft_transfer_call", args: { receiver_id: CIRCLE, amount: String(p.amount), msg: JSON.stringify({ action: "settle", epoch: n }) }, deposit: 1n, gas: 150_000_000_000_000n });
+    }
+  });
+  out.checks.epoch14Final = await view("get_epoch", { epoch: n });
+  out.checks.positionsEpoch14After = await view("list_positions", { epoch: n, from_index: 0, limit: 50 });
+}
+out.notCovered = ["cancel_expired on testnet (24 h expiry; covered by sandbox ct127-08 and unit tests)"];
 save();
 console.log("done; written to", outFile);
