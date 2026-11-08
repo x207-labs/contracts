@@ -1,0 +1,24 @@
+# CT-125 (0.0.18, P1): the locker contract that holds a NEAR account for sale. Deployed on the account that is sold, by the seller, together with
+# the deletion of every key of that account. Its wasm is built like the circle (scripts/repro-build.sh locker) and its sha256 is the official one.
+[package]
+name = "x207-locker"
+version = "0.0.18"
+edition = "2021"
+license = "Apache-2.0"
+description = "x207 account locker: holds a NEAR account for sale and hands its keys to the buyer or back to the seller"
+publish = false
+
+[package.metadata.near.reproducible_build]
+image = "sourcescan/cargo-near:0.22.0-rust-1.99.1"
+image_digest = "sha256:c9655eaf7436b90c87ea8b25739f91063032c5c30ba24cfeafe72c142943b5bb"
+passed_env = []
+container_build_command = ["cargo", "near", "build", "non-reproducible-wasm", "--locked"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "=5.30.1"
+
+[dev-dependencies]
+near-sdk = { version = "=5.30.1", features = ["unit-testing"] }
