@@ -35,7 +35,7 @@ const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSch
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 50] = [
+pub const EVENT_SCHEMAS: [EventSchema; 52] = [
     schema(
         "member_joined",
         &[
@@ -289,6 +289,9 @@ pub const EVENT_SCHEMAS: [EventSchema; 50] = [
         "relayer_fee_failed",
         &["account_id", "relayer", "action", "epoch", "amount"],
     ),
+    // 0.0.18: CT-123 (a `pending` member leaves) and CT-126 (account escrow, P1)
+    schema("member_removed", &["account_id", "by_owner"]),
+    schema("account_escrow_held", &["grant_id", "account_id"]),
 ];
 
 pub trait X207Event: Serialize {
@@ -538,6 +541,22 @@ event!(
         action: String,
         epoch: EpochId,
         amount: U128
+    }
+);
+// CT-123 (0.0.18): a `pending` member with no stake was removed (`by_owner` false: garbage collected after the pending time).
+event!(
+    "member_removed",
+    MemberRemoved {
+        account_id: AccountId,
+        by_owner: bool
+    }
+);
+// CT-126 (0.0.18): the locker of a sold account registered; the escrow of the account is `held`.
+event!(
+    "account_escrow_held",
+    AccountEscrowHeld {
+        grant_id: u64,
+        account_id: AccountId
     }
 );
 event!(
@@ -1209,6 +1228,22 @@ mod tests {
                 .to_log(),
             ),
             (
+                MemberRemoved::NAME,
+                MemberRemoved {
+                    account_id: a.clone(),
+                    by_owner: true,
+                }
+                .to_log(),
+            ),
+            (
+                AccountEscrowHeld::NAME,
+                AccountEscrowHeld {
+                    grant_id: 7,
+                    account_id: a.clone(),
+                }
+                .to_log(),
+            ),
+            (
                 IntentPosted::NAME,
                 IntentPosted {
                     intent_hash: [3u8; 32].into(),
@@ -1789,6 +1824,8 @@ mod tests {
                 "auto_settled",
                 "relayer_fee_paid",
                 "relayer_fee_failed",
+                "member_removed",
+                "account_escrow_held",
             ]
         );
     }

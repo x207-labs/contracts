@@ -154,9 +154,7 @@ impl X207Circle {
         if self.members.contains_key(&account_id) {
             env::panic_str(&format!("ERR_ALREADY_MEMBER: {account_id}"));
         }
-        if self.member_count >= MAX_MEMBERS {
-            env::panic_str(&format!("ERR_MAX_MEMBERS: {MAX_MEMBERS}"));
-        }
+        self.make_room();
 
         let joined_at = env::block_timestamp();
         let member = Member {

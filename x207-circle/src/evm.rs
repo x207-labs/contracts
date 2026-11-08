@@ -13,7 +13,7 @@ use near_sdk::{env, near, require, AccountId, NearToken, Promise, PromiseOrValue
 
 use crate::canonical::Voucher;
 use crate::events::{MemberJoined, X207Event};
-use crate::member::{Member, MemberStatus, MemberView, JOIN_STORAGE_DEPOSIT, MAX_MEMBERS};
+use crate::member::{Member, MemberStatus, MemberView, JOIN_STORAGE_DEPOSIT};
 
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 use crate::types::{ClaimDestination, EpochId};
@@ -94,6 +94,15 @@ fn decode_hex(s: &str) -> Option<Vec<u8>> {
 /// Cheap shape test before the storage read: only `0x` + 40 characters can be an EVM member id.
 fn looks_evm(id: &AccountId) -> bool {
     id.as_str().len() == 42 && id.as_str().starts_with("0x")
+}
+
+/// Drops the sidecar record of an EVM member that was removed (CT-123); a no-op for any other account.
+pub(crate) fn forget_signer(id: &AccountId) {
+    if looks_evm(id) {
+        let mut signers = evm_signers();
+        signers.remove(id);
+        signers.flush();
+    }
 }
 
 pub fn is_evm_member(id: &AccountId) -> bool {
@@ -471,9 +480,6 @@ impl X207Circle {
         if self.members.contains_key(&account_id) {
             env::panic_str(&format!("ERR_ALREADY_MEMBER: {account_id}"));
         }
-        if self.member_count >= MAX_MEMBERS {
-            env::panic_str(&format!("ERR_MAX_MEMBERS: {MAX_MEMBERS}"));
-        }
         check_deadline(deadline);
         let circle = env::current_account_id();
         let message = ActionMsg {
@@ -491,6 +497,8 @@ impl X207Circle {
             recover(&action_digest(&message), &signature) == Some(raw),
             "ERR_BAD_EVM_SIG: eip712 verification failed"
         );
+        // CT-123: after the signature, so that only the owner of the address can make the circle remove a stale row to take its slot
+        self.make_room();
 
         let sponsor = env::predecessor_account_id();
         let joined_at = env::block_timestamp();
