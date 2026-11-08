@@ -95,6 +95,30 @@ pub(crate) fn set_locker_code_hashes(hashes: &[String]) {
     }
 }
 
+fn lock_marker_key(account: &AccountId) -> Vec<u8> {
+    [b"x207_acct_lock_".as_slice(), account.as_str().as_bytes()].concat()
+}
+
+/// A member account whose escrow is open (`held`, `completing`, `stuck`) cannot add debt: the seller still owns the voucher key, and the buyer inherits
+/// whatever is registered until the account is delivered or taken back. Set by `account_on_lock`, cleared when the escrow ends.
+pub(crate) fn mark_locked(account: &AccountId, grant_id: GrantId) {
+    env::storage_write(&lock_marker_key(account), &grant_id.to_le_bytes());
+}
+
+pub(crate) fn unmark_locked(account: &AccountId) {
+    env::storage_remove(&lock_marker_key(account));
+}
+
+/// `ERR_ACCOUNT_LOCKED` when the account is a payer in a voucher while its own escrow is open.
+pub fn assert_not_locked(account: &AccountId) {
+    require!(
+        !env::storage_has_key(&lock_marker_key(account)),
+        format!(
+            "ERR_ACCOUNT_LOCKED: {account} is in an open account escrow and registers no voucher"
+        )
+    );
+}
+
 /// `{"account_id": "<account>"}`: the scope of an account grant. Nothing else may be in it.
 pub fn account_scope(scope: &str) -> Result<AccountId, String> {
     let value: near_sdk::serde_json::Value =
@@ -111,7 +135,38 @@ pub fn account_scope(scope: &str) -> Result<AccountId, String> {
         .map_err(|_| "scope.account_id is not an account id".to_string())
 }
 
+/// How far back `assert_epochs_settled` looks. Older rows are pruned long before; a circle that kept 32 unfinalized epochs is stalled and sells nothing.
+const SETTLED_LOOKBACK: u64 = 32;
+
 impl X207Circle {
+    /// A member account carries stake, debt and a limit, and the buyer inherits them. The debt of an epoch is final only when the epoch is `Finalized`, and
+    /// `current_epoch` moves at the cutoff, not at the finalization. So the sale waits until the locked epoch has ended (`current_epoch > locked_epoch`) and
+    /// every epoch before the open one that the circle still keeps is `Finalized` (`ERR_ESCROW_EPOCH_WAIT`).
+    pub(crate) fn assert_epochs_settled(&self, locked_epoch: EpochId) {
+        require!(
+            self.current_epoch > locked_epoch,
+            format!(
+                "ERR_ESCROW_EPOCH_WAIT: locked in epoch {locked_epoch}, a member account is sold after that epoch ended (now {})",
+                self.current_epoch
+            )
+        );
+        for epoch in (1..self.current_epoch)
+            .rev()
+            .take(SETTLED_LOOKBACK as usize)
+        {
+            match self.epochs.get(&epoch) {
+                None => break,
+                Some(e) => require!(
+                    e.phase == crate::clearing::EpochPhase::Finalized,
+                    format!(
+                        "ERR_ESCROW_EPOCH_WAIT: epoch {epoch} is {:?}; a member account is sold when all earlier epochs are finalized",
+                        e.phase
+                    )
+                ),
+            }
+        }
+    }
+
     /// Rules of an account that is sold. `account` is the sold account, `grantor` the seller (a different account: the buyer pays the grantor, so a grantor that
     /// sold its own account would be paid by the buyer into the account that the buyer receives).
     ///

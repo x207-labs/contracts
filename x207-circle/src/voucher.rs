@@ -189,6 +189,8 @@ impl X207Circle {
         // CT-095: a freeze stops vouchers only from the epoch after the one in which it took effect
         crate::freeze::assert_not_frozen_for_voucher(&voucher.payer, epoch_id);
         crate::freeze::assert_not_frozen_for_voucher(&voucher.payee, epoch_id);
+        // CT-126 (0.0.18): a member account under an open account escrow adds no debt for the buyer to inherit
+        crate::account_escrow::assert_not_locked(&voucher.payer);
         for m in [&payer, &payee] {
             if let Some(exit) = m.exit_requested_epoch {
                 require!(

@@ -500,6 +500,9 @@ impl X207Circle {
         );
         crate::freeze::assert_not_frozen(&grant.grantor, "sell an account");
         self.assert_account_sellable(&account, &grant.grantor, &grant.asset_type);
+        if self.members.contains_key(&account) {
+            crate::account_escrow::mark_locked(&account, grant_id);
+        }
         crate::account_escrow::save_account_escrow(
             grant_id,
             crate::account_escrow::AccountEscrow {
@@ -589,13 +592,7 @@ impl X207Circle {
                         key.curve_type() == near_sdk::CurveType::ED25519,
                         "ERR_BAD_PUBKEY: the key of the buyer of a member account is ed25519"
                     );
-                    require!(
-                        self.current_epoch > account.locked_epoch,
-                        format!(
-                            "ERR_ESCROW_EPOCH_WAIT: locked in epoch {}, a member account is sold from the next epoch (now {})",
-                            account.locked_epoch, self.current_epoch
-                        )
-                    );
+                    self.assert_epochs_settled(account.locked_epoch);
                 }
                 account.delivery_pubkey = Some(key);
             }
@@ -680,6 +677,25 @@ impl X207Circle {
             env::predecessor_account_id() == grant.grantor,
             format!("ERR_ESCROW_NOT_GRANTOR: only {} cancels", grant.grantor)
         );
+        self.cancel_inner(grant_id, grant)
+    }
+
+    /// Anyone may take an account back to the seller once the grant ran out (CT-126): the key goes only to the `return_pubkey` that the locker recorded at the
+    /// lock, so the caller gains nothing, and a seller who lost its grantor account is not left with a locked account. Same rules as `cancel_escrow`: only
+    /// after `expires_at`, only while the escrow is `held` (so a second call, or a call while a sale completes, is refused). Refused for token escrows
+    /// (`ERR_ESCROW_NOT_ACCOUNT`).
+    pub fn cancel_expired_account_escrow(&mut self, grant_id: GrantId) -> Promise {
+        let grant = load_grant(grant_id);
+        require!(
+            crate::account_escrow::load_account_escrow(grant_id).is_some(),
+            format!("ERR_ESCROW_NOT_ACCOUNT: grant {grant_id} holds no account")
+        );
+        self.cancel_inner(grant_id, grant)
+    }
+}
+
+impl X207Circle {
+    fn cancel_inner(&mut self, grant_id: GrantId, grant: crate::grant::AccessGrant) -> Promise {
         let mut escrow = Held::load(grant_id)
             .unwrap_or_else(|| env::panic_str(&format!("ERR_ESCROW_UNKNOWN: grant {grant_id}")));
         require!(
@@ -702,7 +718,10 @@ impl X207Circle {
         escrow.save(grant_id);
         call
     }
+}
 
+#[near]
+impl X207Circle {
     /// Callback of the `nft_transfer` of `complete_escrow` or `cancel_escrow`.
     #[private]
     pub fn on_escrow_resolved(&mut self, grant_id: GrantId, step: EscrowStep) {
@@ -729,6 +748,9 @@ impl X207Circle {
                     if let Some(member) = self.members.get_mut(&e.account_id) {
                         member.pubkey_voucher = key.clone();
                     }
+                }
+                if let Held::Account(e) = &escrow {
+                    crate::account_escrow::unmark_locked(&e.account_id);
                 }
                 crate::grant::activate(&mut grant, buyer.clone(), delivery_pubkey.clone());
                 escrow.save(grant_id);
@@ -762,6 +784,9 @@ impl X207Circle {
                 .emit();
             }
             (EscrowStep::Cancel, true) => {
+                if let Held::Account(e) = &escrow {
+                    crate::account_escrow::unmark_locked(&e.account_id);
+                }
                 escrow.set_state(EscrowState::Cancelled);
                 escrow.save(grant_id);
                 crate::grant::close(&mut grant, GrantStatus::Revoked);
@@ -2811,6 +2836,54 @@ mod tests {
         assert!(text.contains("ERR_BAD_PUBKEY"), "{text}");
     }
 
+    // TC-CT-126-12 (#14, coordinator point 2): the epoch of the lock has ended, but the debt is final only when every earlier epoch is finalized
+    #[test]
+    fn a_member_account_waits_until_the_earlier_epochs_are_finalized() {
+        use crate::clearing::{Epoch, EpochPhase};
+        let mut c = circle();
+        member(&mut c, SOLD, crate::member::MemberStatus::Active);
+        crate::grant::store_grant_for_test(&grant_account("near:member_account"));
+        as_locker(5_000);
+        c.account_on_lock(GRANT);
+        let buy = |c: &mut X207Circle| {
+            testing_env!(VMContextBuilder::new()
+                .predecessor_account_id(acc("bob.near"))
+                .block_timestamp(5_000)
+                .build());
+            refusal(|| {
+                c.complete_account_escrow(
+                    GRANT,
+                    voucher(),
+                    "sig".into(),
+                    BUYER_KEY.parse().unwrap(),
+                )
+            })
+        };
+        // epoch 1 is still the open one: the lock epoch has not ended
+        assert!(buy(&mut c).contains("ERR_ESCROW_EPOCH_WAIT"));
+        // epoch 2 is open, epoch 1 has closed but is still clearing: the debt can still change
+        c.current_epoch = 2;
+        let phase = |c: &mut X207Circle, epoch: u64, phase: EpochPhase| {
+            if c.epochs.get(&epoch).is_none() {
+                c.epochs
+                    .insert(epoch, Epoch::open(epoch, 1_000, 2_000, Params::default()));
+            }
+            c.epochs.get_mut(&epoch).unwrap().phase = phase;
+        };
+        phase(&mut c, 1, EpochPhase::Clearing);
+        assert!(buy(&mut c).contains("ERR_ESCROW_EPOCH_WAIT"));
+        phase(&mut c, 1, EpochPhase::PaymentWindow);
+        assert!(buy(&mut c).contains("ERR_ESCROW_EPOCH_WAIT"));
+        // epoch 1 finalized, but epoch 2 (before the open epoch 3) is not
+        phase(&mut c, 1, EpochPhase::Finalized);
+        c.current_epoch = 3;
+        phase(&mut c, 2, EpochPhase::PaymentWindow);
+        assert!(buy(&mut c).contains("ERR_ESCROW_EPOCH_WAIT"));
+        // everything before the open epoch is finalized: the next refusal is not about epochs
+        phase(&mut c, 2, EpochPhase::Finalized);
+        assert!(!buy(&mut c).contains("ERR_ESCROW_EPOCH_WAIT"));
+    }
+
     fn completing_account(c: &mut X207Circle, member_account: bool) -> Snapshot {
         let snapshot = registered(c, 10 * CREDIT);
         let asset = if member_account {
@@ -2930,6 +3003,118 @@ mod tests {
             EscrowState::Cancelled
         );
         assert_eq!(load_grant(GRANT).status, GrantStatus::Revoked);
+    }
+
+    // TC-CT-126-13 (coordinator point 3): anyone may cancel an expired account escrow, once, never early, never for a token, never after a sale started
+    #[test]
+    fn anyone_cancels_an_expired_account_escrow_once() {
+        let mut c = circle();
+        crate::grant::store_grant_for_test(&grant_account("near:account"));
+        as_locker(5_000);
+        c.account_on_lock(GRANT);
+        let as_eve = |now: u64| {
+            testing_env!(VMContextBuilder::new()
+                .predecessor_account_id(acc("eve.near"))
+                .block_timestamp(now)
+                .build());
+        };
+        as_eve(5_000);
+        assert!(
+            refusal(|| c.cancel_expired_account_escrow(GRANT)).contains("ERR_ESCROW_NOT_EXPIRED")
+        );
+        as_eve(9_000_000_000_001);
+        drop(c.cancel_expired_account_escrow(GRANT)); // a Promise is scheduled when it is dropped
+        assert_eq!(
+            c.get_account_escrow(GRANT).unwrap().state,
+            EscrowState::Cancelling
+        );
+        // (b) the only key that comes back is the return key: the circle sends give_back, which carries no key argument
+        let receipts = near_sdk::test_utils::get_created_receipts();
+        let call = format!("{:?}", receipts.first().expect("a receipt"));
+        let bytes = |name: &str| {
+            name.bytes()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        assert!(
+            call.contains(&bytes("give_back")) && !call.contains(&bytes("release")),
+            "{call}"
+        );
+        assert_eq!(receipts[0].receiver_id.as_str(), SOLD);
+        // (c) a second call is refused; (d) so is a sale that arrives after the cancel started
+        assert!(refusal(|| c.cancel_expired_account_escrow(GRANT)).contains("ERR_ESCROW_NOT_HELD"));
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("bob.near"))
+            .block_timestamp(9_000_000_000_001)
+            .build());
+        let text = refusal(|| {
+            c.complete_account_escrow(GRANT, voucher(), "sig".into(), BUYER_KEY.parse().unwrap())
+        });
+        assert!(
+            text.contains("ERR_ESCROW_NOT_HELD") || text.contains("ERR_GRANT_EXPIRED"),
+            "{text}"
+        );
+    }
+
+    // TC-CT-126-15: a stranger does not cancel the escrow of a token through the account method
+    #[test]
+    fn a_stranger_cancels_no_token_escrow() {
+        let mut c2 = circle();
+        crate::grant::store_grant_for_test(&grant_offered());
+        save(
+            GRANT,
+            Escrow {
+                nft_contract: acc("nft.near"),
+                token_id: "t1".into(),
+                state: EscrowState::Held,
+                buyer: None,
+                snapshot: None,
+            },
+        );
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("eve.near"))
+            .block_timestamp(9_000_000_000_001)
+            .build());
+        assert!(
+            refusal(|| c2.cancel_expired_account_escrow(GRANT)).contains("ERR_ESCROW_NOT_ACCOUNT")
+        );
+    }
+
+    // TC-CT-126-14 (coordinator point 1): a member account under an open escrow registers no voucher as payer; the lock ends when the account is delivered or taken back
+    #[test]
+    fn an_account_under_escrow_adds_no_debt() {
+        let mut c = circle();
+        member(&mut c, SOLD, crate::member::MemberStatus::Active);
+        crate::grant::store_grant_for_test(&grant_account("near:member_account"));
+        as_locker(5_000);
+        c.account_on_lock(GRANT);
+        let text = refusal(|| crate::account_escrow::assert_not_locked(&acc(SOLD)));
+        assert!(text.contains("ERR_ACCOUNT_LOCKED"), "{text}");
+        crate::account_escrow::assert_not_locked(&acc("bob.near"));
+        // a failed delivery leaves the escrow held and the lock in place
+        let mut c = circle();
+        completing_account(&mut c, true);
+        crate::account_escrow::mark_locked(&acc(SOLD), GRANT);
+        callback(&mut c, PromiseResult::Failed);
+        assert_eq!(
+            c.get_account_escrow(GRANT).unwrap().state,
+            EscrowState::Held
+        );
+        assert!(
+            refusal(|| crate::account_escrow::assert_not_locked(&acc(SOLD)))
+                .contains("ERR_ACCOUNT_LOCKED")
+        );
+        // a delivery ends it, and the key of the member is the key of the buyer
+        let mut c = circle();
+        completing_account(&mut c, true);
+        crate::account_escrow::mark_locked(&acc(SOLD), GRANT);
+        callback(&mut c, PromiseResult::Successful(vec![]));
+        crate::account_escrow::assert_not_locked(&acc(SOLD));
+        assert_eq!(
+            c.members.get(&acc(SOLD)).unwrap().pubkey_voucher,
+            BUYER_KEY.parse::<PublicKey>().unwrap()
+        );
     }
 
     // TC-CT-126-10: the list of locker code hashes is the owner's, short, base58 and without duplicates

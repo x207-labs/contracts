@@ -96,18 +96,15 @@ impl World {
         return_key: &PublicKey,
         delete: &[PublicKey],
     ) -> anyhow::Result<near_workspaces::result::ExecutionFinalResult> {
-        let mut batch = sold
-            .batch(sold.id())
-            .deploy(&locker_wasm())
-            .call(
-                near_workspaces::operations::Function::new("new")
-                    .args_json(json!({
-                        "circle": self.f.circle.contract.id(),
-                        "grant_id": grant_id,
-                        "return_pubkey": return_key.to_string(),
-                    }))
-                    .gas(Gas::from_tgas(100)),
-            );
+        let mut batch = sold.batch(sold.id()).deploy(&locker_wasm()).call(
+            near_workspaces::operations::Function::new("new")
+                .args_json(json!({
+                    "circle": self.f.circle.contract.id(),
+                    "grant_id": grant_id,
+                    "return_pubkey": return_key.to_string(),
+                }))
+                .gas(Gas::from_tgas(100)),
+        );
         for key in delete {
             batch = batch.delete_key(key.clone());
         }
@@ -264,11 +261,10 @@ async fn only_the_circle_can_release_or_give_back() -> anyhow::Result<()> {
         assert!(text.contains("ERR_LOCKER_NOT_CIRCLE"), "{method}: {text}");
     }
     // `account_on_lock` called by a plain account that is not the one named in the grant
-    let wrong = w
-        .f
-        .circle
-        .call_as(&carol, "account_on_lock", json!({"grant_id": id}))
-        .await?;
+    let wrong =
+        w.f.circle
+            .call_as(&carol, "account_on_lock", json!({"grant_id": id}))
+            .await?;
     assert!(failure_text(&wrong)
         .unwrap_or_default()
         .contains("ERR_ESCROW_ACCOUNT_MISMATCH"));
@@ -290,19 +286,17 @@ async fn cancel_after_expiry_returns_the_key() -> anyhow::Result<()> {
         .await?;
     assert!(lock.is_success(), "{:?}", failure_text(&lock));
     let alice = w.alice.clone();
-    let early = w
-        .f
-        .circle
-        .call_as(&alice, "cancel_escrow", json!({"grant_id": id}))
-        .await?;
+    let early =
+        w.f.circle
+            .call_as(&alice, "cancel_escrow", json!({"grant_id": id}))
+            .await?;
     assert!(failure_text(&early).is_some(), "not before the expiry");
     let target = w.f.circle.now_ns().await? + 2 * HOUR_NS;
     w.f.circle.advance_to(target).await?;
-    let cancel = w
-        .f
-        .circle
-        .call_as(&alice, "cancel_escrow", json!({"grant_id": id}))
-        .await?;
+    let cancel =
+        w.f.circle
+            .call_as(&alice, "cancel_escrow", json!({"grant_id": id}))
+            .await?;
     assert!(cancel.is_success(), "{:?}", failure_text(&cancel));
     assert_eq!(w.locker_state(&sold_id).await?, "returned");
     assert_eq!(w.keys(&sold_id).await?, vec![seller_key.to_string()]);
@@ -335,7 +329,12 @@ async fn a_member_offered_as_a_plain_account_gets_its_key_back() -> anyhow::Resu
     assert!(wrong.is_success(), "the grant is checked at the lock");
     let wrong_id = wrong.json::<u64>()?;
     let refused = w
-        .lock(&dan, wrong_id, &seller_key, &[dan.secret_key().public_key()])
+        .lock(
+            &dan,
+            wrong_id,
+            &seller_key,
+            &[dan.secret_key().public_key()],
+        )
         .await?;
     assert!(refused.is_success());
     assert_eq!(
@@ -357,8 +356,11 @@ async fn the_member_key_is_rotated_after_the_wait() -> anyhow::Result<()> {
     assert!(w.f.stake(&eve, 150 * CREDIT).await?.is_success());
     let eve_id = eve.id().clone();
     let (_, seller_key) = fresh_key();
-    let (_, buyer_key) = fresh_key();
-    let id = w.offer("near:member_account", &eve_id, 72 * HOUR_NS).await?;
+    // the buyer's key is one whose signing key the fixture holds, so that its vouchers can be signed below
+    let buyer_key: PublicKey = w.f.circle.key_for("neweve").parse().unwrap();
+    let id = w
+        .offer("near:member_account", &eve_id, 72 * HOUR_NS)
+        .await?;
     let lock = w
         .lock(&eve, id, &seller_key, &[eve.secret_key().public_key()])
         .await?;
@@ -375,7 +377,28 @@ async fn the_member_key_is_rotated_after_the_wait() -> anyhow::Result<()> {
     );
     assert!(w.keys(&eve_id).await?.is_empty());
 
+    // while the account is held the seller's voucher key adds no debt (ERR_ACCOUNT_LOCKED), whoever submits the voucher
+    let epoch_now = w.f.circle.view("get_epoch", json!({})).await?["epoch"]
+        .as_u64()
+        .unwrap();
+    let locked =
+        w.f.circle
+            .register("eve", "carol", epoch_now, CREDIT)
+            .await?;
+    assert!(
+        failure_text(&locked)
+            .unwrap_or_default()
+            .contains("ERR_ACCOUNT_LOCKED"),
+        "{:?}",
+        failure_text(&locked)
+    );
+
     idle_epoch_finalized(&w.f).await?;
+    let epoch_now = w.f.circle.view("get_epoch", json!({})).await?["epoch"]
+        .as_u64()
+        .unwrap();
+    // signed with the old key before the sale, submitted after it
+    let (old_voucher, old_signature) = w.f.circle.next_voucher("eve", "carol", epoch_now, CREDIT);
     let done = w.buy(id, &buyer_key).await?;
     assert!(done.is_success(), "{:?}", failure_text(&done));
     assert_eq!(w.keys(&eve_id).await?, vec![buyer_key.to_string()]);
@@ -385,5 +408,92 @@ async fn the_member_key_is_rotated_after_the_wait() -> anyhow::Result<()> {
         buyer_key.to_string(),
         "the member key of eve is the key of the buyer"
     );
+    let keeper = w.f.circle.keeper.clone();
+    let late =
+        w.f.circle
+            .call_as(
+                &keeper,
+                "register_cumulative",
+                json!({"voucher": old_voucher, "signature": old_signature}),
+            )
+            .await?;
+    assert!(
+        failure_text(&late).is_some(),
+        "a voucher signed by the old key before the sale is refused after it"
+    );
+    // a voucher signed by the old key after the sale is refused as well; one signed by the new key is accepted
+    let after =
+        w.f.circle
+            .register("eve", "carol", epoch_now, CREDIT)
+            .await?;
+    assert!(
+        failure_text(&after).is_some(),
+        "the old key adds no debt after the sale"
+    );
+    let new_signing = w.f.circle.keys["neweve"].clone();
+    w.f.circle.keys.insert("eve".to_string(), new_signing);
+    let fresh =
+        w.f.circle
+            .register("eve", "carol", epoch_now, 2 * CREDIT)
+            .await?;
+    assert!(
+        fresh.is_success(),
+        "the key of the buyer registers: {:?}",
+        failure_text(&fresh)
+    );
+    Ok(())
+}
+
+// TC-CT-127-08 (coordinator point 3): anyone cancels an expired account escrow once; the key goes to the return key only
+#[tokio::test]
+async fn a_stranger_cancels_an_expired_account_escrow_once() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let sold = w.f.account("sold").await?;
+    let sold_id = sold.id().clone();
+    let (_, seller_key) = fresh_key();
+    let id = w.offer("near:account", &sold_id, HOUR_NS).await?;
+    let lock = w
+        .lock(&sold, id, &seller_key, &[sold.secret_key().public_key()])
+        .await?;
+    assert!(lock.is_success(), "{:?}", failure_text(&lock));
+    let carol = w.f.account("carol").await?;
+    let early =
+        w.f.circle
+            .call_as(
+                &carol,
+                "cancel_expired_account_escrow",
+                json!({"grant_id": id}),
+            )
+            .await?;
+    assert!(failure_text(&early)
+        .unwrap_or_default()
+        .contains("ERR_ESCROW_NOT_EXPIRED"));
+    let target = w.f.circle.now_ns().await? + 2 * HOUR_NS;
+    w.f.circle.advance_to(target).await?;
+    let cancel =
+        w.f.circle
+            .call_as(
+                &carol,
+                "cancel_expired_account_escrow",
+                json!({"grant_id": id}),
+            )
+            .await?;
+    assert!(cancel.is_success(), "{:?}", failure_text(&cancel));
+    assert_eq!(w.locker_state(&sold_id).await?, "returned");
+    assert_eq!(
+        w.keys(&sold_id).await?,
+        vec![seller_key.to_string()],
+        "the key goes to the seller's return key, not to the caller"
+    );
+    let again =
+        w.f.circle
+            .call_as(
+                &carol,
+                "cancel_expired_account_escrow",
+                json!({"grant_id": id}),
+            )
+            .await?;
+    assert!(failure_text(&again).is_some(), "not twice");
+    assert_eq!(w.keys(&sold_id).await?, vec![seller_key.to_string()]);
     Ok(())
 }

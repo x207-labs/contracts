@@ -1,0 +1,226 @@
+//! CT-128 in near-sandbox (0.0.18, CT-123): an EVM member that joined and never staked is removed again, and its sponsor gets the join deposit back.
+//! The owner removes it at once; a stranger may not before 7 days, and may after; a member with stake is never removed.
+//!
+//! Needs `cargo near build non-reproducible-wasm` first. EIP-712 helpers as in `ct117_relayer_fee.rs`.
+
+mod common;
+
+use common::circle::{events, failure_text, CREDIT};
+use common::funded::Funded;
+use near_workspaces::types::{Gas, NearToken};
+use near_workspaces::Account;
+use secp256k1::{Message, Secp256k1, SecretKey};
+use serde_json::{json, Value};
+use sha3::{Digest, Keccak256};
+
+const JOIN_DEPOSIT_MILLINEAR: u128 = 350;
+const SEVEN_DAYS_NS: u64 = 7 * 24 * 3_600 * 1_000_000_000;
+
+fn k(bytes: &[u8]) -> [u8; 32] {
+    Keccak256::digest(bytes).into()
+}
+
+fn ws(s: &str) -> [u8; 32] {
+    k(s.as_bytes())
+}
+
+fn w64(v: u64) -> [u8; 32] {
+    let mut w = [0u8; 32];
+    w[24..].copy_from_slice(&v.to_be_bytes());
+    w
+}
+
+fn w128(v: u128) -> [u8; 32] {
+    let mut w = [0u8; 32];
+    w[16..].copy_from_slice(&v.to_be_bytes());
+    w
+}
+
+fn digest(contract: &str, struct_hash: [u8; 32]) -> [u8; 32] {
+    let network = if contract.ends_with(".testnet") {
+        "testnet"
+    } else {
+        "mainnet"
+    };
+    let salt = k(format!("near:{network}:{contract}").as_bytes());
+    let domain = k(&[
+        k(b"EIP712Domain(string name,string version,bytes32 salt)"),
+        ws("x207"),
+        ws("1"),
+        salt,
+    ]
+    .concat());
+    k(&[&[0x19u8, 0x01][..], &domain, &struct_hash].concat())
+}
+
+fn sign(secret: &SecretKey, digest: [u8; 32]) -> String {
+    let (id, compact) = Secp256k1::new()
+        .sign_ecdsa_recoverable(&Message::from_slice(&digest).unwrap(), secret)
+        .serialize_compact();
+    let mut bytes = compact.to_vec();
+    bytes.push(27 + id.to_i32() as u8);
+    format!(
+        "eip712:0x{}",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
+}
+
+fn address(secret: &SecretKey) -> String {
+    let public =
+        secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), secret).serialize_uncompressed();
+    let hash = k(&public[1..]);
+    format!(
+        "0x{}",
+        hash[12..]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    )
+}
+
+fn join_signature(
+    secret: &SecretKey,
+    contract: &str,
+    member: &str,
+    terms: &str,
+    deadline: u64,
+) -> String {
+    let type_hash = ws("Action(string circle,string member,string action,uint64 epoch,string receiver,string termsHash,uint64 nonce,uint64 deadline,uint256 maxFee)");
+    let hash = k(&[
+        type_hash,
+        ws(contract),
+        ws(member),
+        ws("join"),
+        w64(0),
+        ws(""),
+        ws(terms),
+        w64(0),
+        w64(deadline),
+        w128(0),
+    ]
+    .concat());
+    sign(secret, digest(contract, hash))
+}
+
+struct World {
+    f: Funded,
+    relayer: Account,
+    member: String,
+}
+
+async fn world() -> anyhow::Result<World> {
+    let mut f = Funded::deploy(Some(Funded::params_short())).await?;
+    let contract = f.circle.contract.id().to_string();
+    let secret = SecretKey::from_slice(&[11u8; 32])?;
+    let member = address(&secret);
+    let deadline = f.circle.now_ns().await? / 1_000_000 + 3_600_000;
+    let relayer = f.account("relayer").await?;
+    let terms = "a".repeat(64);
+    let join = relayer
+        .call(f.circle.contract.id(), "join_evm")
+        .args_json(json!({"address": member, "terms_hash": terms, "deadline": deadline, "signature": join_signature(&secret, &contract, &member, &terms, deadline)}))
+        .deposit(NearToken::from_millinear(JOIN_DEPOSIT_MILLINEAR))
+        .gas(Gas::from_tgas(100))
+        .transact()
+        .await?;
+    assert!(join.is_success(), "join_evm: {:?}", failure_text(&join));
+    Ok(World { f, relayer, member })
+}
+
+impl World {
+    async fn member_view(&self) -> anyhow::Result<Value> {
+        self.f
+            .circle
+            .view("member", json!({"account_id": self.member}))
+            .await
+    }
+
+    async fn near_balance(&self) -> anyhow::Result<u128> {
+        Ok(self.relayer.view_account().await?.balance.as_yoctonear())
+    }
+}
+
+// TC-CT-128-01: the owner removes the pending EVM member; the sponsor gets the deposit back and the slot is free
+#[tokio::test]
+async fn the_owner_removes_a_pending_evm_member_and_the_sponsor_is_refunded() -> anyhow::Result<()>
+{
+    let mut w = world().await?;
+    assert_eq!(w.member_view().await?["status"], "pending");
+    let count_before = w.f.circle.view("get_circle", json!({})).await?["member_count"].as_u64();
+    let dao = w.f.account("dao").await?;
+    let before = w.near_balance().await?;
+    let removed =
+        w.f.circle
+            .call_as(&dao, "remove_pending", json!({"account_id": w.member}))
+            .await?;
+    assert!(removed.is_success(), "{:?}", failure_text(&removed));
+    assert!(events(&removed).iter().any(|(n, d)| n == "member_removed"
+        && d["account_id"] == w.member.as_str()
+        && d["by_owner"] == true));
+    assert!(w.member_view().await?.is_null());
+    let after = w.near_balance().await?;
+    assert!(
+        after - before >= NearToken::from_millinear(300).as_yoctonear(),
+        "the sponsor got the join deposit back: {before} -> {after}"
+    );
+    if let Some(count) = count_before {
+        let now = w.f.circle.view("get_circle", json!({})).await?["member_count"].as_u64();
+        assert_eq!(now, Some(count - 1));
+    }
+    Ok(())
+}
+
+// TC-CT-128-02: a stranger removes it only after 7 days; a member with stake is never removed
+#[tokio::test]
+async fn a_stranger_waits_seven_days_and_a_staked_member_stays() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let eve = w.f.account("eve").await?;
+    let early =
+        w.f.circle
+            .call_as(&eve, "remove_pending", json!({"account_id": w.member}))
+            .await?;
+    assert!(failure_text(&early)
+        .unwrap_or_default()
+        .contains("ERR_PENDING_TOO_YOUNG"));
+
+    // a member that has a stake is refused for everybody
+    let relayer = w.relayer.clone();
+    let stake =
+        w.f.transfer_call(
+            &w.f.usdt.clone(),
+            &relayer,
+            100 * CREDIT,
+            &json!({"action": "stake", "member_id": w.member}).to_string(),
+        )
+        .await?;
+    assert!(stake.is_success(), "stake: {:?}", failure_text(&stake));
+    let dao = w.f.account("dao").await?;
+    let staked =
+        w.f.circle
+            .call_as(&dao, "remove_pending", json!({"account_id": w.member}))
+            .await?;
+    assert!(failure_text(&staked)
+        .unwrap_or_default()
+        .contains("ERR_NOT_PENDING"));
+    assert!(!w.member_view().await?.is_null());
+    Ok(())
+}
+
+// TC-CT-128-03: with no stake, after 7 days anyone removes the row
+#[tokio::test]
+async fn after_seven_days_anyone_removes_an_unadmitted_row() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let target = w.f.circle.now_ns().await? + SEVEN_DAYS_NS + 3_600_000_000_000;
+    w.f.circle.advance_to(target).await?;
+    let eve = w.f.account("eve").await?;
+    let removed =
+        w.f.circle
+            .call_as(&eve, "remove_pending", json!({"account_id": w.member}))
+            .await?;
+    assert!(removed.is_success(), "{:?}", failure_text(&removed));
+    assert!(events(&removed)
+        .iter()
+        .any(|(n, d)| n == "member_removed" && d["by_owner"] == false));
+    assert!(w.member_view().await?.is_null());
+    Ok(())
+}

@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 60] = [
+const CHANGE_METHODS: [&str; 61] = [
     "new",
     "join",
     "ft_on_transfer",
@@ -93,6 +93,7 @@ const CHANGE_METHODS: [&str; 60] = [
     "remove_pending",
     "account_on_lock",
     "complete_account_escrow",
+    "cancel_expired_account_escrow",
     "set_locker_code_hashes",
 ];
 
@@ -145,7 +146,7 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 101] = [
+const SIGNATURES: [&str; 102] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "account_on_lock(grant_id:integer:uint64)-> []",
     "admit_member(account_id:string)-> []",
@@ -153,6 +154,7 @@ const SIGNATURES: [&str; 101] = [
     "apply_upgrade()->Promise []",
     "bond_locked(account_id:string)->string []",
     "cancel_escrow(grant_id:integer:uint64)->Promise []",
+    "cancel_expired_account_escrow(grant_id:integer:uint64)->Promise []",
     "cancel_freeze(account_id:string)-> []",
     "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
     "claim_evm(member:string,epoch:integer:uint64,receiver:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->Promise []",
