@@ -41,7 +41,7 @@ New methods:
 
 - `account_on_lock(grant_id)`: called by the locker. `predecessor` is the sold account. Checks: class A and `Offered` grant, the scope names `predecessor`, the grantor is a member and not frozen, no escrow exists yet, the grant has not expired. Records the escrow as `Held` with `locked_epoch = current_epoch`. Emits `account_escrow_held {grant_id, account_id}` (new event). A panic makes the locker return the account (see `on_registered`).
 - `complete_account_escrow(grant_id, voucher, signature, delivery_pubkey)`: same checks and the same registration as `complete_escrow` (the voucher pair is locked, `ERR_ESCROW_TOO_LATE` near the cutoff), plus the checks of 1.4, then `locker.release(grant_id, delivery_pubkey)` followed by `on_escrow_resolved`. The existing `complete_escrow` on an account escrow fails with `ERR_ESCROW_NEEDS_PUBKEY` (the old method has no key argument, so the ABI of 0.0.17 stays valid).
-- `cancel_escrow` and expiry: for an account escrow `cancel_escrow` calls `locker.give_back(grant_id)`. Cancel keeps its rule (grantor only, after `expires_at`). Added: when the sold account is the grantor itself (#14: the member sells its own account), the grantor has no keys while the locker holds them and cannot call `cancel_escrow` from that account. So once the grant expired, anyone may call a new `cancel_expired_account_escrow(grant_id)` that does the same as `cancel_escrow`. When the sold account is another account (#11 to #13), `cancel_escrow` by the grantor is the way and the new method is refused (`ERR_ESCROW_NOT_GRANTOR`).
+- `cancel_escrow` and expiry: for an account escrow `cancel_escrow` calls `locker.give_back(grant_id)`. Cancel keeps its rule (grantor only, after `expires_at`). Amended during the build: the grantor must differ from the sold account (`ERR_ACCOUNT_SELF`, checked in `offer_grant` and again in `account_on_lock`). The buyer pays the grantor, so a grantor that sold its own account would be paid into the account the buyer receives, and it could not call `cancel_escrow` while the locker holds its keys. For #14 the seller is therefore a second account of the same person (the grantor is a member) and `cancel_escrow` by the grantor always works. There is no `cancel_expired_account_escrow`.
 - `get_account_escrow(grant_id)`: view, like `get_escrow`.
 
 `on_escrow_resolved` gets the `Account` arm: delivered grants become `active` with the buyer and `delivery_pubkey`; a failed `release` is taken back exactly as for tokens.
@@ -82,8 +82,8 @@ Before the buyer calls `complete_account_escrow` the SDK checks over RPC: `view_
 
 ## 2. CT-123: fixes of the audit (A-CT-01, A-CT-02)
 
-- A-CT-01: `join_evm` applies the admission rule of `join` and `stake` before it takes a slot (a `dao` circle refuses an EVM join that is not admitted; `open` circles keep today's behaviour). `remove_pending(account_id)` (owner) removes a `pending` member with no stake, returns the join deposit to the `sponsor` and decrements `member_count`; a member who has become `active` or has stake is refused (`ERR_NOT_PENDING`). Event `member_removed {account_id}`. `member_count` also goes down for every removal of a pending member, so `MAX_MEMBERS` is a real count. The 64-join case is the first test.
-- A-CT-02: in the failure branch of `on_action_fee_resolved` the fee is credited back to the member when the member is `Exited` or `withdraw_pending` (claimable balance), not sent to the reserve.
+- A-CT-01 (amended during the build): admission is checked at the stake, after the join, so a check in `join_evm` would not close the hole. The fix is removal. `remove_pending(account_id)`: the owner removes a `pending` member without stake, debt or withdrawal at any time; anyone may remove one that was never admitted after 7 days (`PENDING_GC_AFTER_NS`). A join into a full circle (`join`, `join_evm`) first removes the oldest such row (`make_room`), after the signature check, so a flood of pending rows cannot hold all 64 slots for good. The join deposit of an EVM member goes back to its sponsor and `member_count` goes down. Events `member_removed {account_id, by_owner}`. `join_evm` is not stricter in `dao` circles. The 64-join case is covered by unit tests TC-CT-123-01..04.
+- A-CT-02 (amended): the planned credit to the stake of an `Exited` member would lock funds, because the stake of such a member can no longer be withdrawn. The reserve is kept; the path is documented as unreachable in normal flows and left as is.
 
 ## 3. CT-115: formatting
 
@@ -95,7 +95,7 @@ Before the buyer calls `complete_account_escrow` the SDK checks over RPC: `view_
 
 ## 5. ABI and compatibility
 
-- `INTERFACE_VERSION` 0.0.18; `abi.json` gains `account_on_lock`, `complete_account_escrow`, `cancel_expired_account_escrow`, `get_account_escrow`, `set_locker_code_hashes`, `get_locker_code_hashes`, `remove_pending`; events `account_escrow_held`, `member_removed`. No existing method changes its signature; `ct068_abi_freeze` counts are updated.
+- `INTERFACE_VERSION` 0.0.18; `abi.json` gains `account_on_lock`, `complete_account_escrow`, `get_account_escrow`, `set_locker_code_hashes`, `get_locker_code_hashes`, `remove_pending`; events `account_escrow_held`, `member_removed`. No existing method changes its signature; `ct068_abi_freeze` counts are updated.
 - No state migration: new storage keys only. A circle upgraded from 0.0.17 keeps all rows. `join_evm` becomes stricter in `dao` circles (documented).
 - The locker has its own reproducible wasm and its sha256 goes into the official list; its crate is built by the same `repro-build.sh` pattern.
 - The wasm of the circle gets a new sha256, a new `KNOWN_SHA256` entry and a new prebuilt, as for every release. 0.0.17 and the tag `v0.0.17` stay as they are.
@@ -112,5 +112,5 @@ Acceptance for the migration decision (owner, after the coordinator's review): a
 ## 7. Open points for the coordinator
 
 1. 1.4 adds a rotation of the member voucher key on delivery and an owner-registered `near:member_account` type. If the owner prefers no member sales in v1, #14 drops out and 1.4 becomes a single refusal.
-2. `cancel_expired_account_escrow` for member grantors is new behaviour (anyone may call it once the grant expired); the alternative is to leave the account stuck until the grantor's key returns, which only the circle can trigger.
+2. Closed: the grantor of an account sale must differ from the sold account, so cancel needs no new method (see 1.3).
 3. The allocator replacement in 4 depends on what near-sdk 5.30.1 offers; it is the one item that may end as "kept, reason recorded".
