@@ -960,6 +960,16 @@
       },
       {
         "kind": "view",
+        "name": "get_pending_gc_delay",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_pending_params",
         "result": {
           "serialization_type": "json",
@@ -2559,6 +2569,21 @@
               "name": "params",
               "type_schema": {
                 "$ref": "#/definitions/Params"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "set_pending_gc_delay",
+        "params": {
+          "args": [
+            {
+              "name": "seconds",
+              "type_schema": {
+                "type": "string"
               }
             }
           ],

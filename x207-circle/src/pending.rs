@@ -14,8 +14,21 @@ use crate::events::{MemberRemoved, X207Event};
 use crate::member::{MemberStatus, MAX_MEMBERS};
 use crate::state::{X207Circle, X207CircleExt};
 
-/// A `pending`, never admitted member without stake is garbage once it has waited this long (7 days).
+/// A `pending`, never admitted member without stake is garbage once it has waited this long (7 days) unless the owner set another delay
+/// (`set_pending_gc_delay`, between `MIN_PENDING_GC_SECS` and `MAX_PENDING_GC_SECS`).
 pub const PENDING_GC_AFTER_NS: u64 = 7 * 24 * 3_600 * 1_000_000_000;
+pub const MIN_PENDING_GC_SECS: u64 = 3_600;
+pub const MAX_PENDING_GC_SECS: u64 = 30 * 24 * 3_600;
+const PENDING_GC_KEY: &[u8] = b"x207_pending_gc_secs";
+
+/// The delay in force, in nanoseconds.
+pub fn pending_gc_after_ns() -> u64 {
+    env::storage_read(PENDING_GC_KEY)
+        .and_then(|b| <[u8; 8]>::try_from(b.as_slice()).ok())
+        .map_or(PENDING_GC_AFTER_NS, |b| {
+            u64::from_le_bytes(b).saturating_mul(1_000_000_000)
+        })
+}
 
 impl X207Circle {
     /// True for a row that is only a slot: `pending`, no stake, no debt, no withdrawal in flight.
@@ -59,7 +72,7 @@ impl X207Circle {
             .find(|id| {
                 self.is_empty_pending(id)
                     && self.members.get(*id).is_some_and(|m| {
-                        !m.admitted && now >= m.joined_at.saturating_add(PENDING_GC_AFTER_NS)
+                        !m.admitted && now >= m.joined_at.saturating_add(pending_gc_after_ns())
                     })
             })
             .cloned();
@@ -88,11 +101,30 @@ impl X207Circle {
         if !by_owner {
             let m = self.members.get(&account_id).expect("member checked above");
             require!(
-                !m.admitted && env::block_timestamp() >= m.joined_at.saturating_add(PENDING_GC_AFTER_NS),
+                !m.admitted
+                    && env::block_timestamp() >= m.joined_at.saturating_add(pending_gc_after_ns()),
                 format!("ERR_PENDING_TOO_YOUNG: only the owner removes {account_id} before it has been pending for 7 days or after it was admitted")
             );
         }
         self.drop_pending(&account_id, by_owner);
+    }
+
+    /// Owner only (the DAO). How long a never-admitted `pending` row waits before anyone may remove it, in seconds. Default 7 days; `ERR_BAD_GC_DELAY` outside
+    /// 1 hour to 30 days. `ERR_NOT_OWNER`.
+    pub fn set_pending_gc_delay(&mut self, seconds: near_sdk::json_types::U64) {
+        self.assert_owner();
+        require!(
+            (MIN_PENDING_GC_SECS..=MAX_PENDING_GC_SECS).contains(&seconds.0),
+            format!(
+                "ERR_BAD_GC_DELAY: between {MIN_PENDING_GC_SECS} and {MAX_PENDING_GC_SECS} seconds"
+            )
+        );
+        env::storage_write(PENDING_GC_KEY, &seconds.0.to_le_bytes());
+    }
+
+    /// The delay in force, in seconds.
+    pub fn get_pending_gc_delay(&self) -> near_sdk::json_types::U64 {
+        near_sdk::json_types::U64(pending_gc_after_ns() / 1_000_000_000)
     }
 }
 
@@ -225,6 +257,45 @@ mod tests {
             c.remove_pending(acc("m7.near"))
         }));
         assert!(admitted.contains("ERR_PENDING_TOO_YOUNG"), "{admitted}");
+    }
+
+    // TC-CT-123-05: the owner shortens the delay (1 hour at least, 30 days at most); the default stays 7 days
+    #[test]
+    fn tc_ct_123_05_the_owner_sets_the_gc_delay() {
+        use near_sdk::json_types::U64;
+        let mut c = full_circle();
+        assert_eq!(c.get_pending_gc_delay().0, 7 * 24 * 3_600);
+        as_caller("eve.near", NearToken::from_yoctonear(0), 6_000);
+        let denied = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.set_pending_gc_delay(U64(3_600))
+        }));
+        assert!(denied.contains("ERR_NOT_OWNER"), "{denied}");
+        as_caller("dao.near", NearToken::from_yoctonear(0), 6_000);
+        for bad in [0u64, 3_599, 30 * 24 * 3_600 + 1] {
+            let text = panic_text(std::panic::AssertUnwindSafe(|| {
+                c.set_pending_gc_delay(U64(bad))
+            }));
+            assert!(text.contains("ERR_BAD_GC_DELAY"), "{bad}: {text}");
+        }
+        c.set_pending_gc_delay(U64(3_600));
+        assert_eq!(c.get_pending_gc_delay().0, 3_600);
+        // a stranger now removes a row that is an hour old, not before
+        as_caller(
+            "eve.near",
+            NearToken::from_yoctonear(0),
+            5_000 + 3_000_000_000_000,
+        );
+        let early = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("m3.near"))
+        }));
+        assert!(early.contains("ERR_PENDING_TOO_YOUNG"), "{early}");
+        as_caller(
+            "eve.near",
+            NearToken::from_yoctonear(0),
+            5_000 + 3_600_000_000_000 + 100,
+        );
+        c.remove_pending(acc("m3.near"));
+        assert_eq!(c.member_count, MAX_MEMBERS - 1);
     }
 
     // TC-CT-123-04 (A-CT-01): 64 pending rows do not block a new join once the oldest is stale; before that the circle is full

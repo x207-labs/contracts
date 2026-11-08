@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use sha3::{Digest, Keccak256};
 
 const JOIN_DEPOSIT_MILLINEAR: u128 = 350;
-const SEVEN_DAYS_NS: u64 = 7 * 24 * 3_600 * 1_000_000_000;
+const HOUR_NS: u64 = 3_600_000_000_000;
 
 fn k(bytes: &[u8]) -> [u8; 32] {
     Keccak256::digest(bytes).into()
@@ -206,15 +206,22 @@ async fn a_stranger_waits_seven_days_and_a_staked_member_stays() -> anyhow::Resu
     Ok(())
 }
 
-// TC-CT-128-03: with no stake, after 7 days anyone removes the row. Ignored by default: a fast-forward of 7 days takes more than 10 minutes in the sandbox;
-// the unit tests TC-CT-123-03 and TC-CT-123-04 cover the same rule. Run it with `cargo test --test ct128_remove_pending -- --ignored`.
-#[ignore = "a seven-day fast-forward is too slow for the normal run"]
+// TC-CT-128-03: with no stake, once the delay ran out anyone removes the row. The delay is 7 days by default; the owner shortens it to the minimum of one hour
+// (`set_pending_gc_delay`) so that the sandbox reaches it in about 3,600 blocks. The 7-day default itself is checked by the unit tests TC-CT-123-03 and -05.
 #[tokio::test]
-async fn after_seven_days_anyone_removes_an_unadmitted_row() -> anyhow::Result<()> {
+async fn once_the_delay_ran_out_anyone_removes_an_unadmitted_row() -> anyhow::Result<()> {
     let mut w = world().await?;
-    let target = w.f.circle.now_ns().await? + SEVEN_DAYS_NS + 3_600_000_000_000;
-    // one long jump: nobody follows this chain through RPC, so the short jumps of the fixture are not needed for 7 days
-    w.f.circle.max_jump = 700_000;
+    let dao = w.f.account("dao").await?;
+    let set =
+        w.f.circle
+            .call_as(&dao, "set_pending_gc_delay", json!({"seconds": "3600"}))
+            .await?;
+    assert!(set.is_success(), "{:?}", failure_text(&set));
+    assert_eq!(
+        w.f.circle.view("get_pending_gc_delay", json!({})).await?,
+        json!("3600")
+    );
+    let target = w.f.circle.now_ns().await? + HOUR_NS + 60_000_000_000;
     w.f.circle.advance_to(target).await?;
     let eve = w.f.account("eve").await?;
     let removed =

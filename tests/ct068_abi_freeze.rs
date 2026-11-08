@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 61] = [
+const CHANGE_METHODS: [&str; 62] = [
     "new",
     "join",
     "ft_on_transfer",
@@ -95,10 +95,12 @@ const CHANGE_METHODS: [&str; 61] = [
     "complete_account_escrow",
     "cancel_expired_account_escrow",
     "set_locker_code_hashes",
+    "set_pending_gc_delay",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 41] = [
+const VIEWS: [&str; 42] = [
+    "get_pending_gc_delay",
     "get_account_escrow",
     "get_locker_code_hashes",
     "interface_version",
@@ -146,7 +148,7 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 102] = [
+const SIGNATURES: [&str; 104] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "account_on_lock(grant_id:integer:uint64)-> []",
     "admit_member(account_id:string)-> []",
@@ -186,6 +188,7 @@ const SIGNATURES: [&str; 102] = [
     "get_mt_escrow(grant_id:integer:uint64)->MtEscrowView|null []",
     "get_owner()->string []",
     "get_params()->Params []",
+    "get_pending_gc_delay()->string []",
     "get_pending_params()->PendingParams|null []",
     "get_pool()->PoolView []",
     "get_proposal(epoch:integer:uint64,from_index:integer:uint32,limit:integer:uint32)->ProposalView|null []",
@@ -241,6 +244,7 @@ const SIGNATURES: [&str; 102] = [
     "set_auto_settle_evm(member:string,enabled:boolean,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
     "set_locker_code_hashes(hashes:array<string>)-> []",
     "set_params(params:Params)-> []",
+    "set_pending_gc_delay(seconds:string)-> []",
     "settle_deal(bundle_id:integer:uint64)-> []",
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
     "solver_fee_balance(account_id:string)->string []",
