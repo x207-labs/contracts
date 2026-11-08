@@ -5,8 +5,11 @@
 //!   `PENDING_GC_AFTER_NS` and was never admitted.
 //! - A join into a full circle (`join`, `join_evm`) removes the oldest such row first (`make_room`), so the cap is a real count of live members.
 //!
-//! Only a row with no stake, no debt and no open withdrawal is removable, so nothing of a member is lost. The sponsor of an EVM member gets the join
-//! deposit back (`refund_sponsor`).
+//! Only a row with no stake, no debt and no open withdrawal is removable, so nothing of a member is lost. "Unadmitted pending" means: status `pending`, never
+//! admitted (`admitted` false: in a `dao` circle the owner did not call `admit_member`, in an `open` circle the member never staked, which is what admits it),
+//! stake 0, no debt, no exit or withdrawal. `make_room` is internal: only `join` and `join_evm` call it, in the transaction of the joiner, only when the circle
+//! holds `MAX_MEMBERS`, and it removes only the oldest such row that is older than the delay (7 days, owner-settable down to 1 hour). The join deposit is not
+//! paid back to the sponsor of an EVM member unless the owner removes the row (`refund_sponsor`), so squatting slots costs 0.35 NEAR per slot.
 
 use near_sdk::{env, near, require, AccountId};
 
@@ -50,7 +53,12 @@ impl X207Circle {
             self.member_index.swap_remove(index as u32);
         }
         self.member_count = self.member_count.saturating_sub(1);
-        crate::evm::refund_sponsor(account_id);
+        // The join deposit of a NEAR member is never paid back (it stays in the contract as storage reserve); the sponsor of an EVM member gets it back only
+        // when the owner removes the row. A removal by anyone else (after the delay, or by `make_room`) keeps it, so a squatter pays 0.35 NEAR for every slot
+        // it holds, for NEAR and EVM rows alike.
+        if by_owner {
+            crate::evm::refund_sponsor(account_id);
+        }
         crate::evm::forget_signer(account_id);
         MemberRemoved {
             account_id: account_id.clone(),

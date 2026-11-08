@@ -224,6 +224,7 @@ async fn once_the_delay_ran_out_anyone_removes_an_unadmitted_row() -> anyhow::Re
     let target = w.f.circle.now_ns().await? + HOUR_NS + 60_000_000_000;
     w.f.circle.advance_to(target).await?;
     let eve = w.f.account("eve").await?;
+    let sponsor_before = w.near_balance().await?;
     let removed =
         w.f.circle
             .call_as(&eve, "remove_pending", json!({"account_id": w.member}))
@@ -233,5 +234,79 @@ async fn once_the_delay_ran_out_anyone_removes_an_unadmitted_row() -> anyhow::Re
         .iter()
         .any(|(n, d)| n == "member_removed" && d["by_owner"] == false));
     assert!(w.member_view().await?.is_null());
+    // coordinator point 1a: a removal by a stranger keeps the join deposit, so squatting a slot costs 0.35 NEAR
+    let sponsor_after = w.near_balance().await?;
+    assert!(
+        sponsor_after < sponsor_before + NearToken::from_millinear(10).as_yoctonear(),
+        "no refund to the sponsor: {sponsor_before} -> {sponsor_after}"
+    );
+    Ok(())
+}
+
+// TC-CT-128-04 (coordinator point 1): an attacker fills all 64 slots with pending rows; a legitimate member is refused while the rows are young, then joins
+// once the oldest empty row is older than the delay, and that row is evicted. Every squatted slot cost the 0.35 NEAR join deposit.
+#[tokio::test]
+async fn a_squatter_cannot_hold_the_circle_for_long() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let dao = w.f.account("dao").await?;
+    let set =
+        w.f.circle
+            .call_as(&dao, "set_pending_gc_delay", json!({"seconds": "3600"}))
+            .await?;
+    assert!(set.is_success(), "{:?}", failure_text(&set));
+    let root = w.f.circle.worker.root_account()?;
+    // `world` already holds one pending EVM row: 63 more fill the circle
+    let mut squatters = Vec::new();
+    for i in 0..63 {
+        let name = format!("sq{i}");
+        let account = root
+            .create_subaccount(&name)
+            .initial_balance(NearToken::from_near(1))
+            .transact()
+            .await?
+            .into_result()?;
+        let key = w.f.circle.key_for(&name);
+        let join = account
+            .call(w.f.circle.contract.id(), "join")
+            .args_json(json!({"circle_id": "agents-main", "pubkey_voucher": key, "terms_hash": "a".repeat(64)}))
+            .deposit(NearToken::from_millinear(350))
+            .gas(Gas::from_tgas(50))
+            .transact()
+            .await?;
+        assert!(join.is_success(), "{name}: {:?}", failure_text(&join));
+        squatters.push(account);
+    }
+    let circle = w.f.circle.view("get_circle", json!({})).await?;
+    assert_eq!(circle["member_count"].as_u64(), Some(64));
+
+    // a legitimate member is refused while every row is young
+    let late = w.f.account("late").await?;
+    let refused = w.f.join("late", Funded::join_deposit()).await?;
+    assert!(
+        failure_text(&refused)
+            .unwrap_or_default()
+            .contains("ERR_MAX_MEMBERS"),
+        "{:?}",
+        failure_text(&refused)
+    );
+    // after the delay the oldest empty row makes room: the legitimate member gets in, the circle stays at 64
+    let target = w.f.circle.now_ns().await? + HOUR_NS + 60_000_000_000;
+    w.f.circle.advance_to(target).await?;
+    let joined = w.f.join("late", Funded::join_deposit()).await?;
+    assert!(joined.is_success(), "{:?}", failure_text(&joined));
+    assert!(events(&joined).iter().any(|(n, d)| n == "member_removed"
+        && d["account_id"] == w.member.as_str()
+        && d["by_owner"] == false));
+    assert!(w.member_view().await?.is_null(), "the oldest row went");
+    assert_eq!(
+        w.f.circle.view("get_circle", json!({})).await?["member_count"].as_u64(),
+        Some(64)
+    );
+    assert_eq!(
+        w.f.circle
+            .view("member", json!({"account_id": late.id()}))
+            .await?["status"],
+        "pending"
+    );
     Ok(())
 }
