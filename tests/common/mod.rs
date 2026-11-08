@@ -120,7 +120,9 @@ pub mod circle {
 
         /// Same, with `usdt` as the token account the contract accepts.
         pub async fn deploy_with(params: Value, usdt: String) -> anyhow::Result<Circle> {
-            let worker = near_workspaces::sandbox().await?;
+            // The sandbox node is pinned to 2.13.4 (the one of near-workspaces 0.23): with the 2.14.0 of near-workspaces 0.24 the
+            // BE-022 indexer test halts every run with "UnknownBlockError ... garbage collected" (3 of 3 runs, also on a quiet machine).
+            let worker = near_workspaces::sandbox_with_version("2.13.4").await?;
             let contract = worker
                 .dev_deploy(&std::fs::read("target/near/x207_circle.wasm")?)
                 .await?;
@@ -601,7 +603,7 @@ pub mod funded {
         }
 
         async fn deploy_inner(params: Option<Value>, with_intents: bool) -> anyhow::Result<Funded> {
-            let worker = near_workspaces::sandbox().await?;
+            let worker = near_workspaces::sandbox_with_version("2.13.4").await?;
             let usdt = token(&worker).await?;
             let palsu = token(&worker).await?;
             let wasm = std::fs::read("target/near/x207_circle.wasm")?;
