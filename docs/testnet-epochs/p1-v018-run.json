@@ -298,14 +298,6 @@
       "value": null
     },
     {
-      "label": "complete_account_escrow #14 (member account delivered)",
-      "expectOk": true,
-      "ok": false,
-      "tx": "6jj8XNd9fqg3h7dKjzX5p8Y2FK2FoRSPUfp7sLf3cnQ4",
-      "failure": "Smart contract panicked: ERR_ESCROW_TOO_LATE: cutoff_at 1794156416929531615",
-      "value": null
-    },
-    {
       "label": "close_epoch 3",
       "expectOk": true,
       "ok": true,
@@ -352,6 +344,62 @@
       "tx": "6pfYS1JQAGF6crJ34u5XjUDNKX4XkhBTDShYvpj6qCzH",
       "failure": "Smart contract panicked: ERR_NO_POSITION: bob.x207-v18-own.testnet in epoch 4",
       "value": "0"
+    },
+    {
+      "label": "finalize_epoch 4",
+      "expectOk": true,
+      "ok": true,
+      "tx": "BsaMRTNavPfWeTMEyzRaXmGqDgjUjw2U5wDrjwS6Tqqh",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "close_epoch 5",
+      "expectOk": true,
+      "ok": true,
+      "tx": "3ftJXYd7Xe5WcANDBkwCesaJjCpmMF7NyP87suu6HDHp",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "commit_epoch 5",
+      "expectOk": true,
+      "ok": true,
+      "tx": "8xj4C4w3sgZUm5WUynNkzX3iNpBbvjV4mfZxVgYJS6Bn",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "finalize_epoch 5",
+      "expectOk": true,
+      "ok": true,
+      "tx": "GwCHeamCwNpAPCFrchBDUzR2vgp7hf9RsJdLcYXBjzmz",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "complete_account_escrow #14 (member account delivered)",
+      "expectOk": true,
+      "ok": true,
+      "tx": "ABuXLGoii1E3qvoDevmzZWWMDyb9nPzsEdB85JJAvZ6C",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "register_voucher of dan with the OLD voucher key (must be refused)",
+      "expectOk": false,
+      "ok": true,
+      "tx": "EppnzFbd52LmvfkThXbbZfRGPwfxF19E68zg1HDvxLWv",
+      "failure": "Smart contract panicked: ERR_BAD_SIGNATURE: ed25519 verification failed",
+      "value": null
+    },
+    {
+      "label": "register_voucher of dan with the BUYER key (accepted)",
+      "expectOk": true,
+      "ok": true,
+      "tx": "FKyRveLsnEzreLDeWzpFNzWMKTpcuCGEqxx15Q7MbQZW",
+      "failure": null,
+      "value": "1000000"
     }
   ],
   "checks": {
@@ -402,15 +450,54 @@
         "delivery_pubkey": "ed25519:6Lf6hpR9CeP9Psk5Y7ZhYUtCEvNzy2GPh1HXBTvTLhNg"
       }
     },
-    "currentEpochAtDelivery14": 3
+    "currentEpochAtDelivery14": 6,
+    "after14": {
+      "keys": [
+        "ed25519:6WeRubo6j573SZHe1CCYbqyhfJjh2iQhmeZbaatSVrnm"
+      ],
+      "buyerKey": "ed25519:6WeRubo6j573SZHe1CCYbqyhfJjh2iQhmeZbaatSVrnm",
+      "member": {
+        "account_id": "dan.x207-v18-p2.testnet",
+        "pubkey_voucher": "ed25519:6WeRubo6j573SZHe1CCYbqyhfJjh2iQhmeZbaatSVrnm",
+        "terms_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stake": "150000000",
+        "limit": "120000000",
+        "status": "active",
+        "admitted": false,
+        "joined_at": "1794154032568912767",
+        "settled_history": "0",
+        "last_active_epoch": 1,
+        "exit_requested_epoch": null
+      },
+      "locker": {
+        "circle": "x207-v018.testnet",
+        "grant_id": 2,
+        "return_pubkey": "ed25519:696YRxQXV95YnSZKqYtDHoWm8Wa9UST4Q1pY8TSfNW8R",
+        "state": "released"
+      },
+      "escrow": {
+        "grant_id": 2,
+        "account_id": "dan.x207-v18-p2.testnet",
+        "state": "delivered",
+        "buyer": "bob.x207-v18-own.testnet",
+        "locked_epoch": 2,
+        "delivery_pubkey": "ed25519:6WeRubo6j573SZHe1CCYbqyhfJjh2iQhmeZbaatSVrnm"
+      }
+    },
+    "rotationEpoch": 6
   },
   "closedEpochs": [
     1,
     2,
     3,
-    4
+    4,
+    5
   ],
   "lockEpoch": 2,
   "grant11": 1,
-  "grant14": 2
+  "grant14": 2,
+  "notCovered": [
+    "the obligation of the #14 voucher (epoch after the lock epoch) is not settled or finalized in this run",
+    "cancel_expired on testnet (24 h expiry; covered by sandbox ct127-08 and unit tests)"
+  ]
 }

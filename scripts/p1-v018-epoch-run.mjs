@@ -295,6 +295,17 @@ out.checks.after14 = {
   locker: await view("get_state", {}, NAMES.dan),
   escrow: await view("get_account_escrow", { grant_id: out.grant14 }),
 };
+// ---- 7. the voucher key of the member rotated: a voucher of dan signed with the OLD key is refused, one signed with the buyer's key is accepted
+{
+  const e = await epochNow();
+  const rotation = (secret) => {
+    const { signature, ...voucher } = signVoucher({ circle: CIRCLE, payer: NAMES.dan, payee: NAMES.alice, epoch: e.epoch, seq: 1, cumulativeAmount: CREDIT.toString(), unit: "credit", resource: "https://x207.example/p1-rotation" }, secret);
+    return { voucher, signature };
+  };
+  await circleCall("register_voucher of dan with the OLD voucher key (must be refused)", acc("alice"), "register_voucher", rotation(voucherKey("dan").toString()), { expectFail: true });
+  await circleCall("register_voucher of dan with the BUYER key (accepted)", acc("alice"), "register_voucher", rotation(keyOf("buyer14", "delivery").toString()));
+  out.checks.rotationEpoch = e.epoch;
+}
 out.notCovered = ["the obligation of the #14 voucher (epoch after the lock epoch) is not settled or finalized in this run", "cancel_expired on testnet (24 h expiry; covered by sandbox ct127-08 and unit tests)"];
 save();
 console.log("done; written to", outFile);
