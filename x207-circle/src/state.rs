@@ -79,6 +79,8 @@ pub enum StorageKey {
     EvmSigners = b'v',
     /// D13 sidecar (CT-108): `AccountId -> true` for members that settle a missed `due` from their stake.
     AutoSettle = b'u',
+    /// D11 class A, NEAR account held by its locker: `GrantId -> AccountEscrow` (CT-126, 0.0.18). The byte is not `x`: raw keys start with `x207_`.
+    AccountEscrows = b'h',
 }
 
 /// Params written by `set_params`, applied by `close_epoch` from `effective_epoch` (spec `get_pending_params`).

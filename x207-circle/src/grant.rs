@@ -497,7 +497,21 @@ impl X207Circle {
             input.limits.quota.map_or(true, |q| q.0 > 0),
             "ERR_BAD_GRANT: quota must be above 0 or null"
         );
-        if entry.class == AssetClass::A {
+        if entry.class == AssetClass::A
+            && (input.asset_type == crate::account_escrow::ASSET_TYPE_ACCOUNT
+                || input.asset_type == crate::account_escrow::ASSET_TYPE_MEMBER_ACCOUNT)
+        {
+            // CT-126: the sale of a NEAR account through a locker; the scope is `{"account_id": ...}` and the locker registers the escrow later
+            match crate::account_escrow::account_scope(&input.limits.scope) {
+                Err(reason) => env::panic_str(&format!(
+                    "ERR_BAD_GRANT: an account scope is {{\"account_id\": ...}}: {reason}"
+                )),
+                Ok(account) => require!(
+                    account != grantor,
+                    format!("ERR_ACCOUNT_SELF: the grantor {grantor} cannot sell its own account")
+                ),
+            }
+        } else if entry.class == AssetClass::A {
             match class_a_asset(&input.limits.scope) {
                 Err(reason) => env::panic_str(&format!("ERR_BAD_GRANT: a class A scope is {{\"nft_contract\": ..., \"token_id\": ...}}, {{\"ft_contract\": ..., \"amount\": \"...\"}} or {{\"mt_contract\": ..., \"token_id\": ..., \"amount\": \"...\"}}: {reason}")),
                 // CT-096: with a list of official contracts for this asset type, the scope must name one of them (the owner finds out before anything is put in escrow)

@@ -58,10 +58,9 @@ impl X207Circle {
             .iter()
             .find(|id| {
                 self.is_empty_pending(id)
-                    && self
-                        .members
-                        .get(*id)
-                        .is_some_and(|m| !m.admitted && now >= m.joined_at.saturating_add(PENDING_GC_AFTER_NS))
+                    && self.members.get(*id).is_some_and(|m| {
+                        !m.admitted && now >= m.joined_at.saturating_add(PENDING_GC_AFTER_NS)
+                    })
             })
             .cloned();
         match victim {
@@ -78,7 +77,10 @@ impl X207Circle {
     /// been `pending` for `PENDING_GC_AFTER_NS`. `ERR_NOT_MEMBER`, `ERR_NOT_PENDING`, `ERR_PENDING_TOO_YOUNG`, `ERR_NOT_OWNER`.
     pub fn remove_pending(&mut self, account_id: AccountId) {
         let by_owner = env::predecessor_account_id() == self.owner_id;
-        require!(self.members.contains_key(&account_id), format!("ERR_NOT_MEMBER: {account_id}"));
+        require!(
+            self.members.contains_key(&account_id),
+            format!("ERR_NOT_MEMBER: {account_id}")
+        );
         require!(
             self.is_empty_pending(&account_id),
             format!("ERR_NOT_PENDING: {account_id} is not a pending member without stake")
@@ -129,8 +131,16 @@ mod tests {
             1_000,
         );
         for i in 0..MAX_MEMBERS {
-            as_caller(&format!("m{i}.near"), JOIN_STORAGE_DEPOSIT, 5_000 + u64::from(i));
-            c.join("agents-main".to_string(), KEY.parse::<PublicKey>().unwrap(), HASH.to_string());
+            as_caller(
+                &format!("m{i}.near"),
+                JOIN_STORAGE_DEPOSIT,
+                5_000 + u64::from(i),
+            );
+            c.join(
+                "agents-main".to_string(),
+                KEY.parse::<PublicKey>().unwrap(),
+                HASH.to_string(),
+            );
         }
         assert_eq!(c.member_count, MAX_MEMBERS);
         c
@@ -138,7 +148,10 @@ mod tests {
 
     fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).expect_err("expected a panic");
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     // TC-CT-123-01: the owner removes a pending member at any time; the slot, the index and the event follow
@@ -151,10 +164,16 @@ mod tests {
         assert!(c.member(acc("m3.near")).is_none());
         assert_eq!(c.member_index.len(), MAX_MEMBERS - 1);
         assert!(!c.member_index.iter().any(|a| a == &acc("m3.near")));
-        assert!(get_logs().iter().any(|l| l.contains("member_removed") && l.contains("\"by_owner\":true")));
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("member_removed") && l.contains("\"by_owner\":true")));
         // the slot is usable at once
         as_caller("late.near", JOIN_STORAGE_DEPOSIT, 7_000);
-        c.join("agents-main".to_string(), KEY.parse::<PublicKey>().unwrap(), HASH.to_string());
+        c.join(
+            "agents-main".to_string(),
+            KEY.parse::<PublicKey>().unwrap(),
+            HASH.to_string(),
+        );
         assert_eq!(c.member_count, MAX_MEMBERS);
     }
 
@@ -163,19 +182,29 @@ mod tests {
     fn tc_ct_123_02_refusals() {
         let mut c = full_circle();
         as_caller("eve.near", NearToken::from_yoctonear(0), 6_000);
-        let young = panic_text(std::panic::AssertUnwindSafe(|| c.remove_pending(acc("m3.near"))));
+        let young = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("m3.near"))
+        }));
         assert!(young.contains("ERR_PENDING_TOO_YOUNG"), "{young}");
-        let unknown = panic_text(std::panic::AssertUnwindSafe(|| c.remove_pending(acc("nobody.near"))));
+        let unknown = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("nobody.near"))
+        }));
         assert!(unknown.contains("ERR_NOT_MEMBER"), "{unknown}");
         c.members.get_mut(&acc("m4.near")).unwrap().stake = 1;
         as_caller("dao.near", NearToken::from_yoctonear(0), 6_000);
-        let staked = panic_text(std::panic::AssertUnwindSafe(|| c.remove_pending(acc("m4.near"))));
+        let staked = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("m4.near"))
+        }));
         assert!(staked.contains("ERR_NOT_PENDING"), "{staked}");
         c.members.get_mut(&acc("m5.near")).unwrap().status = MemberStatus::Active;
-        let active = panic_text(std::panic::AssertUnwindSafe(|| c.remove_pending(acc("m5.near"))));
+        let active = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("m5.near"))
+        }));
         assert!(active.contains("ERR_NOT_PENDING"), "{active}");
         c.outstanding_debt.insert(acc("m6.near"), 5);
-        let debt = panic_text(std::panic::AssertUnwindSafe(|| c.remove_pending(acc("m6.near"))));
+        let debt = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("m6.near"))
+        }));
         assert!(debt.contains("ERR_NOT_PENDING"), "{debt}");
         assert_eq!(c.member_count, MAX_MEMBERS);
     }
@@ -189,8 +218,12 @@ mod tests {
         as_caller("eve.near", NearToken::from_yoctonear(0), later);
         c.remove_pending(acc("m3.near"));
         assert_eq!(c.member_count, MAX_MEMBERS - 1);
-        assert!(get_logs().iter().any(|l| l.contains("member_removed") && l.contains("\"by_owner\":false")));
-        let admitted = panic_text(std::panic::AssertUnwindSafe(|| c.remove_pending(acc("m7.near"))));
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("member_removed") && l.contains("\"by_owner\":false")));
+        let admitted = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.remove_pending(acc("m7.near"))
+        }));
         assert!(admitted.contains("ERR_PENDING_TOO_YOUNG"), "{admitted}");
     }
 
@@ -200,16 +233,36 @@ mod tests {
         let mut c = full_circle();
         as_caller("late.near", JOIN_STORAGE_DEPOSIT, 6_000);
         let full = panic_text(std::panic::AssertUnwindSafe(|| {
-            c.join("agents-main".to_string(), KEY.parse::<PublicKey>().unwrap(), HASH.to_string());
+            c.join(
+                "agents-main".to_string(),
+                KEY.parse::<PublicKey>().unwrap(),
+                HASH.to_string(),
+            );
         }));
         assert!(full.contains("ERR_MAX_MEMBERS"), "{full}");
         c.members.get_mut(&acc("m0.near")).unwrap().stake = 1; // a row with stake is never evicted
-        as_caller("late.near", JOIN_STORAGE_DEPOSIT, 5_000 + PENDING_GC_AFTER_NS + 1_000);
-        c.join("agents-main".to_string(), KEY.parse::<PublicKey>().unwrap(), HASH.to_string());
+        as_caller(
+            "late.near",
+            JOIN_STORAGE_DEPOSIT,
+            5_000 + PENDING_GC_AFTER_NS + 1_000,
+        );
+        c.join(
+            "agents-main".to_string(),
+            KEY.parse::<PublicKey>().unwrap(),
+            HASH.to_string(),
+        );
         assert_eq!(c.member_count, MAX_MEMBERS);
         assert!(c.member(acc("late.near")).is_some());
-        assert!(c.member(acc("m0.near")).is_some(), "the row with stake stays");
-        assert!(c.member(acc("m1.near")).is_none(), "the oldest empty pending row was removed");
-        assert!(get_logs().iter().any(|l| l.contains("member_removed") && l.contains("m1.near")));
+        assert!(
+            c.member(acc("m0.near")).is_some(),
+            "the row with stake stays"
+        );
+        assert!(
+            c.member(acc("m1.near")).is_none(),
+            "the oldest empty pending row was removed"
+        );
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("member_removed") && l.contains("m1.near")));
     }
 }
