@@ -33,3 +33,11 @@
 
 - sha256: `cbb8a9108f975ba8fca86dc6f6d470e3e377b91309fce56b2ec18a77ff4a4b97` (751,548 bytes). Built twice from the committed ref, byte-identical. **Not deployed anywhere**; a deploy needs a decision of the owner.
 - Source: contracts commit `83cc5d7` (the ref given to `repro-build.sh`). The commit that adds this file changes only `prebuilt/`.
+
+# Circle 0.0.18 (P1, UM-076) and the locker
+
+`x207_circle-0.0.18.wasm` is the **reproducible** build (`scripts/repro-build.sh`) at interface 0.0.18: sale of a NEAR account through a locker contract (`near:account`, `near:member_account`), `cancel_expired_account_escrow`, `remove_pending` and `make_room` with an owner-set delay, `set_locker_code_hashes`. `x207_locker-0.0.18.wasm` is the locker that the circle accepts, built by the same script. This is the branch `p1-0.0.18`; the main release stays 0.0.17 until the owner agrees to a migration.
+
+- `x207_circle-0.0.18.wasm` sha256: `e64d4ec74c42897fc94ddd1dcf6f3b60822486b8ff981f9da5056028a9e1534a` (785,021 bytes, base58 `GW19E89YzCbXLxgC1UHPqDeDGD9sxUuMSLUgPK5nd2SD`). It is the code of `x207-v018.testnet`.
+- `x207_locker-0.0.18.wasm` sha256: `6d2ebdf437471a666bf9073637e012c04189cab08921e606ddbfec0bd9524e71` (131,595 bytes, base58 `8MCn7wQpw941cSfH9htjew9yfZedVz37viVEwWZGMZjW`). That base58 is the official locker code hash registered in the circle.
+- Source: contracts commit `993128d` (the ref given to `repro-build.sh`). Built twice from that ref, byte-identical. The commit that adds these files changes only `prebuilt/`.
