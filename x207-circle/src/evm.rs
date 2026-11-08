@@ -85,7 +85,10 @@ fn decode_hex(s: &str) -> Option<Vec<u8>> {
         b'A'..=b'F' => Some(c - b'A' + 10),
         _ => None,
     };
-    s.as_bytes().chunks(2).map(|p| Some(nibble(p[0])? << 4 | nibble(p[1])?)).collect()
+    s.as_bytes()
+        .chunks(2)
+        .map(|p| Some(nibble(p[0])? << 4 | nibble(p[1])?))
+        .collect()
 }
 
 /// Cheap shape test before the storage read: only `0x` + 40 characters can be an EVM member id.
@@ -122,12 +125,24 @@ fn word_u128(v: u128) -> [u8; 32] {
 /// account name on the other network, never verifies on another (audit C55).
 pub fn domain_salt() -> [u8; 32] {
     let contract = env::current_account_id();
-    let network = if contract.as_str().ends_with(".testnet") { "testnet" } else { "mainnet" };
+    let network = if contract.as_str().ends_with(".testnet") {
+        "testnet"
+    } else {
+        "mainnet"
+    };
     keccak(format!("near:{network}:{contract}").as_bytes())
 }
 
 fn domain_separator() -> [u8; 32] {
-    keccak(&[keccak(DOMAIN_TYPE.as_bytes()), word_str("x207"), word_str("1"), domain_salt()].concat())
+    keccak(
+        &[
+            keccak(DOMAIN_TYPE.as_bytes()),
+            word_str("x207"),
+            word_str("1"),
+            domain_salt(),
+        ]
+        .concat(),
+    )
 }
 
 fn digest(struct_hash: [u8; 32]) -> [u8; 32] {
@@ -153,7 +168,15 @@ pub fn voucher_digest(v: &Voucher) -> [u8; 32] {
 
 /// `message` is the canonical terms JSON and `terms_hash_hex` its sha256 in lowercase hex (barter-format.md).
 pub fn bundle_digest(circle: &str, message: &str, terms_hash_hex: &str) -> [u8; 32] {
-    digest(keccak(&[keccak(BUNDLE_TYPE.as_bytes()), word_str(circle), word_str(message), word_str(terms_hash_hex)].concat()))
+    digest(keccak(
+        &[
+            keccak(BUNDLE_TYPE.as_bytes()),
+            word_str(circle),
+            word_str(message),
+            word_str(terms_hash_hex),
+        ]
+        .concat(),
+    ))
 }
 
 pub struct ActionMsg<'a> {
@@ -206,12 +229,20 @@ pub fn recover(digest: &[u8; 32], signature: &str) -> Option<[u8; 20]> {
 
 /// Voucher check 12 for an EVM payer: the recovered address must be the payer id.
 pub fn verify_voucher(voucher: &Voucher, signature: &str) -> bool {
-    recover(&voucher_digest(voucher), signature).is_some_and(|a| address_string(&a) == voucher.payer.as_str())
+    recover(&voucher_digest(voucher), signature)
+        .is_some_and(|a| address_string(&a) == voucher.payer.as_str())
 }
 
 /// Bundle signature of an EVM participant.
-pub fn verify_bundle(signer: &AccountId, circle: &str, message: &str, terms_hash_hex: &str, signature: &str) -> bool {
-    recover(&bundle_digest(circle, message, terms_hash_hex), signature).is_some_and(|a| address_string(&a) == signer.as_str())
+pub fn verify_bundle(
+    signer: &AccountId,
+    circle: &str,
+    message: &str,
+    terms_hash_hex: &str,
+    signature: &str,
+) -> bool {
+    recover(&bundle_digest(circle, message, terms_hash_hex), signature)
+        .is_some_and(|a| address_string(&a) == signer.as_str())
 }
 
 /// Transfers the join deposit back to the sponsor of an EVM member that has exited. Only what the contract holds above
@@ -220,8 +251,12 @@ pub(crate) fn refund_sponsor(account: &AccountId) {
     if !looks_evm(account) {
         return;
     }
-    let Some(signer) = evm_signers().get(account).cloned() else { return };
-    let storage = NearToken::from_yoctonear(env::storage_byte_cost().as_yoctonear() * u128::from(env::storage_usage()));
+    let Some(signer) = evm_signers().get(account).cloned() else {
+        return;
+    };
+    let storage = NearToken::from_yoctonear(
+        env::storage_byte_cost().as_yoctonear() * u128::from(env::storage_usage()),
+    );
     let spare = env::account_balance().saturating_sub(storage);
     let amount = spare.min(JOIN_STORAGE_DEPOSIT);
     if !amount.is_zero() {
@@ -232,7 +267,10 @@ pub(crate) fn refund_sponsor(account: &AccountId) {
 /// `ERR_EVM_EXPIRED` when the deadline has passed, `ERR_EVM_DEADLINE_TOO_FAR` when it is more than `MAX_EVM_DEADLINE_MS` ahead (CT-117, R1a).
 fn check_deadline(deadline: u64) {
     let now_ms = env::block_timestamp_ms();
-    require!(now_ms <= deadline, format!("ERR_EVM_EXPIRED: deadline {deadline} now {now_ms}"));
+    require!(
+        now_ms <= deadline,
+        format!("ERR_EVM_EXPIRED: deadline {deadline} now {now_ms}")
+    );
     require!(
         deadline - now_ms <= MAX_EVM_DEADLINE_MS,
         format!("ERR_EVM_DEADLINE_TOO_FAR: deadline {deadline} now {now_ms} limit {MAX_EVM_DEADLINE_MS} ms")
@@ -242,7 +280,9 @@ fn check_deadline(deadline: u64) {
 /// The fee that the relayer takes from `base` (a payout or a stake): the DAO `relayer_fee`, at most what the member signed (`max_fee`),
 /// at most half of `base` so the member always receives something and the payout leg is never 0 (CT-117, D4).
 pub(crate) fn relayer_fee_for(base: u128, max_fee: u128) -> u128 {
-    crate::params::current_relayer_fee().min(max_fee).min(base / 2)
+    crate::params::current_relayer_fee()
+        .min(max_fee)
+        .min(base / 2)
 }
 
 /// Checks the signer, deadline, nonce and signature of one `*_evm` action, then bumps the nonce. Order of checks:
@@ -260,13 +300,29 @@ pub(crate) fn authorize(
     signature: &str,
 ) {
     let mut signers = evm_signers();
-    let Some(mut signer) = looks_evm(account).then(|| signers.get(account).cloned()).flatten() else {
+    let Some(mut signer) = looks_evm(account)
+        .then(|| signers.get(account).cloned())
+        .flatten()
+    else {
         env::panic_str(&format!("ERR_NOT_EVM_MEMBER: {account}"))
     };
     check_deadline(deadline);
-    require!(nonce == signer.nonce, format!("ERR_EVM_NONCE: nonce {nonce} expected {}", signer.nonce));
+    require!(
+        nonce == signer.nonce,
+        format!("ERR_EVM_NONCE: nonce {nonce} expected {}", signer.nonce)
+    );
     let circle = env::current_account_id();
-    let message = ActionMsg { circle: circle.as_str(), member: account.as_str(), action, epoch, receiver, terms_hash: "", nonce, deadline, max_fee };
+    let message = ActionMsg {
+        circle: circle.as_str(),
+        member: account.as_str(),
+        action,
+        epoch,
+        receiver,
+        terms_hash: "",
+        nonce,
+        deadline,
+        max_fee,
+    };
     let ok = recover(&action_digest(&message), signature) == Some(signer.address);
     require!(ok, "ERR_BAD_EVM_SIG: eip712 verification failed");
     signer.nonce += 1;
@@ -280,10 +336,20 @@ impl X207Circle {
     /// auto-settle into a default. `fee = min(relayer_fee, max_fee, free / 2)`; `free = 0` gives fee 0 and the action stands.
     /// The action has already been applied by the caller; the fee is best effort: stake -> in flight now, `on_action_fee_resolved` books
     /// the outcome. The limit is lowered with `bound_limit` (stake shrank) and put back by the callback if the transfer fails.
-    pub(crate) fn charge_action_fee(&mut self, account: &AccountId, action: &str, max_fee: u128) -> PromiseOrValue<bool> {
+    pub(crate) fn charge_action_fee(
+        &mut self,
+        account: &AccountId,
+        action: &str,
+        max_fee: u128,
+    ) -> PromiseOrValue<bool> {
         let debt = self.outstanding_debt.get(account).copied().unwrap_or(0);
-        let Some(member) = self.members.get_mut(account) else { return PromiseOrValue::Value(false) };
-        let free = member.stake.saturating_sub(crate::deal::bond_locked_of(account)).saturating_sub(debt);
+        let Some(member) = self.members.get_mut(account) else {
+            return PromiseOrValue::Value(false);
+        };
+        let free = member
+            .stake
+            .saturating_sub(crate::deal::bond_locked_of(account))
+            .saturating_sub(debt);
         let fee = relayer_fee_for(free, max_fee);
         if fee == 0 {
             return PromiseOrValue::Value(false);
@@ -317,18 +383,40 @@ impl X207Circle {
     /// (`bound_limit` caps it by the stake), event `relayer_fee_failed`. The reserve is used only if that internal refund cannot be
     /// made (member unknown, exited or withdrawing; not reachable while the exit waits for a finalized epoch).
     #[private]
-    pub fn on_action_fee_resolved(&mut self, account_id: AccountId, fee: U128, limit_before: U128, relayer: AccountId, action: String) -> bool {
+    pub fn on_action_fee_resolved(
+        &mut self,
+        account_id: AccountId,
+        fee: U128,
+        limit_before: U128,
+        relayer: AccountId,
+        action: String,
+    ) -> bool {
         let epoch = self.current_epoch;
         if env::promise_result_checked(0, 16).is_ok() {
             self.d6_in_flight_out(fee.0);
-            crate::events::RelayerFeePaid { account_id, relayer, action, epoch, amount: fee }.emit();
+            crate::events::RelayerFeePaid {
+                account_id,
+                relayer,
+                action,
+                epoch,
+                amount: fee,
+            }
+            .emit();
             return true;
         }
-        crate::events::RelayerFeeFailed { account_id: account_id.clone(), relayer, action, epoch, amount: fee }.emit();
+        crate::events::RelayerFeeFailed {
+            account_id: account_id.clone(),
+            relayer,
+            action,
+            epoch,
+            amount: fee,
+        }
+        .emit();
         match self.members.get_mut(&account_id) {
             Some(m) if m.status != MemberStatus::Exited && !m.withdraw_pending => {
                 m.stake += fee.0;
-                m.limit = crate::deal::bound_limit(m.limit.max(limit_before.0), m.stake, &account_id);
+                m.limit =
+                    crate::deal::bound_limit(m.limit.max(limit_before.0), m.stake, &account_id);
                 self.d6_in_flight_to_stake(fee.0);
             }
             _ => self.d6_in_flight_to_reserve(fee.0),
@@ -345,7 +433,14 @@ impl X207Circle {
     /// `ERR_BAD_EVM_ADDRESS`, `ERR_BAD_TERMS_HASH`, `ERR_ALREADY_MEMBER`, `ERR_MAX_MEMBERS`, `ERR_EVM_EXPIRED`,
     /// `ERR_BAD_EVM_SIG`. The first action after a join carries nonce 0.
     #[payable]
-    pub fn join_evm(&mut self, address: String, terms_hash: String, deadline: u64, signature: String, max_fee: Option<U128>) -> MemberView {
+    pub fn join_evm(
+        &mut self,
+        address: String,
+        terms_hash: String,
+        deadline: u64,
+        signature: String,
+        max_fee: Option<U128>,
+    ) -> MemberView {
         // CT-118: a join pays no relayer fee (the member has no stake yet; the sponsor is paid in NEAR), so a signed fee ceiling is refused
         require!(
             max_fee.map_or(true, |m| m.0 == 0),
@@ -354,15 +449,25 @@ impl X207Circle {
         let deposit = env::attached_deposit();
         require!(
             deposit >= JOIN_STORAGE_DEPOSIT,
-            format!("ERR_INSUFFICIENT_STORAGE_DEPOSIT: attached {deposit}, need {JOIN_STORAGE_DEPOSIT}")
+            format!(
+                "ERR_INSUFFICIENT_STORAGE_DEPOSIT: attached {deposit}, need {JOIN_STORAGE_DEPOSIT}"
+            )
         );
         let Some(raw) = parse_address(&address) else {
-            env::panic_str("ERR_BAD_EVM_ADDRESS: address must be 0x and 40 lowercase hex characters")
+            env::panic_str(
+                "ERR_BAD_EVM_ADDRESS: address must be 0x and 40 lowercase hex characters",
+            )
         };
-        if terms_hash.len() != 64 || !terms_hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        if terms_hash.len() != 64
+            || !terms_hash
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
             env::panic_str("ERR_BAD_TERMS_HASH: terms_hash must be 64 lowercase hex characters");
         }
-        let account_id: AccountId = address.parse().unwrap_or_else(|_| env::panic_str("ERR_BAD_EVM_ADDRESS: not an account id"));
+        let account_id: AccountId = address
+            .parse()
+            .unwrap_or_else(|_| env::panic_str("ERR_BAD_EVM_ADDRESS: not an account id"));
         if self.members.contains_key(&account_id) {
             env::panic_str(&format!("ERR_ALREADY_MEMBER: {account_id}"));
         }
@@ -382,7 +487,10 @@ impl X207Circle {
             deadline,
             max_fee: 0,
         };
-        require!(recover(&action_digest(&message), &signature) == Some(raw), "ERR_BAD_EVM_SIG: eip712 verification failed");
+        require!(
+            recover(&action_digest(&message), &signature) == Some(raw),
+            "ERR_BAD_EVM_SIG: eip712 verification failed"
+        );
 
         let sponsor = env::predecessor_account_id();
         let joined_at = env::block_timestamp();
@@ -407,7 +515,14 @@ impl X207Circle {
         self.member_index.push(account_id.clone());
         self.member_count += 1;
         let mut signers = evm_signers();
-        signers.insert(account_id.clone(), EvmSigner { address: raw, sponsor: sponsor.clone(), nonce: 0 });
+        signers.insert(
+            account_id.clone(),
+            EvmSigner {
+                address: raw,
+                sponsor: sponsor.clone(),
+                nonce: 0,
+            },
+        );
         signers.flush();
         MemberJoined {
             account_id,
@@ -429,7 +544,11 @@ impl X207Circle {
         if !looks_evm(&account_id) {
             return None;
         }
-        evm_signers().get(&account_id).map(|s| EvmSignerView { address: address_string(&s.address), sponsor: s.sponsor.clone(), nonce: U64(s.nonce) })
+        evm_signers().get(&account_id).map(|s| EvmSignerView {
+            address: address_string(&s.address),
+            sponsor: s.sponsor.clone(),
+            nonce: U64(s.nonce),
+        })
     }
 
     /// `claim` for an EVM member (CT-105). Anyone may relay it. `member` is the `0x` id that holds the position; the
@@ -450,12 +569,27 @@ impl X207Circle {
         max_fee: U128,
         signature: String,
     ) -> Promise {
-        authorize(&member, "claim", epoch, receiver.as_str(), nonce, deadline, max_fee.0, &signature);
+        authorize(
+            &member,
+            "claim",
+            epoch,
+            receiver.as_str(),
+            nonce,
+            deadline,
+            max_fee.0,
+            &signature,
+        );
         let relayer = Some((env::predecessor_account_id(), max_fee.0));
         if receiver == self.intents_id {
             self.claim_for(member, epoch, ClaimDestination::Intents, None, relayer)
         } else {
-            self.claim_for(member, epoch, ClaimDestination::Near, Some(receiver), relayer)
+            self.claim_for(
+                member,
+                epoch,
+                ClaimDestination::Near,
+                Some(receiver),
+                relayer,
+            )
         }
     }
 
@@ -463,8 +597,24 @@ impl X207Circle {
     ///
     /// CT-118 (0.0.17): the relayer may take `min(relayer_fee, max_fee, free_stake / 2)` from the free stake (see `charge_action_fee`).
     /// Returns `true` when a fee was sent to the relayer, `false` when none was charged or the transfer failed.
-    pub fn request_exit_evm(&mut self, member: AccountId, nonce: u64, deadline: u64, max_fee: U128, signature: String) -> PromiseOrValue<bool> {
-        authorize(&member, "request_exit", 0, "", nonce, deadline, max_fee.0, &signature);
+    pub fn request_exit_evm(
+        &mut self,
+        member: AccountId,
+        nonce: u64,
+        deadline: u64,
+        max_fee: U128,
+        signature: String,
+    ) -> PromiseOrValue<bool> {
+        authorize(
+            &member,
+            "request_exit",
+            0,
+            "",
+            nonce,
+            deadline,
+            max_fee.0,
+            &signature,
+        );
         self.request_exit_for(member.clone());
         self.charge_action_fee(&member, "request_exit", max_fee.0)
     }
@@ -483,9 +633,25 @@ impl X207Circle {
         max_fee: U128,
         signature: String,
     ) -> PromiseOrValue<bool> {
-        require!(receiver != self.intents_id, "ERR_BAD_EVM_RECEIVER: the Intents contract cannot receive a stake withdrawal");
-        authorize(&member, "withdraw_stake", 0, receiver.as_str(), nonce, deadline, max_fee.0, &signature);
-        self.withdraw_stake_for(member, receiver, Some((env::predecessor_account_id(), max_fee.0)))
+        require!(
+            receiver != self.intents_id,
+            "ERR_BAD_EVM_RECEIVER: the Intents contract cannot receive a stake withdrawal"
+        );
+        authorize(
+            &member,
+            "withdraw_stake",
+            0,
+            receiver.as_str(),
+            nonce,
+            deadline,
+            max_fee.0,
+            &signature,
+        );
+        self.withdraw_stake_for(
+            member,
+            receiver,
+            Some((env::predecessor_account_id(), max_fee.0)),
+        )
     }
 }
 
@@ -502,7 +668,8 @@ mod tests {
     const NOW_NS: u64 = 1_899_996_400_000_000_000; // one hour before every deadline of the fixture (1.9e12 ms)
 
     fn fixture() -> Value {
-        near_sdk::serde_json::from_str(include_str!("../../tests/fixtures/evm-eip712.json")).unwrap()
+        near_sdk::serde_json::from_str(include_str!("../../tests/fixtures/evm-eip712.json"))
+            .unwrap()
     }
 
     fn acc(s: &str) -> AccountId {
@@ -520,7 +687,14 @@ mod tests {
 
     fn circle() -> X207Circle {
         ctx("relayer.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), NOW_NS)
+        X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".into(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            NOW_NS,
+        )
     }
 
     fn v(name: &str) -> Value {
@@ -536,12 +710,21 @@ mod tests {
     }
 
     fn hex32(s: &str) -> [u8; 32] {
-        decode_hex(s.trim_start_matches("0x")).unwrap().try_into().unwrap()
+        decode_hex(s.trim_start_matches("0x"))
+            .unwrap()
+            .try_into()
+            .unwrap()
     }
 
     fn joined(c: &mut X207Circle) {
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
-        c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), None);
+        c.join_evm(
+            address(),
+            "a".repeat(64),
+            1_900_000_000_000,
+            sig("join"),
+            None,
+        );
     }
 
     /// Active member with an exit request already made at epoch 1, stake 0, and the signer nonce set.
@@ -558,7 +741,10 @@ mod tests {
 
     fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).expect_err("must panic");
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     // TC-CT-104-01: hashes and signatures of viem
@@ -566,7 +752,10 @@ mod tests {
     fn tc_ct_104_01_digests_match_viem() {
         let _c = circle();
         let f = fixture();
-        assert_eq!(domain_separator(), hex32(f["domainSeparator"].as_str().unwrap()));
+        assert_eq!(
+            domain_separator(),
+            hex32(f["domainSeparator"].as_str().unwrap())
+        );
         let m = &v("voucher")["message"];
         let voucher = Voucher {
             circle: acc(m["circle"].as_str().unwrap()),
@@ -574,31 +763,79 @@ mod tests {
             payee: acc(m["payee"].as_str().unwrap()),
             epoch: 4,
             seq: 2,
-            cumulative_amount: near_sdk::json_types::U128(m["cumulativeAmount"].as_str().unwrap().parse().unwrap()),
+            cumulative_amount: near_sdk::json_types::U128(
+                m["cumulativeAmount"].as_str().unwrap().parse().unwrap(),
+            ),
             unit: "credit".into(),
             resource: m["resource"].as_str().unwrap().into(),
         };
-        assert_eq!(voucher_digest(&voucher), hex32(v("voucher")["digest"].as_str().unwrap()));
+        assert_eq!(
+            voucher_digest(&voucher),
+            hex32(v("voucher")["digest"].as_str().unwrap())
+        );
         assert!(verify_voucher(&voucher, &sig("voucher")));
         let b = v("bundle");
-        assert_eq!(bundle_digest("x207-v014.testnet", b["termsMessage"].as_str().unwrap(), b["termsHash"].as_str().unwrap()), hex32(b["digest"].as_str().unwrap()));
-        assert!(verify_bundle(&acc(&address()), "x207-v014.testnet", b["termsMessage"].as_str().unwrap(), b["termsHash"].as_str().unwrap(), &sig("bundle")));
+        assert_eq!(
+            bundle_digest(
+                "x207-v014.testnet",
+                b["termsMessage"].as_str().unwrap(),
+                b["termsHash"].as_str().unwrap()
+            ),
+            hex32(b["digest"].as_str().unwrap())
+        );
+        assert!(verify_bundle(
+            &acc(&address()),
+            "x207-v014.testnet",
+            b["termsMessage"].as_str().unwrap(),
+            b["termsHash"].as_str().unwrap(),
+            &sig("bundle")
+        ));
     }
 
     #[test]
     fn tc_ct_104_02_action_digests_match_viem() {
         let _c = circle();
         let a = address();
-        let mk = |action: &'static str, epoch, receiver: &'static str, terms: &'static str, nonce, max_fee| {
-            action_digest(&ActionMsg { circle: "x207-v014.testnet", member: Box::leak(a.clone().into_boxed_str()), action, epoch, receiver, terms_hash: terms, nonce, deadline: 1_900_000_000_000, max_fee })
+        let mk = |action: &'static str,
+                  epoch,
+                  receiver: &'static str,
+                  terms: &'static str,
+                  nonce,
+                  max_fee| {
+            action_digest(&ActionMsg {
+                circle: "x207-v014.testnet",
+                member: Box::leak(a.clone().into_boxed_str()),
+                action,
+                epoch,
+                receiver,
+                terms_hash: terms,
+                nonce,
+                deadline: 1_900_000_000_000,
+                max_fee,
+            })
         };
         let join_terms: &'static str = Box::leak("a".repeat(64).into_boxed_str());
-        assert_eq!(mk("join", 0, "", join_terms, 0, 0), hex32(v("join")["digest"].as_str().unwrap()));
-        assert_eq!(mk("claim", 5, "agent.testnet", "", 0, 250_000), hex32(v("claim")["digest"].as_str().unwrap()));
-        assert_eq!(mk("request_exit", 0, "", "", 1, 0), hex32(v("request_exit")["digest"].as_str().unwrap()));
-        assert_eq!(mk("withdraw_stake", 0, "agent.testnet", "", 2, 100_000), hex32(v("withdraw_stake")["digest"].as_str().unwrap()));
+        assert_eq!(
+            mk("join", 0, "", join_terms, 0, 0),
+            hex32(v("join")["digest"].as_str().unwrap())
+        );
+        assert_eq!(
+            mk("claim", 5, "agent.testnet", "", 0, 250_000),
+            hex32(v("claim")["digest"].as_str().unwrap())
+        );
+        assert_eq!(
+            mk("request_exit", 0, "", "", 1, 0),
+            hex32(v("request_exit")["digest"].as_str().unwrap())
+        );
+        assert_eq!(
+            mk("withdraw_stake", 0, "agent.testnet", "", 2, 100_000),
+            hex32(v("withdraw_stake")["digest"].as_str().unwrap())
+        );
         // the signed fee ceiling is part of the digest: another maxFee is another message
-        assert_ne!(mk("claim", 5, "agent.testnet", "", 0, 250_001), hex32(v("claim")["digest"].as_str().unwrap()));
+        assert_ne!(
+            mk("claim", 5, "agent.testnet", "", 0, 250_001),
+            hex32(v("claim")["digest"].as_str().unwrap())
+        );
     }
 
     // a changed field, a high-s twin, a wrong prefix and a bad v are all refused
@@ -607,19 +844,35 @@ mod tests {
         let _c = circle();
         let d = hex32(v("voucher")["digest"].as_str().unwrap());
         let good = sig("voucher");
-        assert_eq!(recover(&d, &good).map(|a| address_string(&a)), Some(address()));
+        assert_eq!(
+            recover(&d, &good).map(|a| address_string(&a)),
+            Some(address())
+        );
         let mut other = d;
         other[0] ^= 1;
-        assert_ne!(recover(&other, &good).map(|a| address_string(&a)), Some(address()));
-        let high = format!("eip712:{}", v("voucher")["highSSignature"].as_str().unwrap());
+        assert_ne!(
+            recover(&other, &good).map(|a| address_string(&a)),
+            Some(address())
+        );
+        let high = format!(
+            "eip712:{}",
+            v("voucher")["highSSignature"].as_str().unwrap()
+        );
         assert_eq!(recover(&d, &high), None);
         assert_eq!(recover(&d, &good.replace("eip712:", "ed25519:")), None);
         assert_eq!(recover(&d, &good[..good.len() - 2]), None);
         let bad_v = format!("{}ff", &good[..good.len() - 2]);
         assert_eq!(recover(&d, &bad_v), None);
         // v as 0/1 also works
-        let v01 = format!("{}{:02x}", &good[..good.len() - 2], u8::from_str_radix(&good[good.len() - 2..], 16).unwrap() - 27);
-        assert_eq!(recover(&d, &v01).map(|a| address_string(&a)), Some(address()));
+        let v01 = format!(
+            "{}{:02x}",
+            &good[..good.len() - 2],
+            u8::from_str_radix(&good[good.len() - 2..], 16).unwrap() - 27
+        );
+        assert_eq!(
+            recover(&d, &v01).map(|a| address_string(&a)),
+            Some(address())
+        );
     }
 
     #[test]
@@ -637,17 +890,36 @@ mod tests {
     fn tc_ct_104_05_join_evm_creates_member_and_sidecar() {
         let mut c = circle();
         ctx("relayer.testnet", NearToken::from_near(1), NOW_NS);
-        let view = c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), None);
+        let view = c.join_evm(
+            address(),
+            "a".repeat(64),
+            1_900_000_000_000,
+            sig("join"),
+            None,
+        );
         assert_eq!(view.account_id.as_str(), address());
         assert_eq!(view.status, MemberStatus::Pending);
         let signer = c.evm_signer(acc(&address())).unwrap();
-        assert_eq!((signer.address.as_str(), signer.sponsor.as_str(), signer.nonce.0), (address().as_str(), "relayer.testnet", 0));
+        assert_eq!(
+            (
+                signer.address.as_str(),
+                signer.sponsor.as_str(),
+                signer.nonce.0
+            ),
+            (address().as_str(), "relayer.testnet", 0)
+        );
         assert!(is_evm_member(&acc(&address())));
         assert!(!is_evm_member(&acc("gpu.testnet")));
         assert_eq!(c.member_count, 1);
         // the excess over the join deposit goes back to the sponsor
         let receipts = get_created_receipts();
-        assert!(receipts.iter().any(|r| r.receiver_id.as_str() == "relayer.testnet" && format!("{:?}", r.actions).contains(&(NearToken::from_near(1).as_yoctonear() - JOIN_STORAGE_DEPOSIT.as_yoctonear()).to_string())));
+        assert!(receipts
+            .iter()
+            .any(|r| r.receiver_id.as_str() == "relayer.testnet"
+                && format!("{:?}", r.actions).contains(
+                    &(NearToken::from_near(1).as_yoctonear() - JOIN_STORAGE_DEPOSIT.as_yoctonear())
+                        .to_string()
+                )));
     }
 
     #[test]
@@ -656,29 +928,59 @@ mod tests {
         let t = "a".repeat(64);
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
         // wrong signer: the signature of another action
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("claim"), None); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("claim"), None);
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // changed terms_hash
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), "b".repeat(64), 1_900_000_000_000, sig("join"), None); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(
+                address(),
+                "b".repeat(64),
+                1_900_000_000_000,
+                sig("join"),
+                None,
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // changed deadline
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_001, sig("join"), None); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(address(), t.clone(), 1_900_000_000_001, sig("join"), None);
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // uppercase letters in the address
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm("0x70997970C51812dc3A010C7d01b50e0d17dc79C8".into(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(
+                "0x70997970C51812dc3A010C7d01b50e0d17dc79C8".into(),
+                t.clone(),
+                1_900_000_000_000,
+                sig("join"),
+                None,
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_ADDRESS"), "{text}");
         // short deposit
         ctx("relayer.testnet", NearToken::from_millinear(349), NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None);
+        }));
         assert!(text.contains("ERR_INSUFFICIENT_STORAGE_DEPOSIT"), "{text}");
         // past the deadline
-        ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, 1_900_000_001_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
+        ctx(
+            "relayer.testnet",
+            JOIN_STORAGE_DEPOSIT,
+            1_900_000_001_000_000_000,
+        );
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None);
+        }));
         assert!(text.contains("ERR_EVM_EXPIRED"), "{text}");
         // replay of a join
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
         c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(address(), t.clone(), 1_900_000_000_000, sig("join"), None);
+        }));
         assert!(text.contains("ERR_ALREADY_MEMBER"), "{text}");
     }
 
@@ -688,13 +990,40 @@ mod tests {
         let mut c = circle();
         let t = "a".repeat(64);
         // 1.9e12 ms is one hour ahead of NOW_NS: fine for the limit. Move the clock 24 h back so the same deadline is 25 h ahead.
-        ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS - 24 * 3_600 * 1_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65), None); }));
+        ctx(
+            "relayer.testnet",
+            JOIN_STORAGE_DEPOSIT,
+            NOW_NS - 24 * 3_600 * 1_000_000_000,
+        );
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(
+                address(),
+                t.clone(),
+                1_900_000_000_000,
+                "00".repeat(65),
+                None,
+            );
+        }));
         assert!(text.contains("ERR_EVM_DEADLINE_TOO_FAR"), "{text}");
         // exactly 24 h ahead passes the deadline check (and then fails on the signature)
-        ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS - 23 * 3_600 * 1_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), t.clone(), 1_900_000_000_000, "00".repeat(65), None); }));
-        assert!(!text.contains("ERR_EVM_DEADLINE_TOO_FAR") && !text.contains("ERR_EVM_EXPIRED"), "{text}");
+        ctx(
+            "relayer.testnet",
+            JOIN_STORAGE_DEPOSIT,
+            NOW_NS - 23 * 3_600 * 1_000_000_000,
+        );
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(
+                address(),
+                t.clone(),
+                1_900_000_000_000,
+                "00".repeat(65),
+                None,
+            );
+        }));
+        assert!(
+            !text.contains("ERR_EVM_DEADLINE_TOO_FAR") && !text.contains("ERR_EVM_EXPIRED"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -703,8 +1032,16 @@ mod tests {
         assert_eq!(relayer_fee_for(1_000_000, 500), 0, "DAO fee 0 -> no fee");
         crate::params::write_relayer_fee(250_000);
         assert_eq!(relayer_fee_for(10_000_000, 1_000_000), 250_000, "flat fee");
-        assert_eq!(relayer_fee_for(10_000_000, 100), 100, "capped by the signed maxFee");
-        assert_eq!(relayer_fee_for(300_000, 1_000_000), 150_000, "capped at half the base");
+        assert_eq!(
+            relayer_fee_for(10_000_000, 100),
+            100,
+            "capped by the signed maxFee"
+        );
+        assert_eq!(
+            relayer_fee_for(300_000, 1_000_000),
+            150_000,
+            "capped at half the base"
+        );
         assert_eq!(relayer_fee_for(1, 1_000_000), 0, "dust base");
         assert_eq!(relayer_fee_for(10_000_000, 0), 0, "maxFee 0 forbids a fee");
     }
@@ -717,13 +1054,35 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // a nonce that is not the next one
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(id.clone(), 2, 1_900_000_000_000, U128(0), sig("request_exit")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.request_exit_evm(
+                id.clone(),
+                2,
+                1_900_000_000_000,
+                U128(0),
+                sig("request_exit"),
+            );
+        }));
         assert!(text.contains("ERR_EVM_NONCE"), "{text}");
-        let _ = c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, U128(0), sig("request_exit"));
+        let _ = c.request_exit_evm(
+            id.clone(),
+            1,
+            1_900_000_000_000,
+            U128(0),
+            sig("request_exit"),
+        );
         assert_eq!(c.members.get(&id).unwrap().exit_requested_epoch, Some(1));
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 2);
         // replay of the same signature
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.request_exit_evm(
+                id.clone(),
+                1,
+                1_900_000_000_000,
+                U128(0),
+                sig("request_exit"),
+            );
+        }));
         assert!(text.contains("ERR_EVM_NONCE"), "{text}");
     }
 
@@ -732,15 +1091,43 @@ mod tests {
         let mut c = circle();
         active(&mut c, 1);
         let id = acc(&address());
-        ctx("anyone.testnet", NearToken::from_yoctonear(0), 1_900_000_001_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(id.clone(), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
+        ctx(
+            "anyone.testnet",
+            NearToken::from_yoctonear(0),
+            1_900_000_001_000_000_000,
+        );
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.request_exit_evm(
+                id.clone(),
+                1,
+                1_900_000_000_000,
+                U128(0),
+                sig("request_exit"),
+            );
+        }));
         assert!(text.contains("ERR_EVM_EXPIRED"), "{text}");
         // a NEAR-key member cannot be driven by an EVM signature
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(acc("gpu.testnet"), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.request_exit_evm(
+                acc("gpu.testnet"),
+                1,
+                1_900_000_000_000,
+                U128(0),
+                sig("request_exit"),
+            );
+        }));
         assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
         // and a 0x id that never joined
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.request_exit_evm(acc("0x0000000000000000000000000000000000000001"), 1, 1_900_000_000_000, U128(0), sig("request_exit")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.request_exit_evm(
+                acc("0x0000000000000000000000000000000000000001"),
+                1,
+                1_900_000_000_000,
+                U128(0),
+                sig("request_exit"),
+            );
+        }));
         assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
     }
 
@@ -751,18 +1138,56 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // claim signed for agent.testnet cannot pay thief.testnet
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("thief.testnet"), 0, 1_900_000_000_000, U128(250_000), sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.claim_evm(
+                id.clone(),
+                5,
+                acc("thief.testnet"),
+                0,
+                1_900_000_000_000,
+                U128(250_000),
+                sig("claim"),
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // another epoch
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 6, acc("agent.testnet"), 0, 1_900_000_000_000, U128(250_000), sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.claim_evm(
+                id.clone(),
+                6,
+                acc("agent.testnet"),
+                0,
+                1_900_000_000_000,
+                U128(250_000),
+                sig("claim"),
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // the claim signature is not a withdraw signature
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 0, 1_900_000_000_000, U128(100_000), sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.withdraw_stake_evm(
+                id.clone(),
+                acc("agent.testnet"),
+                0,
+                1_900_000_000_000,
+                U128(100_000),
+                sig("claim"),
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         // nothing moved the nonce
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 0);
         // the Intents contract is no receiver of a stake withdrawal
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_stake_evm(id.clone(), acc("intents.near"), 0, 1_900_000_000_000, U128(100_000), sig("claim")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.withdraw_stake_evm(
+                id.clone(),
+                acc("intents.near"),
+                0,
+                1_900_000_000_000,
+                U128(100_000),
+                sig("claim"),
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_RECEIVER"), "{text}");
     }
 
@@ -773,8 +1198,21 @@ mod tests {
         active(&mut c, 0);
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         let id = acc(&address());
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.claim_evm(id.clone(), 5, acc("agent.testnet"), 0, 1_900_000_000_000, U128(250_000), sig("claim")); }));
-        assert!(!text.contains("ERR_BAD_EVM_SIG") && !text.contains("ERR_EVM_NONCE"), "{text}");
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.claim_evm(
+                id.clone(),
+                5,
+                acc("agent.testnet"),
+                0,
+                1_900_000_000_000,
+                U128(250_000),
+                sig("claim"),
+            );
+        }));
+        assert!(
+            !text.contains("ERR_BAD_EVM_SIG") && !text.contains("ERR_EVM_NONCE"),
+            "{text}"
+        );
     }
 
     // withdraw with stake 0: exits at once, the nonce moves, the deposit goes to the sponsor
@@ -786,13 +1224,23 @@ mod tests {
         c.members.get_mut(&id).unwrap().exit_requested_epoch = Some(1);
         c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Finalized;
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        let out = c.withdraw_stake_evm(id.clone(), acc("agent.testnet"), 2, 1_900_000_000_000, U128(100_000), sig("withdraw_stake"));
+        let out = c.withdraw_stake_evm(
+            id.clone(),
+            acc("agent.testnet"),
+            2,
+            1_900_000_000_000,
+            U128(100_000),
+            sig("withdraw_stake"),
+        );
         assert!(matches!(out, PromiseOrValue::Value(true)));
         assert_eq!(c.members.get(&id).unwrap().status, MemberStatus::Exited);
         assert_eq!(c.evm_signer(id).unwrap().nonce.0, 3);
         let receipts = get_created_receipts();
-        assert!(receipts.iter().any(|r| r.receiver_id.as_str() == "relayer.testnet"
-            && format!("{:?}", r.actions).contains(&JOIN_STORAGE_DEPOSIT.as_yoctonear().to_string())));
+        assert!(receipts
+            .iter()
+            .any(|r| r.receiver_id.as_str() == "relayer.testnet"
+                && format!("{:?}", r.actions)
+                    .contains(&JOIN_STORAGE_DEPOSIT.as_yoctonear().to_string())));
     }
 
     // audit C55: the domain salt binds a signature to one contract and one network
@@ -803,8 +1251,14 @@ mod tests {
         assert_eq!(domain_salt(), hex32(f["salt"].as_str().unwrap()));
         let d = hex32(v("voucher")["digest"].as_str().unwrap());
         let own = sig("voucher");
-        assert_eq!(recover(&d, &own).map(|a| address_string(&a)), Some(address()));
-        for (contract, expect_network_word) in [("other-circle.testnet", "testnet"), ("x207-v014.near", "mainnet")] {
+        assert_eq!(
+            recover(&d, &own).map(|a| address_string(&a)),
+            Some(address())
+        );
+        for (contract, expect_network_word) in [
+            ("other-circle.testnet", "testnet"),
+            ("x207-v014.near", "mainnet"),
+        ] {
             let cross = &f["crossContract"][contract];
             let cross_sig = format!("eip712:{}", cross["signature"].as_str().unwrap());
             // the signature made for `contract` is refused here ...
@@ -821,13 +1275,27 @@ mod tests {
             let amount = &v("voucher")["message"]["cumulativeAmount"];
             assert!(!verify_voucher(&voucher(amount), &cross_sig), "{contract}");
             // ... and ours is refused there
-            testing_env!(VMContextBuilder::new().current_account_id(acc(contract)).block_timestamp(NOW_NS).build());
-            assert_eq!(hex32(cross["salt"].as_str().unwrap()), domain_salt(), "{expect_network_word}");
+            testing_env!(VMContextBuilder::new()
+                .current_account_id(acc(contract))
+                .block_timestamp(NOW_NS)
+                .build());
+            assert_eq!(
+                hex32(cross["salt"].as_str().unwrap()),
+                domain_salt(),
+                "{expect_network_word}"
+            );
             assert!(!verify_voucher(&voucher(amount), &own), "{contract}");
         }
         // the testnet and mainnet names of one contract have different salts
         let testnet_salt = hex32(f["salt"].as_str().unwrap());
-        assert_ne!(testnet_salt, hex32(f["crossContract"]["x207-v014.near"]["salt"].as_str().unwrap()));
+        assert_ne!(
+            testnet_salt,
+            hex32(
+                f["crossContract"]["x207-v014.near"]["salt"]
+                    .as_str()
+                    .unwrap()
+            )
+        );
     }
 
     // security review M2: the placeholder key is not a valid ed25519 point, so it verifies nothing
@@ -853,7 +1321,9 @@ mod tests {
             acc("gpu.testnet"),
             Member {
                 account_id: acc("gpu.testnet"),
-                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap(),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                    .parse()
+                    .unwrap(),
                 terms_hash: "a".repeat(64),
                 stake: 1,
                 limit: 1,
@@ -868,7 +1338,10 @@ mod tests {
             },
         );
         c.current_epoch = 4;
-        c.epochs.insert(4, crate::clearing::Epoch::open(4, NOW_NS, NOW_NS + 600_000_000_000, Params::default()));
+        c.epochs.insert(
+            4,
+            crate::clearing::Epoch::open(4, NOW_NS, NOW_NS + 600_000_000_000, Params::default()),
+        );
         ctx("relayer.testnet", NearToken::from_yoctonear(0), NOW_NS);
         let m = &v("voucher")["message"];
         let voucher = Voucher {
@@ -877,18 +1350,27 @@ mod tests {
             payee: acc("gpu.testnet"),
             epoch: 4,
             seq: 2,
-            cumulative_amount: near_sdk::json_types::U128(m["cumulativeAmount"].as_str().unwrap().parse().unwrap()),
+            cumulative_amount: near_sdk::json_types::U128(
+                m["cumulativeAmount"].as_str().unwrap().parse().unwrap(),
+            ),
             unit: "credit".into(),
             resource: m["resource"].as_str().unwrap().into(),
         };
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.register_cumulative(voucher.clone(), "ed25519:3tDmsQ7pDmCnn3P9yTDPZ8uS6rqGKWdnh5FZK6Wcb1YZ9k7eQy1VhYYtJWvn5Wv7cqJL8Zyb6WAkJgNiXEcxRSkR".into()); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.register_cumulative(voucher.clone(), "ed25519:3tDmsQ7pDmCnn3P9yTDPZ8uS6rqGKWdnh5FZK6Wcb1YZ9k7eQy1VhYYtJWvn5Wv7cqJL8Zyb6WAkJgNiXEcxRSkR".into());
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         let mut tampered = voucher.clone();
         tampered.seq = 3;
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.register_cumulative(tampered, sig("voucher")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.register_cumulative(tampered, sig("voucher"));
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
         let obligation = c.register_cumulative(voucher, sig("voucher"));
-        assert_eq!(obligation.0.to_string(), m["cumulativeAmount"].as_str().unwrap());
+        assert_eq!(
+            obligation.0.to_string(),
+            m["cumulativeAmount"].as_str().unwrap()
+        );
     }
 
     // TC-CT-108-05: set_auto_settle_evm is a signed Action; the choice is part of the signed action name
@@ -899,25 +1381,91 @@ mod tests {
         let id = acc(&address());
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
         // the "off" signature cannot switch it on, and the other way round
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle_off")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.set_auto_settle_evm(
+                id.clone(),
+                true,
+                3,
+                1_900_000_000_000,
+                U128(0),
+                sig("auto_settle_off"),
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), false, 3, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.set_auto_settle_evm(
+                id.clone(),
+                false,
+                3,
+                1_900_000_000_000,
+                U128(0),
+                sig("auto_settle"),
+            );
+        }));
         assert!(text.contains("ERR_BAD_EVM_SIG"), "{text}");
-        let _ = c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle"));
+        let _ = c.set_auto_settle_evm(
+            id.clone(),
+            true,
+            3,
+            1_900_000_000_000,
+            U128(0),
+            sig("auto_settle"),
+        );
         assert!(c.is_auto_settle(id.clone()));
         assert_eq!(c.evm_signer(id.clone()).unwrap().nonce.0, 4);
         // replay
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.set_auto_settle_evm(
+                id.clone(),
+                true,
+                3,
+                1_900_000_000_000,
+                U128(0),
+                sig("auto_settle"),
+            );
+        }));
         assert!(text.contains("ERR_EVM_NONCE"), "{text}");
-        let _ = c.set_auto_settle_evm(id.clone(), false, 4, 1_900_000_000_000, U128(0), sig("auto_settle_off"));
+        let _ = c.set_auto_settle_evm(
+            id.clone(),
+            false,
+            4,
+            1_900_000_000_000,
+            U128(0),
+            sig("auto_settle_off"),
+        );
         assert!(!c.is_auto_settle(id.clone()));
         // expired
-        ctx("anyone.testnet", NearToken::from_yoctonear(0), 1_900_000_001_000_000_000);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(id.clone(), true, 5, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
-        assert!(text.contains("ERR_EVM_NONCE") || text.contains("ERR_EVM_EXPIRED"), "{text}");
+        ctx(
+            "anyone.testnet",
+            NearToken::from_yoctonear(0),
+            1_900_000_001_000_000_000,
+        );
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.set_auto_settle_evm(
+                id.clone(),
+                true,
+                5,
+                1_900_000_000_000,
+                U128(0),
+                sig("auto_settle"),
+            );
+        }));
+        assert!(
+            text.contains("ERR_EVM_NONCE") || text.contains("ERR_EVM_EXPIRED"),
+            "{text}"
+        );
         // a NEAR-key member is not driven by an EVM signature
         ctx("anyone.testnet", NearToken::from_yoctonear(0), NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { let _ = c.set_auto_settle_evm(acc("gpu.testnet"), true, 3, 1_900_000_000_000, U128(0), sig("auto_settle")); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            let _ = c.set_auto_settle_evm(
+                acc("gpu.testnet"),
+                true,
+                3,
+                1_900_000_000_000,
+                U128(0),
+                sig("auto_settle"),
+            );
+        }));
         assert!(text.contains("ERR_NOT_EVM_MEMBER"), "{text}");
     }
 
@@ -949,24 +1497,46 @@ mod tests {
             .flat_map(|r| {
                 let receiver = r.receiver_id.to_string();
                 r.actions.into_iter().filter_map(move |a| match a {
-                    MockAction::FunctionCallWeight { method_name, args, .. } => {
-                        Some((receiver.clone(), format!("{} {}", String::from_utf8(method_name).unwrap(), String::from_utf8(args).unwrap())))
-                    }
+                    MockAction::FunctionCallWeight {
+                        method_name, args, ..
+                    } => Some((
+                        receiver.clone(),
+                        format!(
+                            "{} {}",
+                            String::from_utf8(method_name).unwrap(),
+                            String::from_utf8(args).unwrap()
+                        ),
+                    )),
                     _ => None,
                 })
             })
             .collect()
     }
 
-    fn resolve_action_fee(c: &mut X207Circle, id: &AccountId, fee: u128, limit_before: u128, result: near_sdk::PromiseResult) -> bool {
+    fn resolve_action_fee(
+        c: &mut X207Circle,
+        id: &AccountId,
+        fee: u128,
+        limit_before: u128,
+        result: near_sdk::PromiseResult,
+    ) -> bool {
         near_sdk::testing_env!(
-            VMContextBuilder::new().predecessor_account_id(acc("x207-v014.testnet")).current_account_id(acc("x207-v014.testnet")).build(),
+            VMContextBuilder::new()
+                .predecessor_account_id(acc("x207-v014.testnet"))
+                .current_account_id(acc("x207-v014.testnet"))
+                .build(),
             near_sdk::test_vm_config(),
             near_sdk::RuntimeFeesConfig::test(),
             Default::default(),
             vec![result]
         );
-        c.on_action_fee_resolved(id.clone(), U128(fee), U128(limit_before), acc("relayer.testnet"), "request_exit".into())
+        c.on_action_fee_resolved(
+            id.clone(),
+            U128(fee),
+            U128(limit_before),
+            acc("relayer.testnet"),
+            "request_exit".into(),
+        )
     }
 
     #[test]
@@ -978,11 +1548,23 @@ mod tests {
         assert_eq!(c.members.get(&id).unwrap().stake, 100 * CREDIT - 250_000);
         assert_eq!(c.total_stake, 100 * CREDIT - 250_000);
         assert_eq!(c.in_flight, 250_000);
-        assert_eq!(c.members.get(&id).unwrap().limit, 100 * CREDIT - 250_000, "limit follows the stake");
+        assert_eq!(
+            c.members.get(&id).unwrap().limit,
+            100 * CREDIT - 250_000,
+            "limit follows the stake"
+        );
         let calls = fee_calls();
         assert_eq!(calls.len(), 2);
-        assert!(calls[0].1.starts_with("ft_transfer ") && calls[0].1.contains("relayer.testnet") && calls[0].1.contains("250000"), "{calls:?}");
-        assert!(calls[1].1.starts_with("on_action_fee_resolved "), "{calls:?}");
+        assert!(
+            calls[0].1.starts_with("ft_transfer ")
+                && calls[0].1.contains("relayer.testnet")
+                && calls[0].1.contains("250000"),
+            "{calls:?}"
+        );
+        assert!(
+            calls[1].1.starts_with("on_action_fee_resolved "),
+            "{calls:?}"
+        );
         c.assert_d6(None);
     }
 
@@ -994,20 +1576,36 @@ mod tests {
         assert_eq!(c.in_flight, 100);
         // maxFee 0: no fee, no promise
         let (mut c, id) = funded(100 * CREDIT, 0);
-        assert!(matches!(c.charge_action_fee(&id, "request_exit", 0), PromiseOrValue::Value(false)));
-        assert_eq!((c.in_flight, c.members.get(&id).unwrap().stake), (0, 100 * CREDIT));
+        assert!(matches!(
+            c.charge_action_fee(&id, "request_exit", 0),
+            PromiseOrValue::Value(false)
+        ));
+        assert_eq!(
+            (c.in_flight, c.members.get(&id).unwrap().stake),
+            (0, 100 * CREDIT)
+        );
         // half of the free stake: stake 100 credit, debt 99.4 credit -> free 600_000 -> fee 250_000 (flat) ; debt 99.7 -> free 300_000 -> 150_000
         let (mut c, id) = funded(100 * CREDIT, 99_700_000);
         let _ = c.charge_action_fee(&id, "auto_settle", 1_000_000);
         assert_eq!(c.in_flight, 150_000, "capped at free / 2");
         // free stake 0 (the whole stake is the due): action stands, no fee
         let (mut c, id) = funded(100 * CREDIT, 100 * CREDIT);
-        assert!(matches!(c.charge_action_fee(&id, "auto_settle", 1_000_000), PromiseOrValue::Value(false)));
-        assert_eq!(c.members.get(&id).unwrap().stake, 100 * CREDIT, "the due is never touched");
+        assert!(matches!(
+            c.charge_action_fee(&id, "auto_settle", 1_000_000),
+            PromiseOrValue::Value(false)
+        ));
+        assert_eq!(
+            c.members.get(&id).unwrap().stake,
+            100 * CREDIT,
+            "the due is never touched"
+        );
         // DAO fee 0: no fee
         let (mut c, id) = funded(100 * CREDIT, 0);
         crate::params::write_relayer_fee(0);
-        assert!(matches!(c.charge_action_fee(&id, "request_exit", 1_000_000), PromiseOrValue::Value(false)));
+        assert!(matches!(
+            c.charge_action_fee(&id, "request_exit", 1_000_000),
+            PromiseOrValue::Value(false)
+        ));
     }
 
     #[test]
@@ -1015,17 +1613,32 @@ mod tests {
         let (mut c, id) = funded(100 * CREDIT, 0);
         let _ = c.charge_action_fee(&id, "request_exit", 1_000_000);
         // success: the fee left the contract
-        assert!(resolve_action_fee(&mut c, &id, 250_000, 100 * CREDIT, near_sdk::PromiseResult::Successful(vec![])));
+        assert!(resolve_action_fee(
+            &mut c,
+            &id,
+            250_000,
+            100 * CREDIT,
+            near_sdk::PromiseResult::Successful(vec![])
+        ));
         assert_eq!((c.in_flight, c.total_stake), (0, 100 * CREDIT - 250_000));
         c.assert_d6(None);
         // failure of a second charge: back to the member stake and limit
         let before = c.members.get(&id).unwrap().limit;
         ctx("relayer.testnet", NearToken::from_yoctonear(0), NOW_NS);
         let _ = c.charge_action_fee(&id, "request_exit", 1_000_000);
-        assert!(!resolve_action_fee(&mut c, &id, 250_000, before, near_sdk::PromiseResult::Failed));
+        assert!(!resolve_action_fee(
+            &mut c,
+            &id,
+            250_000,
+            before,
+            near_sdk::PromiseResult::Failed
+        ));
         let m = c.members.get(&id).unwrap();
         assert_eq!((m.stake, m.limit), (100 * CREDIT - 250_000, before));
-        assert_eq!((c.in_flight, c.reserve, c.total_stake), (0, 0, 100 * CREDIT - 250_000));
+        assert_eq!(
+            (c.in_flight, c.reserve, c.total_stake),
+            (0, 0, 100 * CREDIT - 250_000)
+        );
         c.assert_d6(None);
     }
 
@@ -1034,7 +1647,13 @@ mod tests {
         let (mut c, id) = funded(100 * CREDIT, 0);
         let _ = c.charge_action_fee(&id, "request_exit", 1_000_000);
         c.members.get_mut(&id).unwrap().status = MemberStatus::Exited;
-        assert!(!resolve_action_fee(&mut c, &id, 250_000, 100 * CREDIT, near_sdk::PromiseResult::Failed));
+        assert!(!resolve_action_fee(
+            &mut c,
+            &id,
+            250_000,
+            100 * CREDIT,
+            near_sdk::PromiseResult::Failed
+        ));
         assert_eq!((c.in_flight, c.reserve), (0, 250_000));
     }
 
@@ -1042,10 +1661,24 @@ mod tests {
     fn ct118_join_refuses_signed_fee() {
         let mut c = circle();
         ctx("relayer.testnet", JOIN_STORAGE_DEPOSIT, NOW_NS);
-        let text = panic_text(std::panic::AssertUnwindSafe(|| { c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), Some(U128(1))); }));
+        let text = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.join_evm(
+                address(),
+                "a".repeat(64),
+                1_900_000_000_000,
+                sig("join"),
+                Some(U128(1)),
+            );
+        }));
         assert!(text.contains("ERR_EVM_FEE_NOT_ALLOWED"), "{text}");
         // Some(0) and None are the same message
-        c.join_evm(address(), "a".repeat(64), 1_900_000_000_000, sig("join"), Some(U128(0)));
+        c.join_evm(
+            address(),
+            "a".repeat(64),
+            1_900_000_000_000,
+            sig("join"),
+            Some(U128(0)),
+        );
         assert!(c.members.contains_key(&acc(&address())));
     }
 
@@ -1060,7 +1693,11 @@ mod tests {
         c.epochs.insert(2, e2);
         c.current_epoch = 2;
         assert_eq!(c.get_epoch(Some(2)).unwrap().params.relayer_fee.0, 250_000);
-        assert_eq!(c.get_epoch(Some(1)).unwrap().params.relayer_fee.0, 0, "the past epoch keeps its value");
+        assert_eq!(
+            c.get_epoch(Some(1)).unwrap().params.relayer_fee.0,
+            0,
+            "the past epoch keeps its value"
+        );
         // no snapshot: the running epoch reads the rules in force now, an older epoch the stored defaults
         crate::params::write_relayer_fee(7);
         let e3 = crate::clearing::Epoch::open(3, NOW_NS, NOW_NS + 1, Params::default());

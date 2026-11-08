@@ -22,7 +22,9 @@ pub enum Stage {
 pub struct Probe {}
 
 fn key_bytes(pubkey: &PublicKey) -> [u8; 32] {
-    pubkey.as_bytes()[1..].try_into().unwrap_or_else(|_| env::panic_str("pubkey must be 32 bytes"))
+    pubkey.as_bytes()[1..]
+        .try_into()
+        .unwrap_or_else(|_| env::panic_str("pubkey must be 32 bytes"))
 }
 
 fn signature_bytes(signature: &str) -> [u8; 64] {
@@ -41,7 +43,14 @@ impl Probe {
 
     /// Runs `stage` `count` times. Returns the number of successful rounds, so no stage is
     /// optimized away.
-    pub fn probe_measure(&self, voucher: Voucher, signature: String, pubkey: PublicKey, count: u32, stage: Stage) -> u32 {
+    pub fn probe_measure(
+        &self,
+        voucher: Voucher,
+        signature: String,
+        pubkey: PublicKey,
+        count: u32,
+        stage: Stage,
+    ) -> u32 {
         let signature = signature_bytes(&signature);
         let pubkey = key_bytes(&pubkey);
         let mut passed = 0;
@@ -78,7 +87,12 @@ mod tests {
     }
 
     fn pubkey() -> PublicKey {
-        format!("ed25519:{}", near_sdk::bs58::encode([7u8; 32]).into_string()).parse().unwrap()
+        format!(
+            "ed25519:{}",
+            near_sdk::bs58::encode([7u8; 32]).into_string()
+        )
+        .parse()
+        .unwrap()
     }
 
     // TC-CT-003-05
@@ -86,7 +100,10 @@ mod tests {
     #[should_panic(expected = "signature must be 64 bytes")]
     fn short_signature_panics_before_verify() {
         testing_env!(VMContextBuilder::new().build());
-        let signature = format!("ed25519:{}", near_sdk::bs58::encode([1u8; 63]).into_string());
+        let signature = format!(
+            "ed25519:{}",
+            near_sdk::bs58::encode([1u8; 63]).into_string()
+        );
         Probe::default().probe_verify(voucher(), signature, pubkey());
     }
 

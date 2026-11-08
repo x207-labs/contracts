@@ -16,18 +16,21 @@ use ed25519_dalek::{Signer, SigningKey};
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::{self, json};
 use near_sdk::test_utils::VMContextBuilder;
-use near_sdk::{env, AccountId, CurveType, Gas, MockedBlockchain, NearToken, PromiseOrValue, PromiseResult, PublicKey, RuntimeFeesConfig, VMContext};
+use near_sdk::{
+    env, AccountId, CurveType, Gas, MockedBlockchain, NearToken, PromiseOrValue, PromiseResult,
+    PublicKey, RuntimeFeesConfig, VMContext,
+};
 use proptest::prelude::*;
 
 use crate::bundle::{terms_message, BundleInput, BundleLeg, BundleSignature};
 use crate::canonical::{nep413_signing_hash, voucher_signing_hash, Voucher};
-use sha2::{Digest, Sha256};
 use crate::clearing::EpochPhaseView;
 use crate::grant::{AssetClassEntry, GrantInput, RevokeReason};
 use crate::params::{Fees, Params};
 use crate::settlement::{PositionRole, PositionStatus};
 use crate::types::ClearingEdge;
 use crate::X207Circle;
+use sha2::{Digest, Sha256};
 
 const CREDIT: u128 = 1_000_000;
 const MEMBERS: usize = 4;
@@ -46,7 +49,11 @@ fn key(i: usize) -> SigningKey {
 }
 
 fn pubkey(i: usize) -> PublicKey {
-    PublicKey::from_parts(CurveType::ED25519, key(i).verifying_key().to_bytes().to_vec()).unwrap()
+    PublicKey::from_parts(
+        CurveType::ED25519,
+        key(i).verifying_key().to_bytes().to_vec(),
+    )
+    .unwrap()
 }
 
 struct World {
@@ -67,7 +74,15 @@ struct World {
 
 /// CT-097: the rules of the tests: fees on every cleared amount (they take stake) and a low bond threshold, so that small swaps carry a bond.
 fn rules() -> Params {
-    Params { fees: Fees { clearing_fee_bps: 10, solver_fee_bps: 5 }, bond_threshold: U128(10 * CREDIT), bond_bps: 5000, ..Params::default() }
+    Params {
+        fees: Fees {
+            clearing_fee_bps: 10,
+            solver_fee_bps: 5,
+        },
+        bond_threshold: U128(10 * CREDIT),
+        bond_bps: 5000,
+        ..Params::default()
+    }
 }
 
 fn context(w: &World, predecessor: &str, deposit: NearToken) -> VMContext {
@@ -83,7 +98,15 @@ fn context(w: &World, predecessor: &str, deposit: NearToken) -> VMContext {
 }
 
 fn install(ctx: VMContext, storage: HashMap<Vec<u8>, Vec<u8>>, results: Vec<PromiseResult>) {
-    env::set_blockchain_interface(MockedBlockchain::new(ctx, near_sdk::test_vm_config(), RuntimeFeesConfig::test(), results, storage, Default::default(), None));
+    env::set_blockchain_interface(MockedBlockchain::new(
+        ctx,
+        near_sdk::test_vm_config(),
+        RuntimeFeesConfig::test(),
+        results,
+        storage,
+        Default::default(),
+        None,
+    ));
 }
 
 fn take() -> HashMap<Vec<u8>, Vec<u8>> {
@@ -91,14 +114,38 @@ fn take() -> HashMap<Vec<u8>, Vec<u8>> {
 }
 
 fn panic_message(e: Box<dyn std::any::Any + Send>) -> String {
-    e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    e.downcast_ref::<String>()
+        .cloned()
+        .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+        .unwrap_or_default()
 }
 
 impl World {
     fn new() -> World {
-        let mut w = World { now: 1_000, height: 100, storage: HashMap::new(), usdt: 0, cumulative: BTreeMap::new(), refused: BTreeMap::new(), accepted: BTreeMap::new(), rejected: BTreeMap::new(), deals: vec![] };
-        install(context(&w, "deployer.near", NearToken::from_yoctonear(0)), HashMap::new(), vec![]);
-        let c = X207Circle::with_config(named("dao.near"), "agents-main".into(), named("usdt.near"), named("intents.near"), rules(), w.now);
+        let mut w = World {
+            now: 1_000,
+            height: 100,
+            storage: HashMap::new(),
+            usdt: 0,
+            cumulative: BTreeMap::new(),
+            refused: BTreeMap::new(),
+            accepted: BTreeMap::new(),
+            rejected: BTreeMap::new(),
+            deals: vec![],
+        };
+        install(
+            context(&w, "deployer.near", NearToken::from_yoctonear(0)),
+            HashMap::new(),
+            vec![],
+        );
+        let c = X207Circle::with_config(
+            named("dao.near"),
+            "agents-main".into(),
+            named("usdt.near"),
+            named("intents.near"),
+            rules(),
+            w.now,
+        );
         env::state_write(&c);
         drop(c);
         w.storage = take();
@@ -106,9 +153,19 @@ impl World {
     }
 
     /// One transaction: the state comes from storage, `f` runs, a panic reverts everything. `Err` is the message of the panic.
-    fn call<R>(&mut self, predecessor: &str, deposit: NearToken, results: Vec<PromiseResult>, f: impl FnOnce(&mut X207Circle) -> R) -> Result<R, String> {
+    fn call<R>(
+        &mut self,
+        predecessor: &str,
+        deposit: NearToken,
+        results: Vec<PromiseResult>,
+        f: impl FnOnce(&mut X207Circle) -> R,
+    ) -> Result<R, String> {
         self.height += 1;
-        install(context(self, predecessor, deposit), self.storage.clone(), results);
+        install(
+            context(self, predecessor, deposit),
+            self.storage.clone(),
+            results,
+        );
         let mut c: X207Circle = env::state_read().expect("state");
         match catch_unwind(AssertUnwindSafe(|| f(&mut c))) {
             Ok(r) => {
@@ -120,7 +177,12 @@ impl World {
             Err(e) => {
                 drop(c);
                 let message = panic_message(e);
-                let code = message.find("ERR_").map_or("(no ERR_ code)", |i| message[i..].split(|ch: char| !(ch.is_ascii_uppercase() || ch == '_')).next().unwrap_or(""));
+                let code = message.find("ERR_").map_or("(no ERR_ code)", |i| {
+                    message[i..]
+                        .split(|ch: char| !(ch.is_ascii_uppercase() || ch == '_'))
+                        .next()
+                        .unwrap_or("")
+                });
                 *self.refused.entry(code.to_string()).or_default() += 1;
                 Err(message)
             }
@@ -128,7 +190,11 @@ impl World {
     }
 
     fn view<R>(&mut self, f: impl FnOnce(&X207Circle) -> R) -> R {
-        install(context(self, "viewer.near", NearToken::from_yoctonear(0)), self.storage.clone(), vec![]);
+        install(
+            context(self, "viewer.near", NearToken::from_yoctonear(0)),
+            self.storage.clone(),
+            vec![],
+        );
         let c: X207Circle = env::state_read().expect("state");
         let r = f(&c);
         drop(c);
@@ -140,7 +206,13 @@ impl World {
         let running = self.epoch().epoch;
         [running.saturating_sub(1).max(1), running]
             .into_iter()
-            .find(|e| self.view(|c| c.get_epoch(Some(*e)).is_some_and(|v| matches!(v.phase, EpochPhaseView::Clearing | EpochPhaseView::Commit))))
+            .find(|e| {
+                self.view(|c| {
+                    c.get_epoch(Some(*e)).is_some_and(|v| {
+                        matches!(v.phase, EpochPhaseView::Clearing | EpochPhaseView::Commit)
+                    })
+                })
+            })
             .unwrap_or(running)
     }
 
@@ -233,19 +305,46 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-fn signed_voucher(payer: usize, payee: usize, epoch: u64, seq: u64, cumulative: u128) -> (Voucher, String) {
+fn signed_voucher(
+    payer: usize,
+    payee: usize,
+    epoch: u64,
+    seq: u64,
+    cumulative: u128,
+) -> (Voucher, String) {
     let voucher = Voucher {
-        circle: named(CIRCLE), payer: acc(payer), payee: acc(payee), epoch, seq, cumulative_amount: U128(cumulative), unit: "credit".into(), resource: "r".into(),
+        circle: named(CIRCLE),
+        payer: acc(payer),
+        payee: acc(payee),
+        epoch,
+        seq,
+        cumulative_amount: U128(cumulative),
+        unit: "credit".into(),
+        resource: "r".into(),
     };
-    let signature = format!("ed25519:{}", near_sdk::bs58::encode(key(payer).sign(&voucher_signing_hash(&voucher)).to_bytes()).into_string());
+    let signature = format!(
+        "ed25519:{}",
+        near_sdk::bs58::encode(key(payer).sign(&voucher_signing_hash(&voucher)).to_bytes())
+            .into_string()
+    );
     (voucher, signature)
 }
 
 /// Runs one operation. The USDT that moves is booked in `w.usdt`. Returns `Err(message)` for a refusal.
 fn run(w: &mut World, op: &Op) -> Result<(), String> {
     let result = run_inner(w, op);
-    let name = format!("{op:?}").split(['(', ' ']).next().unwrap_or("").to_string();
-    *(if result.is_ok() { &mut w.accepted } else { &mut w.rejected }).entry(name).or_default() += 1;
+    let name = format!("{op:?}")
+        .split(['(', ' '])
+        .next()
+        .unwrap_or("")
+        .to_string();
+    *(if result.is_ok() {
+        &mut w.accepted
+    } else {
+        &mut w.rejected
+    })
+    .entry(name)
+    .or_default() += 1;
     result
 }
 
@@ -482,7 +581,13 @@ fn expand(op: Op) -> Vec<Op> {
     match op {
         Op::PairTrade(a, b, x, y) => vec![Op::Register(a, b, x), Op::Register(b, a, y)],
         Op::Flow(steps) => {
-            let mut all = vec![Op::Advance(0), Op::CloseEpoch, Op::SubmitBest, Op::Advance(1), Op::CommitEpoch];
+            let mut all = vec![
+                Op::Advance(0),
+                Op::CloseEpoch,
+                Op::SubmitBest,
+                Op::Advance(1),
+                Op::CommitEpoch,
+            ];
             all.extend((0..MEMBERS).map(Op::Settle));
             all.extend([Op::Advance(2), Op::Finalize]);
             all.extend((0..MEMBERS).map(|m| Op::Claim(m, true)));
@@ -490,11 +595,26 @@ fn expand(op: Op) -> Vec<Op> {
             all.truncate(steps as usize);
             all
         }
-        Op::DealRuled(a, b, x, v) => vec![Op::Deal(a, b, x, 0, 48), Op::Dispute(a, usize::MAX), Op::Rule(usize::MAX, v)],
-        Op::DealConfirmed(a, b, x) => vec![Op::Deal(a, b, x, 1, 48), Op::Confirm(a, usize::MAX), Op::Confirm(b, usize::MAX)],
+        Op::DealRuled(a, b, x, v) => vec![
+            Op::Deal(a, b, x, 0, 48),
+            Op::Dispute(a, usize::MAX),
+            Op::Rule(usize::MAX, v),
+        ],
+        Op::DealConfirmed(a, b, x) => vec![
+            Op::Deal(a, b, x, 1, 48),
+            Op::Confirm(a, usize::MAX),
+            Op::Confirm(b, usize::MAX),
+        ],
         Op::FreezeApplied(m) => vec![Op::Freeze(m), Op::ApplyFreeze(m)],
         Op::BondedClearing(a, b) => vec![
-            Op::Deal(a, b, 40, 0, 48), Op::Register(a, b, 10), Op::Register(b, a, 10), Op::Advance(0), Op::CloseEpoch, Op::SubmitBest, Op::Advance(1), Op::CommitEpoch,
+            Op::Deal(a, b, 40, 0, 48),
+            Op::Register(a, b, 10),
+            Op::Register(b, a, 10),
+            Op::Advance(0),
+            Op::CloseEpoch,
+            Op::SubmitBest,
+            Op::Advance(1),
+            Op::CommitEpoch,
         ],
         other => vec![other],
     }
@@ -504,10 +624,25 @@ fn check(w: &mut World, after: &Op, accepted: bool) -> Result<(), TestCaseError>
     let (members, pool) = w.view(|c| (c.list_members(0, 100), c.get_pool()));
     let mut stake = 0u128;
     for m in &members {
-        prop_assert!(m.limit.0 <= m.stake.0, "I-01 after {:?}: {} has limit {} above stake {}", after, m.account_id, m.limit.0, m.stake.0);
+        prop_assert!(
+            m.limit.0 <= m.stake.0,
+            "I-01 after {:?}: {} has limit {} above stake {}",
+            after,
+            m.account_id,
+            m.limit.0,
+            m.stake.0
+        );
         // CT-097: a bond is not available as a limit
         let locked = w.view(|c| c.bond_locked(m.account_id.clone())).0;
-        prop_assert!(m.limit.0 <= m.stake.0.saturating_sub(locked), "CT-094 after {:?}: {} has limit {} above stake {} minus the locked bond {}", after, m.account_id, m.limit.0, m.stake.0, locked);
+        prop_assert!(
+            m.limit.0 <= m.stake.0.saturating_sub(locked),
+            "CT-094 after {:?}: {} has limit {} above stake {} minus the locked bond {}",
+            after,
+            m.account_id,
+            m.limit.0,
+            m.stake.0,
+            locked
+        );
         stake += m.stake.0;
     }
     // CT-097: the bond locked of each member is the sum of the bonds of the deals that are open and still lock it
@@ -523,21 +658,48 @@ fn check(w: &mut World, after: &Op, accepted: bool) -> Result<(), TestCaseError>
     }
     for m in &members {
         let got = w.view(|c| c.bond_locked(m.account_id.clone())).0;
-        prop_assert_eq!(got, expected.get(&m.account_id).copied().unwrap_or(0), "bond_locked of {} after {:?}", m.account_id, after);
+        prop_assert_eq!(
+            got,
+            expected.get(&m.account_id).copied().unwrap_or(0),
+            "bond_locked of {} after {:?}",
+            m.account_id,
+            after
+        );
     }
     prop_assert_eq!(pool.total_stake.0, stake, "total_stake after {:?}", after);
-    prop_assert_eq!(pool.accounted.0, w.usdt, "D6 after {:?}: the pool books {} and {} came in", after, pool.accounted.0, w.usdt);
+    prop_assert_eq!(
+        pool.accounted.0,
+        w.usdt,
+        "D6 after {:?}: the pool books {} and {} came in",
+        after,
+        pool.accounted.0,
+        w.usdt
+    );
     let last = w.epoch().epoch;
     for epoch in 1..=last {
         let positions = w.view(|c| c.list_positions(epoch, 0, 100));
-        let due: u128 = positions.iter().filter(|p| p.role == PositionRole::Debtor).map(|p| p.amount.0).sum();
-        let claimable: u128 = positions.iter().filter(|p| p.role == PositionRole::Creditor).map(|p| p.amount.0).sum();
+        let due: u128 = positions
+            .iter()
+            .filter(|p| p.role == PositionRole::Debtor)
+            .map(|p| p.amount.0)
+            .sum();
+        let claimable: u128 = positions
+            .iter()
+            .filter(|p| p.role == PositionRole::Creditor)
+            .map(|p| p.amount.0)
+            .sum();
         prop_assert_eq!(due, claimable, "I-09 in epoch {} after {:?}", epoch, after);
     }
     // right after a registration that the contract accepted, the payer owes no more than its limit (later the limit may fall, at a default or a recount)
     if let (Op::Register(p, _, _), true) = (after, accepted) {
         let (debt, limit) = w.view(|c| (c.outstanding_debt(acc(*p)).0, c.limit(acc(*p)).0));
-        prop_assert!(debt <= limit, "{} owes {} above its limit {}", acc(*p), debt, limit);
+        prop_assert!(
+            debt <= limit,
+            "{} owes {} above its limit {}",
+            acc(*p),
+            debt,
+            limit
+        );
     }
     Ok(())
 }
@@ -547,10 +709,22 @@ fn check(w: &mut World, after: &Op, accepted: bool) -> Result<(), TestCaseError>
 #[test]
 fn random_sequences_of_calls_keep_the_invariants() {
     use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
-    let cases: u32 = std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(10);
+    let cases: u32 = std::env::var("PROPTEST_CASES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
     // a fixed seed: the same sequences on every machine, so that what the coverage assertion sees here is what the CI sees; `X207_STATEFUL_SEED=<n>` tries others
-    let seed: u8 = std::env::var("X207_STATEFUL_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(7);
-    let mut runner = TestRunner::new_with_rng(Config { cases, ..Config::default() }, TestRng::from_seed(RngAlgorithm::ChaCha, &[seed; 32]));
+    let seed: u8 = std::env::var("X207_STATEFUL_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7);
+    let mut runner = TestRunner::new_with_rng(
+        Config {
+            cases,
+            ..Config::default()
+        },
+        TestRng::from_seed(RngAlgorithm::ChaCha, &[seed; 32]),
+    );
     let accepted = std::cell::RefCell::new(BTreeMap::<String, u32>::new());
     let rejected = std::cell::RefCell::new(BTreeMap::<String, u32>::new());
     let refusals = std::cell::RefCell::new(BTreeMap::<String, u32>::new());
@@ -566,7 +740,12 @@ fn random_sequences_of_calls_keep_the_invariants() {
             let accepted = match run(&mut w, &operation) {
                 Ok(()) => true,
                 Err(message) => {
-                    prop_assert!(message.contains("ERR_"), "a refusal without an ERR_ code after {:?}: {}", operation, message);
+                    prop_assert!(
+                        message.contains("ERR_"),
+                        "a refusal without an ERR_ code after {:?}: {}",
+                        operation,
+                        message
+                    );
                     false
                 }
             };
@@ -583,7 +762,12 @@ fn random_sequences_of_calls_keep_the_invariants() {
         }
         Ok(())
     });
-    let report = format!("accepted {:?}\nrefused {:?}\nerror codes {:?}\n", accepted.borrow(), rejected.borrow(), refusals.borrow());
+    let report = format!(
+        "accepted {:?}\nrefused {:?}\nerror codes {:?}\n",
+        accepted.borrow(),
+        rejected.borrow(),
+        refusals.borrow()
+    );
     if let Ok(path) = std::env::var("X207_STATEFUL_STATS") {
         std::fs::write(path, &report).unwrap();
     }
@@ -592,8 +776,28 @@ fn random_sequences_of_calls_keep_the_invariants() {
     }
     // coverage: the sequences must get through the main steps of an epoch, not only be refused. The seed is fixed (7) and was chosen because those steps are accepted
     // in its 12 sequences; with another seed or other `PROPTEST_CASES` the assertion may fail for lack of coverage, not for a violation (the message says which).
-    for name in ["Register", "CloseEpoch", "SubmitBest", "CommitEpoch", "Settle", "Finalize", "Claim", "Prune", "OfferGrant", "Deal", "Confirm", "Dispute", "Rule", "SettleDeal", "Freeze", "ApplyFreeze"] {
-        assert!(accepted.borrow().get(name).copied().unwrap_or(0) > 0, "no {name} was ever accepted in {cases} sequences:\n{report}");
+    for name in [
+        "Register",
+        "CloseEpoch",
+        "SubmitBest",
+        "CommitEpoch",
+        "Settle",
+        "Finalize",
+        "Claim",
+        "Prune",
+        "OfferGrant",
+        "Deal",
+        "Confirm",
+        "Dispute",
+        "Rule",
+        "SettleDeal",
+        "Freeze",
+        "ApplyFreeze",
+    ] {
+        assert!(
+            accepted.borrow().get(name).copied().unwrap_or(0) > 0,
+            "no {name} was ever accepted in {cases} sequences:\n{report}"
+        );
     }
 }
 
@@ -614,9 +818,21 @@ fn the_harness_gets_a_real_epoch_through_the_whole_cycle() {
     let all = w.view(|c| c.list_obligations(1, 0, 100));
     assert_eq!(all.len(), 3);
     let edges = vec![
-        ClearingEdge { debtor: acc(0), creditor: acc(1), cleared: U128(25 * CREDIT) },
-        ClearingEdge { debtor: acc(1), creditor: acc(2), cleared: U128(25 * CREDIT) },
-        ClearingEdge { debtor: acc(2), creditor: acc(0), cleared: U128(25 * CREDIT) },
+        ClearingEdge {
+            debtor: acc(0),
+            creditor: acc(1),
+            cleared: U128(25 * CREDIT),
+        },
+        ClearingEdge {
+            debtor: acc(1),
+            creditor: acc(2),
+            cleared: U128(25 * CREDIT),
+        },
+        ClearingEdge {
+            debtor: acc(2),
+            creditor: acc(0),
+            cleared: U128(25 * CREDIT),
+        },
     ];
     w.now += 1_000_000_000;
     w.call("solver.near", NearToken::from_yoctonear(0), vec![], |c| {
@@ -625,12 +841,21 @@ fn the_harness_gets_a_real_epoch_through_the_whole_cycle() {
     .unwrap();
     let deadline = w.view(|c| c.get_epoch(Some(1)).unwrap().proposal_deadline.unwrap().0);
     w.now = deadline;
-    w.call("keeper.near", NearToken::from_yoctonear(0), vec![], |c| c.commit_epoch(1)).unwrap();
-    assert!(matches!(w.view(|c| c.get_epoch(Some(1)).unwrap().phase), EpochPhaseView::PaymentWindow));
+    w.call("keeper.near", NearToken::from_yoctonear(0), vec![], |c| {
+        c.commit_epoch(1)
+    })
+    .unwrap();
+    assert!(matches!(
+        w.view(|c| c.get_epoch(Some(1)).unwrap().phase),
+        EpochPhaseView::PaymentWindow
+    ));
     run(&mut w, &Op::Settle(0)).unwrap();
     check(&mut w, &Op::Settle(0), true).unwrap();
     w.now = w.view(|c| c.get_epoch(Some(1)).unwrap().payment_deadline.unwrap().0) + 1;
-    w.call("keeper.near", NearToken::from_yoctonear(0), vec![], |c| c.finalize_epoch(1)).unwrap();
+    w.call("keeper.near", NearToken::from_yoctonear(0), vec![], |c| {
+        c.finalize_epoch(1)
+    })
+    .unwrap();
     run(&mut w, &Op::Claim(1, true)).unwrap();
     check(&mut w, &Op::Claim(1, true), true).unwrap();
     // CT-099 (B8-F1): too early at once after the finalization; two epochs later it goes through

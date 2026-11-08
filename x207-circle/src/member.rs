@@ -61,10 +61,16 @@ impl Member {
     /// Writes the effective status the first time the member is touched by a state change, with the limit from the
     /// stake and the reset history (the limit stays 0 while the member is still `suspended`).
     pub fn settle_reactivation(&mut self, current_epoch: EpochId, params: &crate::params::Params) {
-        if self.effective_status(current_epoch) == MemberStatus::Active && self.status != MemberStatus::Active {
+        if self.effective_status(current_epoch) == MemberStatus::Active
+            && self.status != MemberStatus::Active
+        {
             self.status = MemberStatus::Active;
             self.reactivate_epoch = None;
-            self.limit = crate::deal::bound_limit(crate::risk::compute_limit(self.stake, self.settled_history, params), self.stake, &self.account_id);
+            self.limit = crate::deal::bound_limit(
+                crate::risk::compute_limit(self.stake, self.settled_history, params),
+                self.stake,
+                &self.account_id,
+            );
         }
     }
 
@@ -119,7 +125,12 @@ impl X207Circle {
     /// `terms_hash` (64 lowercase hex), not yet registered, member cap. Stake and admission come later.
     /// The deposit above `JOIN_STORAGE_DEPOSIT` goes back to the caller in the same receipt chain.
     #[payable]
-    pub fn join(&mut self, circle_id: String, pubkey_voucher: PublicKey, terms_hash: String) -> MemberView {
+    pub fn join(
+        &mut self,
+        circle_id: String,
+        pubkey_voucher: PublicKey,
+        terms_hash: String,
+    ) -> MemberView {
         let deposit = env::attached_deposit();
         if deposit < JOIN_STORAGE_DEPOSIT {
             env::panic_str(&format!(
@@ -132,7 +143,11 @@ impl X207Circle {
         if pubkey_voucher.curve_type() != CurveType::ED25519 {
             env::panic_str("ERR_BAD_PUBKEY: pubkey_voucher must be an ed25519 key");
         }
-        if terms_hash.len() != 64 || !terms_hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        if terms_hash.len() != 64
+            || !terms_hash
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
             env::panic_str("ERR_BAD_TERMS_HASH: terms_hash must be 64 lowercase hex characters");
         }
         let account_id = env::predecessor_account_id();
@@ -180,7 +195,9 @@ impl X207Circle {
     }
 
     pub fn member(&self, account_id: AccountId) -> Option<MemberView> {
-        self.members.get(&account_id).map(|m| self.member_now(m).to_view())
+        self.members
+            .get(&account_id)
+            .map(|m| self.member_now(m).to_view())
     }
 
     /// Members in join order, `limit` per page; `limit` 0 or an `from_index` past the end gives `[]` (K-23).
@@ -220,7 +237,10 @@ mod tests {
             limit_growth: 1000,
             limit_cap: U128(1_000_000_000),
             limit_decay: 0,
-            fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
+            fees: Fees {
+                clearing_fee_bps: 0,
+                solver_fee_bps: 0,
+            },
             admission: Admission::Open,
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
@@ -265,7 +285,12 @@ mod tests {
     #[test]
     fn tc_ct_009_01_registered_member_returns_all_fields() {
         let mut c = circle();
-        add(&mut c, "translator.near", MemberStatus::Active, 1_793_836_800_000_000_000);
+        add(
+            &mut c,
+            "translator.near",
+            MemberStatus::Active,
+            1_793_836_800_000_000_000,
+        );
         let v = serde_json::to_value(c.member(acc("translator.near")).unwrap()).unwrap();
         assert_eq!(
             v,
@@ -289,7 +314,10 @@ mod tests {
     fn tc_ct_009_02_unregistered_account_is_null() {
         let mut c = circle();
         add(&mut c, "translator.near", MemberStatus::Active, 1);
-        assert_eq!(serde_json::to_value(c.member(acc("outsider.near"))).unwrap(), serde_json::Value::Null);
+        assert_eq!(
+            serde_json::to_value(c.member(acc("outsider.near"))).unwrap(),
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -301,14 +329,22 @@ mod tests {
             (MemberStatus::Exited, "exited"),
         ] {
             assert_eq!(serde_json::to_value(status).unwrap(), json!(wire));
-            assert_eq!(serde_json::from_value::<MemberStatus>(json!(wire)).unwrap(), status);
+            assert_eq!(
+                serde_json::from_value::<MemberStatus>(json!(wire)).unwrap(),
+                status
+            );
         }
     }
 
     #[test]
     fn tc_ct_009_04_joined_at_is_nanosecond_string() {
         let mut c = circle();
-        add(&mut c, "a.near", MemberStatus::Pending, 1_700_000_000_123_456_789);
+        add(
+            &mut c,
+            "a.near",
+            MemberStatus::Pending,
+            1_700_000_000_123_456_789,
+        );
         let v = serde_json::to_value(c.member(acc("a.near")).unwrap()).unwrap();
         assert_eq!(v["joined_at"], json!("1700000000123456789"));
     }
@@ -319,8 +355,15 @@ mod tests {
         for i in 0..6 {
             add(&mut c, &format!("m{i}.near"), MemberStatus::Active, i);
         }
-        let ids = |v: Vec<MemberView>| v.into_iter().map(|m| m.account_id.to_string()).collect::<Vec<_>>();
-        assert_eq!(ids(c.list_members(0, 4)), ["m0.near", "m1.near", "m2.near", "m3.near"]);
+        let ids = |v: Vec<MemberView>| {
+            v.into_iter()
+                .map(|m| m.account_id.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(c.list_members(0, 4)),
+            ["m0.near", "m1.near", "m2.near", "m3.near"]
+        );
         assert_eq!(ids(c.list_members(4, 4)), ["m4.near", "m5.near"]);
         assert!(c.list_members(6, 4).is_empty());
     }
@@ -392,14 +435,24 @@ mod join_tests {
         assert_eq!(v["account_id"], json!("translator.near"));
         assert_eq!(v["joined_at"], json!("5000"));
         assert_eq!(c.member_count, 1);
-        assert_eq!(c.member(acc("translator.near")).unwrap().status, MemberStatus::Pending);
-        let log = get_logs().into_iter().find(|l| l.contains("member_joined")).expect("member_joined event");
-        let e: serde_json::Value = serde_json::from_str(log.trim_start_matches("EVENT_JSON:")).unwrap();
+        assert_eq!(
+            c.member(acc("translator.near")).unwrap().status,
+            MemberStatus::Pending
+        );
+        let log = get_logs()
+            .into_iter()
+            .find(|l| l.contains("member_joined"))
+            .expect("member_joined event");
+        let e: serde_json::Value =
+            serde_json::from_str(log.trim_start_matches("EVENT_JSON:")).unwrap();
         assert_eq!(
             e["data"][0],
             json!({"account_id":"translator.near","pubkey_voucher":KEY,"terms_hash":HASH,"status":"pending","joined_at":"5000"})
         );
-        assert!(get_created_receipts().is_empty(), "exact deposit has nothing to refund");
+        assert!(
+            get_created_receipts().is_empty(),
+            "exact deposit has nothing to refund"
+        );
     }
 
     // TC-CT-016-02 (unit part): excess is sent back to the caller
@@ -410,14 +463,20 @@ mod join_tests {
         let receipts = get_created_receipts();
         assert_eq!(receipts.len(), 1);
         assert_eq!(receipts[0].receiver_id, acc("translator.near"));
-        assert!(format!("{:?}", receipts[0].actions).contains(&(NearToken::from_near(1).as_yoctonear() - JOIN_STORAGE_DEPOSIT.as_yoctonear()).to_string()));
+        assert!(format!("{:?}", receipts[0].actions).contains(
+            &(NearToken::from_near(1).as_yoctonear() - JOIN_STORAGE_DEPOSIT.as_yoctonear())
+                .to_string()
+        ));
     }
 
     // TC-CT-016-03
     #[test]
     #[should_panic(expected = "ERR_INSUFFICIENT_STORAGE_DEPOSIT")]
     fn tc_ct_016_03_one_yocto_short() {
-        let mut c = circle("translator.near", NearToken::from_yoctonear(JOIN_STORAGE_DEPOSIT.as_yoctonear() - 1));
+        let mut c = circle(
+            "translator.near",
+            NearToken::from_yoctonear(JOIN_STORAGE_DEPOSIT.as_yoctonear() - 1),
+        );
         join_ok(&mut c);
     }
 
@@ -448,7 +507,9 @@ mod join_tests {
     // TC-CT-016-07 (K-16): a broken key never reaches the contract code
     #[test]
     fn tc_ct_016_07_broken_key_fails_deserialization() {
-        let err = serde_json::from_value::<PublicKey>(json!("ed25519:xyz")).unwrap_err().to_string();
+        let err = serde_json::from_value::<PublicKey>(json!("ed25519:xyz"))
+            .unwrap_err()
+            .to_string();
         assert!(!err.contains("ERR_"), "{err}");
     }
 

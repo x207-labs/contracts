@@ -34,6 +34,11 @@ pub enum ClaimDestination {
 #[serde(tag = "action", rename_all = "snake_case")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TransferMsg {
-    Stake { member_id: Option<AccountId> },
-    Settle { epoch: EpochId, member_id: Option<AccountId> },
+    Stake {
+        member_id: Option<AccountId>,
+    },
+    Settle {
+        epoch: EpochId,
+        member_id: Option<AccountId>,
+    },
 }

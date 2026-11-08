@@ -149,7 +149,10 @@ pub(crate) fn reserves() -> LookupMap<(EpochId, AccountId), u128> {
 
 /// Headroom reserved for bundle legs of `account` in `epoch`.
 pub fn reserved(epoch: EpochId, account: &AccountId) -> u128 {
-    reserves().get(&(epoch, account.clone())).copied().unwrap_or(0)
+    reserves()
+        .get(&(epoch, account.clone()))
+        .copied()
+        .unwrap_or(0)
 }
 
 fn set_reserved(epoch: EpochId, account: &AccountId, value: u128) {
@@ -164,14 +167,23 @@ fn epoch_ids_key(epoch: EpochId) -> Vec<u8> {
 
 /// Ids of the bundles committed in `epoch`, oldest first: raw storage, little-endian `u64`s, so `prune_epoch` finds the bundles of an epoch.
 pub(crate) fn epoch_bundle_ids(epoch: EpochId) -> Vec<u64> {
-    env::storage_read(&epoch_ids_key(epoch)).map_or_else(Vec::new, |b| b.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes"))).collect())
+    env::storage_read(&epoch_ids_key(epoch)).map_or_else(Vec::new, |b| {
+        b.chunks_exact(8)
+            .map(|c| u64::from_le_bytes(c.try_into().expect("8 bytes")))
+            .collect()
+    })
 }
 
 pub(crate) fn set_epoch_bundle_ids(epoch: EpochId, ids: &[u64]) {
     if ids.is_empty() {
         env::storage_remove(&epoch_ids_key(epoch));
     } else {
-        env::storage_write(&epoch_ids_key(epoch), &ids.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<u8>>());
+        env::storage_write(
+            &epoch_ids_key(epoch),
+            &ids.iter()
+                .flat_map(|i| i.to_le_bytes())
+                .collect::<Vec<u8>>(),
+        );
     }
 }
 
@@ -180,23 +192,48 @@ pub(crate) fn hash_key(terms_hash: &[u8; 32]) -> Vec<u8> {
 }
 
 /// Canonical JSON of the terms (legs sorted by `(payer, payee)`), spec `sdk/spec/barter-format.md`.
-pub fn terms_message(circle: &AccountId, epoch: EpochId, legs: &[BundleLeg], search_leg: Option<&SearchLeg>, deal: Option<(&AccountId, Option<&str>, u64)>) -> String {
+pub fn terms_message(
+    circle: &AccountId,
+    epoch: EpochId,
+    legs: &[BundleLeg],
+    search_leg: Option<&SearchLeg>,
+    deal: Option<(&AccountId, Option<&str>, u64)>,
+) -> String {
     let mut sorted: Vec<&BundleLeg> = legs.iter().collect();
-    sorted.sort_by(|a, b| (a.payer.as_str(), a.payee.as_str()).cmp(&(b.payer.as_str(), b.payee.as_str())));
+    sorted.sort_by(|a, b| {
+        (a.payer.as_str(), a.payee.as_str()).cmp(&(b.payer.as_str(), b.payee.as_str()))
+    });
     let legs: Vec<String> = sorted
         .iter()
-        .map(|l| format!(r#"{{"payer":"{}","payee":"{}","max_amount":"{}"}}"#, l.payer, l.payee, l.max_amount.0))
+        .map(|l| {
+            format!(
+                r#"{{"payer":"{}","payee":"{}","max_amount":"{}"}}"#,
+                l.payer, l.payee, l.max_amount.0
+            )
+        })
         .collect();
-    let search = search_leg.map(|l| format!(r#","search_leg":{{"payer":"{}","payee":"{}"}}"#, l.payer, l.payee)).unwrap_or_default();
+    let search = search_leg
+        .map(|l| {
+            format!(
+                r#","search_leg":{{"payer":"{}","payee":"{}"}}"#,
+                l.payer, l.payee
+            )
+        })
+        .unwrap_or_default();
     // CT-094: the three keys come after `search_leg`, only when the swap names an arbiter, so that every bundle without one keeps its `terms_hash`; `confirm_by` is a
     // string because nanoseconds do not fit a JavaScript number
     let deal = deal
         .map(|(arbiter, agreement, confirm_by)| {
-            let agreement = agreement.map(|h| format!(r#","agreement_hash":"{h}""#)).unwrap_or_default();
+            let agreement = agreement
+                .map(|h| format!(r#","agreement_hash":"{h}""#))
+                .unwrap_or_default();
             format!(r#","arbiter":"{arbiter}"{agreement},"confirm_by":"{confirm_by}""#)
         })
         .unwrap_or_default();
-    format!(r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]{search}{deal}}}"#, legs.join(","))
+    format!(
+        r#"{{"circle":"{circle}","epoch":{epoch},"legs":[{}]{search}{deal}}}"#,
+        legs.join(",")
+    )
 }
 
 fn hex(bytes: &[u8; 32]) -> String {
@@ -213,7 +250,12 @@ impl Bundle {
                 .legs
                 .iter()
                 .zip(&self.registered)
-                .map(|(l, r)| BundleLegView { payer: l.payer.clone(), payee: l.payee.clone(), max_amount: l.max_amount, registered: U128(*r) })
+                .map(|(l, r)| BundleLegView {
+                    payer: l.payer.clone(),
+                    payee: l.payee.clone(),
+                    max_amount: l.max_amount,
+                    registered: U128(*r),
+                })
                 .collect(),
             status: self.status,
         }
@@ -221,12 +263,23 @@ impl Bundle {
 }
 
 /// Leg of bundle `bundle_id` for `(payer, payee)`: `(index, remaining reserved amount)`.
-pub fn leg_remaining(bundle: &Bundle, payer: &AccountId, payee: &AccountId) -> Option<(usize, u128)> {
-    bundle.legs.iter().position(|l| &l.payer == payer && &l.payee == payee).map(|i| (i, bundle.legs[i].max_amount.0 - bundle.registered[i]))
+pub fn leg_remaining(
+    bundle: &Bundle,
+    payer: &AccountId,
+    payee: &AccountId,
+) -> Option<(usize, u128)> {
+    bundle
+        .legs
+        .iter()
+        .position(|l| &l.payer == payer && &l.payee == payee)
+        .map(|i| (i, bundle.legs[i].max_amount.0 - bundle.registered[i]))
 }
 
 pub fn load_bundle(bundle_id: u64) -> Bundle {
-    bundles().get(&bundle_id).cloned().unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_BUNDLE: {bundle_id}")))
+    bundles()
+        .get(&bundle_id)
+        .cloned()
+        .unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_BUNDLE: {bundle_id}")))
 }
 
 /// Records `delta` as registered against leg `index` and releases the same amount of reservation.
@@ -244,21 +297,39 @@ impl X207Circle {
     /// F5 (CT-062): an `active` member posts the hash of its barter intent. `ERR_PAYER_NOT_ACTIVE`, `ERR_INTENT_EXISTS`.
     pub fn post_intent(&mut self, intent_hash: Base58CryptoHash) {
         let account = env::predecessor_account_id();
-        let active = self.members.get(&account).map(|m| self.member_now(m)).is_some_and(|m| m.status == MemberStatus::Active);
+        let active = self
+            .members
+            .get(&account)
+            .map(|m| self.member_now(m))
+            .is_some_and(|m| m.status == MemberStatus::Active);
         require!(active, format!("ERR_PAYER_NOT_ACTIVE: {account}"));
         crate::freeze::assert_not_frozen(&account, "post an intent");
         let key: [u8; 32] = intent_hash.into();
         let mut map = intents();
-        require!(map.get(&key).is_none(), format!("ERR_INTENT_EXISTS: {}", hex(&key)));
+        require!(
+            map.get(&key).is_none(),
+            format!("ERR_INTENT_EXISTS: {}", hex(&key))
+        );
         let mut counts = intent_counts();
         let open = counts.get(&account).copied().unwrap_or(0);
         require!(open < MAX_OPEN_INTENTS_PER_MEMBER, format!("ERR_INTENT_LIMIT: {account} has {open} open intents, the limit is {MAX_OPEN_INTENTS_PER_MEMBER}"));
         let posted_at = env::block_timestamp();
-        map.insert(key, IntentRecord { account_id: account.clone(), posted_at });
+        map.insert(
+            key,
+            IntentRecord {
+                account_id: account.clone(),
+                posted_at,
+            },
+        );
         map.flush();
         counts.insert(account.clone(), open + 1);
         counts.flush();
-        IntentPosted { intent_hash, account_id: account, posted_at: U64(posted_at) }.emit();
+        IntentPosted {
+            intent_hash,
+            account_id: account,
+            posted_at: U64(posted_at),
+        }
+        .emit();
     }
 
     /// F5 (security review F2): the owner of an intent takes it away and gets the slot back. Anybody may remove the intent of a member that has `exited`
@@ -268,17 +339,29 @@ impl X207Circle {
         let caller = env::predecessor_account_id();
         let key: [u8; 32] = intent_hash.into();
         let mut map = intents();
-        let Some(record) = map.get(&key) else { env::panic_str(&format!("ERR_UNKNOWN_INTENT: {}", hex(&key))) };
+        let Some(record) = map.get(&key) else {
+            env::panic_str(&format!("ERR_UNKNOWN_INTENT: {}", hex(&key)))
+        };
         let owner = record.account_id.clone();
-        let owner_exited = self.members.get(&owner).is_some_and(|m| m.status == MemberStatus::Exited);
-        require!(owner == caller || owner_exited, format!("ERR_NOT_INTENT_OWNER: {caller}"));
+        let owner_exited = self
+            .members
+            .get(&owner)
+            .is_some_and(|m| m.status == MemberStatus::Exited);
+        require!(
+            owner == caller || owner_exited,
+            format!("ERR_NOT_INTENT_OWNER: {caller}")
+        );
         map.remove(&key);
         map.flush();
         let mut counts = intent_counts();
         let open = counts.get(&owner).copied().unwrap_or(1);
         counts.insert(owner.clone(), open.saturating_sub(1));
         counts.flush();
-        IntentRemoved { intent_hash, account_id: owner }.emit();
+        IntentRemoved {
+            intent_hash,
+            account_id: owner,
+        }
+        .emit();
     }
 
     /// F5 (CT-063): permissionless. Checks in order: epoch (`ERR_UNKNOWN_EPOCH`, `ERR_WRONG_PHASE`), past cutoff
@@ -288,32 +371,80 @@ impl X207Circle {
     /// written before the last check passes. Returns the `bundle_id`.
     pub fn commit_bundle(&mut self, bundle: BundleInput, signatures: Vec<BundleSignature>) -> u64 {
         let epoch_id = bundle.epoch;
-        let Some(epoch) = self.epochs.get(&epoch_id) else { env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch_id}")) };
+        let Some(epoch) = self.epochs.get(&epoch_id) else {
+            env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch_id}"))
+        };
         if epoch_id != self.current_epoch || epoch.phase != EpochPhase::Open {
-            env::panic_str(&format!("ERR_WRONG_PHASE: epoch {epoch_id} is not the running open epoch"));
+            env::panic_str(&format!(
+                "ERR_WRONG_PHASE: epoch {epoch_id} is not the running open epoch"
+            ));
         }
         let now = env::block_timestamp();
-        require!(now < epoch.cutoff_at, format!("ERR_PAST_CUTOFF: cutoff_at {}", epoch.cutoff_at));
+        require!(
+            now < epoch.cutoff_at,
+            format!("ERR_PAST_CUTOFF: cutoff_at {}", epoch.cutoff_at)
+        );
 
         // shape: at least two legs, payer != payee, unique pairs, amounts > 0
-        require!(bundle.legs.len() >= 2, "ERR_BAD_BUNDLE: a bundle needs at least two legs");
-        require!(bundle.legs.len() <= MAX_BUNDLE_LEGS, format!("ERR_BAD_BUNDLE: {} legs, the limit is {MAX_BUNDLE_LEGS}", bundle.legs.len()));
+        require!(
+            bundle.legs.len() >= 2,
+            "ERR_BAD_BUNDLE: a bundle needs at least two legs"
+        );
+        require!(
+            bundle.legs.len() <= MAX_BUNDLE_LEGS,
+            format!(
+                "ERR_BAD_BUNDLE: {} legs, the limit is {MAX_BUNDLE_LEGS}",
+                bundle.legs.len()
+            )
+        );
         let mut pairs = std::collections::BTreeSet::new();
         for leg in &bundle.legs {
-            require!(leg.payer != leg.payee, format!("ERR_BAD_BUNDLE: leg pays itself {}", leg.payer));
-            require!(leg.max_amount.0 > 0, "ERR_BAD_BUNDLE: max_amount must be above 0");
-            require!(pairs.insert((leg.payer.clone(), leg.payee.clone())), format!("ERR_BAD_BUNDLE: duplicate leg {} -> {}", leg.payer, leg.payee));
+            require!(
+                leg.payer != leg.payee,
+                format!("ERR_BAD_BUNDLE: leg pays itself {}", leg.payer)
+            );
+            require!(
+                leg.max_amount.0 > 0,
+                "ERR_BAD_BUNDLE: max_amount must be above 0"
+            );
+            require!(
+                pairs.insert((leg.payer.clone(), leg.payee.clone())),
+                format!(
+                    "ERR_BAD_BUNDLE: duplicate leg {} -> {}",
+                    leg.payer, leg.payee
+                )
+            );
         }
         if let Some(search) = &bundle.search_leg {
-            let leg = bundle.legs.iter().find(|l| l.payer == search.payer && l.payee == search.payee);
-            let leg = leg.unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: search_leg is not a leg of the bundle"));
-            let sum = bundle.legs.iter().try_fold(0u128, |a, l| a.checked_add(l.max_amount.0)).unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: legs overflow"));
+            let leg = bundle
+                .legs
+                .iter()
+                .find(|l| l.payer == search.payer && l.payee == search.payee);
+            let leg = leg.unwrap_or_else(|| {
+                env::panic_str("ERR_BAD_BUNDLE: search_leg is not a leg of the bundle")
+            });
+            let sum = bundle
+                .legs
+                .iter()
+                .try_fold(0u128, |a, l| a.checked_add(l.max_amount.0))
+                .unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: legs overflow"));
             let cap_bps = epoch.params.max_search_share_bps as u128;
-            let over = leg.max_amount.0.checked_mul(10_000).map_or(true, |scaled| scaled > cap_bps.saturating_mul(sum));
-            require!(!over, format!("ERR_SEARCH_SHARE_EXCEEDED: {} of {} exceeds {} bps", leg.max_amount.0, sum, cap_bps));
+            let over = leg
+                .max_amount
+                .0
+                .checked_mul(10_000)
+                .map_or(true, |scaled| scaled > cap_bps.saturating_mul(sum));
+            require!(
+                !over,
+                format!(
+                    "ERR_SEARCH_SHARE_EXCEEDED: {} of {} exceeds {} bps",
+                    leg.max_amount.0, sum, cap_bps
+                )
+            );
         }
         let mut participants: Vec<AccountId> = Vec::new();
-        let mut owed: std::collections::BTreeMap<AccountId, u128> = std::collections::BTreeMap::new();
+        let mut owed: std::collections::BTreeMap<AccountId, u128> =
+            std::collections::BTreeMap::new();
         for leg in &bundle.legs {
             for who in [&leg.payer, &leg.payee] {
                 if !participants.contains(who) {
@@ -321,13 +452,21 @@ impl X207Circle {
                 }
             }
             let total = owed.entry(leg.payer.clone()).or_default();
-            *total = total.checked_add(leg.max_amount.0).unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: legs overflow"));
+            *total = total
+                .checked_add(leg.max_amount.0)
+                .unwrap_or_else(|| env::panic_str("ERR_BAD_BUNDLE: legs overflow"));
         }
         for leg in &bundle.legs {
             let payer = self.members.get(&leg.payer).map(|m| self.member_now(m));
-            require!(payer.is_some_and(|m| m.status == MemberStatus::Active), format!("ERR_PAYER_NOT_ACTIVE: {}", leg.payer));
+            require!(
+                payer.is_some_and(|m| m.status == MemberStatus::Active),
+                format!("ERR_PAYER_NOT_ACTIVE: {}", leg.payer)
+            );
             let payee = self.members.get(&leg.payee).map(|m| self.member_now(m));
-            require!(payee.is_some_and(|m| m.status == MemberStatus::Active), format!("ERR_PAYEE_NOT_ACTIVE: {}", leg.payee));
+            require!(
+                payee.is_some_and(|m| m.status == MemberStatus::Active),
+                format!("ERR_PAYEE_NOT_ACTIVE: {}", leg.payee)
+            );
         }
 
         // security review F2: a participant is in at most MAX_BUNDLES_PER_MEMBER_PER_EPOCH bundles of an epoch
@@ -348,29 +487,60 @@ impl X207Circle {
                 None
             }
             (Some(arbiter), agreement, Some(confirm_by)) => {
-                require!(participants.len() == 2, "ERR_BAD_BUNDLE: an arbiter is only for a swap of two participants");
+                require!(
+                    participants.len() == 2,
+                    "ERR_BAD_BUNDLE: an arbiter is only for a swap of two participants"
+                );
                 Some((arbiter, agreement.as_deref(), confirm_by.0))
             }
-            _ => env::panic_str("ERR_BAD_BUNDLE: arbiter and confirm_by come together; agreement_hash needs them"),
+            _ => env::panic_str(
+                "ERR_BAD_BUNDLE: arbiter and confirm_by come together; agreement_hash needs them",
+            ),
         };
         let circle = env::current_account_id();
-        let message = terms_message(&circle, epoch_id, &bundle.legs, bundle.search_leg.as_ref(), deal_terms);
+        let message = terms_message(
+            &circle,
+            epoch_id,
+            &bundle.legs,
+            bundle.search_leg.as_ref(),
+            deal_terms,
+        );
         let terms_hash = env::sha256_array(message.as_bytes());
-        require!(!env::storage_has_key(&hash_key(&terms_hash)), format!("ERR_BUNDLE_EXISTS: {}", hex(&terms_hash)));
+        require!(
+            !env::storage_has_key(&hash_key(&terms_hash)),
+            format!("ERR_BUNDLE_EXISTS: {}", hex(&terms_hash))
+        );
 
         // exactly one valid signature per participant, nobody else
-        require!(signatures.len() == participants.len(), "ERR_BUNDLE_SIGNATURES: every participant signs exactly once");
+        require!(
+            signatures.len() == participants.len(),
+            "ERR_BUNDLE_SIGNATURES: every participant signs exactly once"
+        );
         let signing_hash = nep413_signing_hash(&message, terms_hash, circle.as_str());
         for who in &participants {
             let mut mine = signatures.iter().filter(|s| &s.account_id == who);
             let signature = mine.next();
-            require!(signature.is_some() && mine.next().is_none(), format!("ERR_BUNDLE_SIGNATURES: {who} must sign exactly once"));
+            require!(
+                signature.is_some() && mine.next().is_none(),
+                format!("ERR_BUNDLE_SIGNATURES: {who} must sign exactly once")
+            );
             let signature = signature.expect("checked").signature.as_str();
             let ok = if crate::evm::is_evm_member(who) {
                 // CT-104: an EVM participant signs the EIP-712 `Bundle`
-                crate::evm::verify_bundle(who, circle.as_str(), &message, &hex(&terms_hash), signature)
+                crate::evm::verify_bundle(
+                    who,
+                    circle.as_str(),
+                    &message,
+                    &hex(&terms_hash),
+                    signature,
+                )
             } else {
-                let pubkey = self.members.get(who).expect("participants are members").pubkey_voucher.clone();
+                let pubkey = self
+                    .members
+                    .get(who)
+                    .expect("participants are members")
+                    .pubkey_voucher
+                    .clone();
                 parse_signature(signature)
                     .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
                     .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &signing_hash, &pk))
@@ -380,15 +550,27 @@ impl X207Circle {
 
         // headroom of each payer: limit - outstanding debt - what other bundles of this epoch already reserve
         for (payer, total) in &owed {
-            let member = self.members.get(payer).map(|m| self.member_now(m)).expect("checked above");
+            let member = self
+                .members
+                .get(payer)
+                .map(|m| self.member_now(m))
+                .expect("checked above");
             let debt = self.outstanding_debt.get(payer).copied().unwrap_or(0);
-            let free = member.limit.saturating_sub(debt).saturating_sub(reserved(epoch_id, payer));
-            require!(*total <= free, format!("ERR_BUNDLE_HEADROOM: {payer} needs {total} headroom {free}"));
+            let free = member
+                .limit
+                .saturating_sub(debt)
+                .saturating_sub(reserved(epoch_id, payer));
+            require!(
+                *total <= free,
+                format!("ERR_BUNDLE_HEADROOM: {payer} needs {total} headroom {free}")
+            );
         }
 
         // state change
         let mut map = bundles();
-        let bundle_id = env::storage_read(SEQ_KEY).map_or(1, |b| u64::from_le_bytes(b.try_into().expect("8 bytes")) + 1);
+        let bundle_id = env::storage_read(SEQ_KEY).map_or(1, |b| {
+            u64::from_le_bytes(b.try_into().expect("8 bytes")) + 1
+        });
         env::storage_write(SEQ_KEY, &bundle_id.to_le_bytes());
         env::storage_write(&hash_key(&terms_hash), &bundle_id.to_le_bytes());
         let solver = env::predecessor_account_id();
@@ -414,11 +596,30 @@ impl X207Circle {
             counts.insert((epoch_id, who.clone()), n + 1);
         }
         counts.flush();
-        BundleCommitted { bundle_id, terms_hash: hex(&terms_hash), epoch: epoch_id, legs: bundle.legs, solver }.emit();
+        BundleCommitted {
+            bundle_id,
+            terms_hash: hex(&terms_hash),
+            epoch: epoch_id,
+            legs: bundle.legs,
+            solver,
+        }
+        .emit();
         if let Some((arbiter, agreement, confirm_by)) = deal_terms {
-            let bond = value.checked_mul(bond_bps as u128).map_or(value / 10_000 * bond_bps as u128, |v| v / 10_000);
-            require!(bond > 0, "ERR_BAD_BUNDLE: the bond of this swap rounds to 0");
-            self.open_deal(bundle_id, [participants[0].clone(), participants[1].clone()], arbiter.clone(), agreement.map(str::to_string), confirm_by, bond);
+            let bond = value
+                .checked_mul(bond_bps as u128)
+                .map_or(value / 10_000 * bond_bps as u128, |v| v / 10_000);
+            require!(
+                bond > 0,
+                "ERR_BAD_BUNDLE: the bond of this swap rounds to 0"
+            );
+            self.open_deal(
+                bundle_id,
+                [participants[0].clone(), participants[1].clone()],
+                arbiter.clone(),
+                agreement.map(str::to_string),
+                confirm_by,
+                bond,
+            );
         }
         bundle_id
     }
@@ -429,7 +630,11 @@ impl X207Circle {
 
     pub fn get_intent(&self, intent_hash: Base58CryptoHash) -> Option<IntentView> {
         let key: [u8; 32] = intent_hash.into();
-        intents().get(&key).map(|r| IntentView { intent_hash, account_id: r.account_id.clone(), posted_at: U64(r.posted_at) })
+        intents().get(&key).map(|r| IntentView {
+            intent_hash,
+            account_id: r.account_id.clone(),
+            posted_at: U64(r.posted_at),
+        })
     }
 }
 
@@ -448,17 +653,42 @@ mod security_tests {
 
     fn circle_with_member(name: &str) -> X207Circle {
         testing_env!(VMContextBuilder::new().block_timestamp(1_000).build());
-        let mut c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), 1_000);
-        c.members.insert(acc(name), Member {
-            account_id: acc(name), pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap(), terms_hash: "a".repeat(64),
-            stake: 100, limit: 80, status: MemberStatus::Active, admitted: false, joined_at: 1, settled_history: 0, last_active_epoch: 1, exit_requested_epoch: None,
-            withdraw_pending: false, reactivate_epoch: None,
-        });
+        let mut c = X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".into(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            1_000,
+        );
+        c.members.insert(
+            acc(name),
+            Member {
+                account_id: acc(name),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                    .parse()
+                    .unwrap(),
+                terms_hash: "a".repeat(64),
+                stake: 100,
+                limit: 80,
+                status: MemberStatus::Active,
+                admitted: false,
+                joined_at: 1,
+                settled_history: 0,
+                last_active_epoch: 1,
+                exit_requested_epoch: None,
+                withdraw_pending: false,
+                reactivate_epoch: None,
+            },
+        );
         c
     }
 
     fn post(c: &mut X207Circle, who: &str, n: u32) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(who)).block_timestamp(2_000).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc(who))
+            .block_timestamp(2_000)
+            .build());
         let mut hash = [0u8; 32];
         hash[..4].copy_from_slice(&n.to_le_bytes());
         c.post_intent(Base58CryptoHash::from(hash));
@@ -473,7 +703,10 @@ mod security_tests {
                 post(&mut c, "gina.near", n);
             }
         }));
-        assert!(refused.is_err(), "5000 intents of one member were all accepted, paid by the balance of the contract");
+        assert!(
+            refused.is_err(),
+            "5000 intents of one member were all accepted, paid by the balance of the contract"
+        );
     }
 
     fn hash_of(n: u32) -> Base58CryptoHash {
@@ -484,20 +717,39 @@ mod security_tests {
 
     fn panics_with(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).expect_err("expected a panic");
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     #[test]
     fn a_bundle_with_more_than_64_legs_is_refused_with_err_bad_bundle() {
         let mut c = circle_with_member("gina.near");
         let legs = |n: usize| -> Vec<BundleLeg> {
-            (0..n).map(|i| BundleLeg { payer: acc("gina.near"), payee: acc(&format!("p{i}.near")), max_amount: U128(1) }).collect()
+            (0..n)
+                .map(|i| BundleLeg {
+                    payer: acc("gina.near"),
+                    payee: acc(&format!("p{i}.near")),
+                    max_amount: U128(1),
+                })
+                .collect()
         };
-        let input = |n: usize| BundleInput { epoch: 1, legs: legs(n), search_leg: None, arbiter: None, agreement_hash: None, confirm_by: None };
+        let input = |n: usize| BundleInput {
+            epoch: 1,
+            legs: legs(n),
+            search_leg: None,
+            arbiter: None,
+            agreement_hash: None,
+            confirm_by: None,
+        };
         let msg = panics_with(std::panic::AssertUnwindSafe(|| {
             c.commit_bundle(input(MAX_BUNDLE_LEGS + 1), vec![]);
         }));
-        assert!(msg.contains("ERR_BAD_BUNDLE") && msg.contains("limit is 64"), "{msg}");
+        assert!(
+            msg.contains("ERR_BAD_BUNDLE") && msg.contains("limit is 64"),
+            "{msg}"
+        );
         // 64 legs pass the shape check and stop later (the payees are not members)
         let msg = panics_with(std::panic::AssertUnwindSafe(|| {
             c.commit_bundle(input(MAX_BUNDLE_LEGS), vec![]);
@@ -510,8 +762,15 @@ mod security_tests {
     fn anybody_removes_the_intent_of_an_exited_member_and_of_nobody_else() {
         let mut c = circle_with_member("gina.near");
         post(&mut c, "gina.near", 1);
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("mallory.near")).block_timestamp(2_000).build());
-        for status in [MemberStatus::Active, MemberStatus::Suspended, MemberStatus::Pending] {
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("mallory.near"))
+            .block_timestamp(2_000)
+            .build());
+        for status in [
+            MemberStatus::Active,
+            MemberStatus::Suspended,
+            MemberStatus::Pending,
+        ] {
             c.members.get_mut(&acc("gina.near")).unwrap().status = status;
             let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(1))));
             assert!(msg.contains("ERR_NOT_INTENT_OWNER"), "{status:?}: {msg}");
@@ -520,9 +779,18 @@ mod security_tests {
         let _ = near_sdk::test_utils::get_logs();
         c.remove_intent(hash_of(1));
         let log = near_sdk::test_utils::get_logs().join("\n");
-        assert!(log.contains(r#""event":"intent_removed""#) && log.contains("gina.near") && !log.contains("mallory.near"), "{log}");
+        assert!(
+            log.contains(r#""event":"intent_removed""#)
+                && log.contains("gina.near")
+                && !log.contains("mallory.near"),
+            "{log}"
+        );
         assert!(c.get_intent(hash_of(1)).is_none());
-        assert_eq!(intent_counts().get(&acc("gina.near")).copied(), Some(0), "the slot of the owner is free");
+        assert_eq!(
+            intent_counts().get(&acc("gina.near")).copied(),
+            Some(0),
+            "the slot of the owner is free"
+        );
     }
 
     #[test]
@@ -531,7 +799,9 @@ mod security_tests {
         for n in 0..MAX_OPEN_INTENTS_PER_MEMBER {
             post(&mut c, "gina.near", n);
         }
-        let msg = panics_with(std::panic::AssertUnwindSafe(|| post(&mut c, "gina.near", 1_000)));
+        let msg = panics_with(std::panic::AssertUnwindSafe(|| {
+            post(&mut c, "gina.near", 1_000)
+        }));
         assert!(msg.contains("ERR_INTENT_LIMIT"), "{msg}");
     }
 
@@ -541,14 +811,23 @@ mod security_tests {
         for n in 0..MAX_OPEN_INTENTS_PER_MEMBER {
             post(&mut c, "gina.near", n);
         }
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("mallory.near")).block_timestamp(2_000).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("mallory.near"))
+            .block_timestamp(2_000)
+            .build());
         let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(3))));
         assert!(msg.contains("ERR_NOT_INTENT_OWNER"), "{msg}");
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc("gina.near")).block_timestamp(2_000).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("gina.near"))
+            .block_timestamp(2_000)
+            .build());
         let _ = near_sdk::test_utils::get_logs();
         c.remove_intent(hash_of(3));
         let log = near_sdk::test_utils::get_logs().join("\n");
-        assert!(log.contains(r#""event":"intent_removed""#) && log.contains("gina.near"), "{log}");
+        assert!(
+            log.contains(r#""event":"intent_removed""#) && log.contains("gina.near"),
+            "{log}"
+        );
         let msg = panics_with(std::panic::AssertUnwindSafe(|| c.remove_intent(hash_of(3))));
         assert!(msg.contains("ERR_UNKNOWN_INTENT"), "{msg}");
         post(&mut c, "gina.near", 1_000);
@@ -586,7 +865,9 @@ mod leg_properties {
     fn legs() -> impl Strategy<Value = Vec<(usize, usize, u128)>> {
         proptest::collection::vec((0usize..6, 0usize..6, 1u128..=1_000), 2..=8).prop_map(|raw| {
             let mut seen = std::collections::BTreeSet::new();
-            raw.into_iter().filter(|(a, b, _)| a != b && seen.insert((*a, *b))).collect::<Vec<_>>()
+            raw.into_iter()
+                .filter(|(a, b, _)| a != b && seen.insert((*a, *b)))
+                .collect::<Vec<_>>()
         })
     }
 
@@ -595,7 +876,14 @@ mod leg_properties {
             terms_hash: [id as u8; 32],
             epoch: 1,
             registered: vec![0; legs.len()],
-            legs: legs.iter().map(|&(a, b, m)| BundleLeg { payer: acc(a), payee: acc(b), max_amount: U128(m) }).collect(),
+            legs: legs
+                .iter()
+                .map(|&(a, b, m)| BundleLeg {
+                    payer: acc(a),
+                    payee: acc(b),
+                    max_amount: U128(m),
+                })
+                .collect(),
             solver: acc(9),
             status: BundleStatus::Active,
         };

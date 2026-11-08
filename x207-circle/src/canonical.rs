@@ -39,7 +39,10 @@ pub fn voucher_message(voucher: &Voucher) -> String {
 
 /// `sha256("x207:" + payer + ":" + payee + ":" + epoch + ":" + seq)`.
 pub fn voucher_nonce(voucher: &Voucher) -> [u8; 32] {
-    let seed = format!("x207:{}:{}:{}:{}", voucher.payer, voucher.payee, voucher.epoch, voucher.seq);
+    let seed = format!(
+        "x207:{}:{}:{}:{}",
+        voucher.payer, voucher.payee, voucher.epoch, voucher.seq
+    );
     env::sha256_array(seed.as_bytes())
 }
 
@@ -64,13 +67,22 @@ pub fn voucher_signing_hash(voucher: &Voucher) -> [u8; 32] {
 /// Decodes `"ed25519:<base58 64 bytes>"`; `None` for a malformed string or a wrong length.
 pub fn parse_signature(signature: &str) -> Option<[u8; 64]> {
     let encoded = signature.strip_prefix("ed25519:")?;
-    near_sdk::bs58::decode(encoded).into_vec().ok()?.try_into().ok()
+    near_sdk::bs58::decode(encoded)
+        .into_vec()
+        .ok()?
+        .try_into()
+        .ok()
 }
 
 /// `sha256` of the NEP-413 payload for an arbitrary `message` and 32 byte `nonce` (barter bundles: `message` is the
 /// canonical terms JSON and `nonce` is the `terms_hash`; `sdk/spec/barter-format.md`).
 pub fn nep413_signing_hash(message: &str, nonce: [u8; 32], recipient: &str) -> [u8; 32] {
-    let payload = Nep413Payload { message: message.to_string(), nonce, recipient: recipient.to_string(), callback_url: None };
+    let payload = Nep413Payload {
+        message: message.to_string(),
+        nonce,
+        recipient: recipient.to_string(),
+        callback_url: None,
+    };
     let mut bytes = borsh::to_vec(&NEP413_TAG).expect("tag serializes");
     bytes.extend(borsh::to_vec(&payload).expect("payload serializes"));
     env::sha256_array(bytes)

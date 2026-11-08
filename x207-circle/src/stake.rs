@@ -6,11 +6,14 @@
 
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
-use near_sdk::{assert_one_yocto, env, near, serde_json, AccountId, Gas, NearToken, Promise, PromiseOrValue};
+use near_sdk::{
+    assert_one_yocto, env, near, serde_json, AccountId, Gas, NearToken, Promise, PromiseOrValue,
+};
 
 use crate::clearing::EpochPhase;
 use crate::events::{
-    ExitRequested, MemberAdmitted, MemberReactivated, RelayerFeeFailed, RelayerFeePaid, StakeAdded, StakeWithdrawFailed, StakeWithdrawn, X207Event,
+    ExitRequested, MemberAdmitted, MemberReactivated, RelayerFeeFailed, RelayerFeePaid, StakeAdded,
+    StakeWithdrawFailed, StakeWithdrawn, X207Event,
 };
 use crate::member::MemberStatus;
 use crate::params::Admission;
@@ -30,7 +33,12 @@ fn status_wire(status: MemberStatus) -> &'static str {
 impl X207Circle {
     /// Adds `amount` to the stake of `member_id` (default: the sender). Order of checks (spec 4.7):
     /// `ERR_NOT_MEMBER`, `ERR_MEMBER_EXITED`, `ERR_EXITING`, `ERR_NOT_ADMITTED`.
-    pub fn stake_from_transfer(&mut self, sender_id: AccountId, amount: u128, member_id: Option<AccountId>) {
+    pub fn stake_from_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: u128,
+        member_id: Option<AccountId>,
+    ) {
         let account = member_id.unwrap_or_else(|| sender_id.clone());
         let params = self.epoch_or_panic(self.current_epoch).params.clone();
         let Some(member) = self.members.get(&account) else {
@@ -47,15 +55,25 @@ impl X207Circle {
         }
 
         let current_epoch = self.current_epoch;
-        let member = self.members.get_mut(&account).expect("member checked above");
+        let member = self
+            .members
+            .get_mut(&account)
+            .expect("member checked above");
         member.settle_reactivation(current_epoch, &params);
-        member.stake = member.stake.checked_add(amount).unwrap_or_else(|| env::panic_str("ERR_STAKE_OVERFLOW"));
+        member.stake = member
+            .stake
+            .checked_add(amount)
+            .unwrap_or_else(|| env::panic_str("ERR_STAKE_OVERFLOW"));
         if member.status == MemberStatus::Pending {
             member.status = MemberStatus::Active;
         }
         let mut reactivated = None;
         if member.status == MemberStatus::Active {
-            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account);
+            member.limit = crate::deal::bound_limit(
+                compute_limit(member.stake, member.settled_history, &params),
+                member.stake,
+                &account,
+            );
         } else if member.status == MemberStatus::Suspended {
             // ADR-30 (CT-079): a stake top-up reactivates from the next epoch. The join condition is a positive stake,
             // which this transfer gives (`ERR_ZERO_AMOUNT` is checked before). `settled_history` before the default
@@ -92,12 +110,26 @@ impl X207Circle {
 impl X207Circle {
     /// Called by the USDT contract. Returns the amount to refund: `0` when the whole amount was used.
     /// Order of checks: `ERR_WRONG_TOKEN`, `ERR_BAD_MSG`, `ERR_ZERO_AMOUNT`, then the action.
-    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
+    pub fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
         let token = env::predecessor_account_id();
         // CT-090: the `escrow` action fills the escrow of a class A grant with a NEP-141 token; stake and settle stay USDT only
-        let escrow = serde_json::from_str::<serde_json::Value>(&msg).ok().filter(|v| v.get("action").and_then(|a| a.as_str()) == Some("escrow"));
+        let escrow = serde_json::from_str::<serde_json::Value>(&msg)
+            .ok()
+            .filter(|v| v.get("action").and_then(|a| a.as_str()) == Some("escrow"));
         if let Some(escrow) = escrow {
-            let grant_id = escrow.get("grant_id").and_then(|g| g.as_u64()).unwrap_or_else(|| env::panic_str("ERR_BAD_MSG: msg must be {\"action\":\"escrow\",\"grant_id\":N}"));
+            let grant_id = escrow
+                .get("grant_id")
+                .and_then(|g| g.as_u64())
+                .unwrap_or_else(|| {
+                    env::panic_str(
+                        "ERR_BAD_MSG: msg must be {\"action\":\"escrow\",\"grant_id\":N}",
+                    )
+                });
             if amount.0 == 0 {
                 env::panic_str("ERR_ZERO_AMOUNT");
             }
@@ -106,7 +138,8 @@ impl X207Circle {
         if token != self.usdt_token_id {
             env::panic_str(&format!("ERR_WRONG_TOKEN: {token}"));
         }
-        let msg: TransferMsg = serde_json::from_str(&msg).unwrap_or_else(|e| env::panic_str(&format!("ERR_BAD_MSG: {e}")));
+        let msg: TransferMsg = serde_json::from_str(&msg)
+            .unwrap_or_else(|e| env::panic_str(&format!("ERR_BAD_MSG: {e}")));
         if amount.0 == 0 {
             env::panic_str("ERR_ZERO_AMOUNT");
         }
@@ -115,7 +148,9 @@ impl X207Circle {
                 self.stake_from_transfer(sender_id, amount.0, member_id);
                 PromiseOrValue::Value(U128(0))
             }
-            TransferMsg::Settle { epoch, member_id } => self.settle_transfer(sender_id, amount, epoch, member_id),
+            TransferMsg::Settle { epoch, member_id } => {
+                self.settle_transfer(sender_id, amount, epoch, member_id)
+            }
         }
     }
 
@@ -133,23 +168,36 @@ impl X207Circle {
     ) -> PromiseOrValue<Vec<U128>> {
         let caller = env::predecessor_account_id();
         // CT-092: the `escrow` action fills the escrow of a class A grant with a multi-token from any NEP-245 contract; settle stays Intents and USDT only
-        let escrow = serde_json::from_str::<serde_json::Value>(&msg).ok().filter(|v| v.get("action").and_then(|a| a.as_str()) == Some("escrow"));
+        let escrow = serde_json::from_str::<serde_json::Value>(&msg)
+            .ok()
+            .filter(|v| v.get("action").and_then(|a| a.as_str()) == Some("escrow"));
         if let Some(escrow) = escrow {
             let grant_id = escrow.get("grant_id").and_then(|g| g.as_u64());
             let _ = sender_id;
-            return self.escrow_mt_from_transfer(caller, previous_owner_ids, token_ids, amounts, grant_id);
+            return self.escrow_mt_from_transfer(
+                caller,
+                previous_owner_ids,
+                token_ids,
+                amounts,
+                grant_id,
+            );
         }
         if caller != self.intents_id {
-            env::panic_str(&format!("ERR_WRONG_TOKEN: {caller} is not the intents contract"));
+            env::panic_str(&format!(
+                "ERR_WRONG_TOKEN: {caller} is not the intents contract"
+            ));
         }
         let expected = format!("nep141:{}", self.usdt_token_id);
         if token_ids.len() != 1 || token_ids[0] != expected {
-            env::panic_str(&format!("ERR_WRONG_TOKEN: expected the single token {expected}, got {token_ids:?}"));
+            env::panic_str(&format!(
+                "ERR_WRONG_TOKEN: expected the single token {expected}, got {token_ids:?}"
+            ));
         }
         if amounts.len() != 1 || previous_owner_ids.is_empty() {
             env::panic_str("ERR_BAD_MSG: one amount and at least one previous owner are required");
         }
-        let msg: TransferMsg = serde_json::from_str(&msg).unwrap_or_else(|e| env::panic_str(&format!("ERR_BAD_MSG: {e}")));
+        let msg: TransferMsg = serde_json::from_str(&msg)
+            .unwrap_or_else(|e| env::panic_str(&format!("ERR_BAD_MSG: {e}")));
         let amount = amounts[0];
         if amount.0 == 0 {
             env::panic_str("ERR_ZERO_AMOUNT");
@@ -164,7 +212,9 @@ impl X207Circle {
                 crate::intents_withdraw::add_credit(amount.0 - refund.0);
                 PromiseOrValue::Value(vec![refund])
             }
-            PromiseOrValue::Promise(_) => env::panic_str("ERR_D2_ACCOUNTING: settle_transfer returned a promise"),
+            PromiseOrValue::Promise(_) => {
+                env::panic_str("ERR_D2_ACCOUNTING: settle_transfer returned a promise")
+            }
         }
     }
 }
@@ -186,12 +236,19 @@ impl X207Circle {
         if self.epoch_or_panic(self.current_epoch).params.admission != Admission::Dao {
             env::panic_str("ERR_ADMISSION_NOT_DAO: admission is open");
         }
-        let member = self.members.get_mut(&account_id).expect("member checked above");
+        let member = self
+            .members
+            .get_mut(&account_id)
+            .expect("member checked above");
         if member.admitted {
             env::panic_str(&format!("ERR_ALREADY_ADMITTED: {account_id}"));
         }
         member.admitted = true;
-        MemberAdmitted { account_id, status: status_wire(member.status).to_string() }.emit();
+        MemberAdmitted {
+            account_id,
+            status: status_wire(member.status).to_string(),
+        }
+        .emit();
     }
 
     /// ADR-29: the member asks to leave at the end of the current epoch. Vouchers for later epochs
@@ -218,48 +275,95 @@ impl X207Circle {
     /// - payout ok: the member is `exited`. A fee that failed is sent on to `receiver` (the member keeps it), see `on_fee_refund_resolved`.
     /// - payout failed: the stake comes back (plus the fee if that failed too) and the member may retry; a fee that was paid stays paid.
     #[private]
-    pub fn on_withdraw_resolved_fee(&mut self, account_id: AccountId, amount: U128, fee: U128, relayer: AccountId, receiver: AccountId) -> bool {
+    pub fn on_withdraw_resolved_fee(
+        &mut self,
+        account_id: AccountId,
+        amount: U128,
+        fee: U128,
+        relayer: AccountId,
+        receiver: AccountId,
+    ) -> bool {
         let payout = amount.0 - fee.0;
         let payout_ok = env::promise_result_checked(0, 64).is_ok();
         let fee_ok = env::promise_result_checked(1, 16).is_ok();
-        let epoch_params = self.epochs.get(&self.current_epoch).map(|e| e.params.clone());
-        let Some(member) = self.members.get_mut(&account_id) else { return false };
+        let epoch_params = self
+            .epochs
+            .get(&self.current_epoch)
+            .map(|e| e.params.clone());
+        let Some(member) = self.members.get_mut(&account_id) else {
+            return false;
+        };
         if !member.withdraw_pending {
             return false;
         }
         member.withdraw_pending = false;
         if fee_ok {
             self.d6_in_flight_out(fee.0);
-            RelayerFeePaid { account_id: account_id.clone(), relayer: relayer.clone(), action: "withdraw_stake".into(), epoch: 0, amount: fee }.emit();
+            RelayerFeePaid {
+                account_id: account_id.clone(),
+                relayer: relayer.clone(),
+                action: "withdraw_stake".into(),
+                epoch: 0,
+                amount: fee,
+            }
+            .emit();
         } else {
-            RelayerFeeFailed { account_id: account_id.clone(), relayer, action: "withdraw_stake".into(), epoch: 0, amount: fee }.emit();
+            RelayerFeeFailed {
+                account_id: account_id.clone(),
+                relayer,
+                action: "withdraw_stake".into(),
+                epoch: 0,
+                amount: fee,
+            }
+            .emit();
         }
-        let member = self.members.get_mut(&account_id).expect("member checked above");
+        let member = self
+            .members
+            .get_mut(&account_id)
+            .expect("member checked above");
         if payout_ok {
             member.status = MemberStatus::Exited;
             self.d6_in_flight_out(payout);
             crate::evm::refund_sponsor(&account_id);
-            StakeWithdrawn { account_id: account_id.clone(), amount: U128(payout) }.emit();
+            StakeWithdrawn {
+                account_id: account_id.clone(),
+                amount: U128(payout),
+            }
+            .emit();
             if !fee_ok {
                 // `fee` is still in flight: send it to the member's receiver; the second callback books the outcome.
                 let _ = Promise::new(self.usdt_token_id.clone())
                     .function_call(
                         "ft_transfer".to_string(),
-                        json!({"receiver_id": receiver, "amount": fee, "memo": null}).to_string().into_bytes(),
+                        json!({"receiver_id": receiver, "amount": fee, "memo": null})
+                            .to_string()
+                            .into_bytes(),
                         NearToken::from_yoctonear(1),
                         WITHDRAW_TRANSFER_GAS,
                     )
-                    .then(Self::ext(env::current_account_id()).with_static_gas(WITHDRAW_CALLBACK_GAS).on_fee_refund_resolved(account_id, fee));
+                    .then(
+                        Self::ext(env::current_account_id())
+                            .with_static_gas(WITHDRAW_CALLBACK_GAS)
+                            .on_fee_refund_resolved(account_id, fee),
+                    );
             }
             return true;
         }
         let back = payout + if fee_ok { 0 } else { fee.0 };
         member.stake = back;
         if let (MemberStatus::Active, Some(params)) = (member.status, epoch_params) {
-            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account_id);
+            member.limit = crate::deal::bound_limit(
+                compute_limit(member.stake, member.settled_history, &params),
+                member.stake,
+                &account_id,
+            );
         }
         self.d6_in_flight_to_stake(back);
-        StakeWithdrawFailed { account_id, amount: U128(back) }.emit();
+        StakeWithdrawFailed {
+            account_id,
+            amount: U128(back),
+        }
+        .emit();
         false
     }
 
@@ -271,7 +375,14 @@ impl X207Circle {
             self.d6_in_flight_out(amount.0);
         } else {
             self.d6_in_flight_to_reserve(amount.0);
-            RelayerFeeFailed { account_id: account_id.clone(), relayer: account_id, action: "refund".into(), epoch: 0, amount }.emit();
+            RelayerFeeFailed {
+                account_id: account_id.clone(),
+                relayer: account_id,
+                action: "refund".into(),
+                epoch: 0,
+                amount,
+            }
+            .emit();
         }
     }
 
@@ -281,8 +392,13 @@ impl X207Circle {
     pub fn on_withdraw_resolved(&mut self, account_id: AccountId, amount: U128) -> bool {
         let sent = amount.0;
         let ok = env::promise_result_checked(0, 64).is_ok();
-        let epoch_params = self.epochs.get(&self.current_epoch).map(|e| e.params.clone());
-        let Some(member) = self.members.get_mut(&account_id) else { return false };
+        let epoch_params = self
+            .epochs
+            .get(&self.current_epoch)
+            .map(|e| e.params.clone());
+        let Some(member) = self.members.get_mut(&account_id) else {
+            return false;
+        };
         if !member.withdraw_pending {
             return false;
         }
@@ -296,7 +412,11 @@ impl X207Circle {
         }
         member.stake = sent;
         if let (MemberStatus::Active, Some(params)) = (member.status, epoch_params) {
-            member.limit = crate::deal::bound_limit(compute_limit(member.stake, member.settled_history, &params), member.stake, &account_id);
+            member.limit = crate::deal::bound_limit(
+                compute_limit(member.stake, member.settled_history, &params),
+                member.stake,
+                &account_id,
+            );
         }
         self.d6_in_flight_to_stake(sent);
         StakeWithdrawFailed { account_id, amount }.emit();
@@ -309,12 +429,25 @@ impl X207Circle {
     pub(crate) fn request_exit_for(&mut self, account: AccountId) {
         let epoch = self.current_epoch;
         crate::deal::assert_no_bond(&account);
-        let Some(member) = self.members.get_mut(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
-        if !matches!(member.status, MemberStatus::Active | MemberStatus::Suspended) || member.exit_requested_epoch.is_some() {
-            env::panic_str(&format!("ERR_WRONG_STATUS: {account} is {}", status_wire(member.status)));
+        let Some(member) = self.members.get_mut(&account) else {
+            env::panic_str(&format!("ERR_NOT_MEMBER: {account}"))
+        };
+        if !matches!(
+            member.status,
+            MemberStatus::Active | MemberStatus::Suspended
+        ) || member.exit_requested_epoch.is_some()
+        {
+            env::panic_str(&format!(
+                "ERR_WRONG_STATUS: {account} is {}",
+                status_wire(member.status)
+            ));
         }
         member.exit_requested_epoch = Some(epoch);
-        ExitRequested { account_id: account, epoch }.emit();
+        ExitRequested {
+            account_id: account,
+            epoch,
+        }
+        .emit();
     }
 
     /// Body of `withdraw_stake`, shared with `withdraw_stake_evm`; the stake goes to `receiver`.
@@ -326,30 +459,43 @@ impl X207Circle {
         relayer: Option<(AccountId, u128)>,
     ) -> PromiseOrValue<bool> {
         crate::deal::assert_no_bond(&account);
-        let Some(member) = self.members.get(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
+        let Some(member) = self.members.get(&account) else {
+            env::panic_str(&format!("ERR_NOT_MEMBER: {account}"))
+        };
         if member.status == MemberStatus::Exited {
             env::panic_str(&format!("ERR_MEMBER_EXITED: {account}"));
         }
         let Some(exit_epoch) = member.exit_requested_epoch else {
-            env::panic_str(&format!("ERR_EXIT_NOT_READY: {account} has not asked to exit"))
+            env::panic_str(&format!(
+                "ERR_EXIT_NOT_READY: {account} has not asked to exit"
+            ))
         };
         if member.withdraw_pending {
             env::panic_str(&format!("ERR_WITHDRAW_IN_FLIGHT: {account}"));
         }
         if self.epochs.get(&exit_epoch).map(|e| e.phase) != Some(EpochPhase::Finalized) {
-            env::panic_str(&format!("ERR_EXIT_NOT_READY: epoch {exit_epoch} is not finalized"));
+            env::panic_str(&format!(
+                "ERR_EXIT_NOT_READY: epoch {exit_epoch} is not finalized"
+            ));
         }
         let debt = self.outstanding_debt.get(&account).copied().unwrap_or(0);
         if debt > 0 {
             env::panic_str(&format!("ERR_HAS_DUE: {account} owes {debt}"));
         }
 
-        let member = self.members.get_mut(&account).expect("member checked above");
+        let member = self
+            .members
+            .get_mut(&account)
+            .expect("member checked above");
         let amount = member.stake;
         if amount == 0 {
             member.status = MemberStatus::Exited;
             member.limit = 0;
-            StakeWithdrawn { account_id: account.clone(), amount: U128(0) }.emit();
+            StakeWithdrawn {
+                account_id: account.clone(),
+                amount: U128(0),
+            }
+            .emit();
             crate::evm::refund_sponsor(&account);
             return PromiseOrValue::Value(true);
         }
@@ -357,10 +503,14 @@ impl X207Circle {
         member.limit = 0;
         member.withdraw_pending = true;
         self.d6_stake_to_in_flight(amount);
-        let fee = relayer.as_ref().map_or(0, |(_, max_fee)| crate::evm::relayer_fee_for(amount, *max_fee));
+        let fee = relayer.as_ref().map_or(0, |(_, max_fee)| {
+            crate::evm::relayer_fee_for(amount, *max_fee)
+        });
         let transfer = Promise::new(self.usdt_token_id.clone()).function_call(
             "ft_transfer".to_string(),
-            json!({"receiver_id": receiver, "amount": U128(amount - fee), "memo": null}).to_string().into_bytes(),
+            json!({"receiver_id": receiver, "amount": U128(amount - fee), "memo": null})
+                .to_string()
+                .into_bytes(),
             NearToken::from_yoctonear(1),
             WITHDRAW_TRANSFER_GAS,
         );
@@ -368,19 +518,33 @@ impl X207Circle {
             // CT-117: the fee is its own transfer, joined with the payout in one callback (see `claim_for`).
             let fee_transfer = Promise::new(self.usdt_token_id.clone()).function_call(
                 "ft_transfer".to_string(),
-                json!({"receiver_id": relayer_id, "amount": U128(fee), "memo": null}).to_string().into_bytes(),
+                json!({"receiver_id": relayer_id, "amount": U128(fee), "memo": null})
+                    .to_string()
+                    .into_bytes(),
                 NearToken::from_yoctonear(1),
                 WITHDRAW_TRANSFER_GAS,
             );
-            return PromiseOrValue::Promise(transfer.and(fee_transfer).then(
+            return PromiseOrValue::Promise(
+                transfer.and(fee_transfer).then(
+                    Self::ext(env::current_account_id())
+                        .with_static_gas(WITHDRAW_CALLBACK_GAS)
+                        .on_withdraw_resolved_fee(
+                            account,
+                            U128(amount),
+                            U128(fee),
+                            relayer_id,
+                            receiver,
+                        ),
+                ),
+            );
+        }
+        PromiseOrValue::Promise(
+            transfer.then(
                 Self::ext(env::current_account_id())
                     .with_static_gas(WITHDRAW_CALLBACK_GAS)
-                    .on_withdraw_resolved_fee(account, U128(amount), U128(fee), relayer_id, receiver),
-            ));
-        }
-        PromiseOrValue::Promise(transfer.then(
-            Self::ext(env::current_account_id()).with_static_gas(WITHDRAW_CALLBACK_GAS).on_withdraw_resolved(account, U128(amount)),
-        ))
+                    .on_withdraw_resolved(account, U128(amount)),
+            ),
+        )
     }
 }
 
@@ -401,12 +565,22 @@ mod tests {
     }
 
     fn as_caller(caller: &str) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(caller)).block_timestamp(1_000).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc(caller))
+            .block_timestamp(1_000)
+            .build());
     }
 
     fn circle_with(params: Params) -> X207Circle {
         as_caller("deployer.near");
-        X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), params, 1_000)
+        X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".into(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            params,
+            1_000,
+        )
     }
 
     fn circle() -> X207Circle {
@@ -418,7 +592,9 @@ mod tests {
             acc(id),
             Member {
                 account_id: acc(id),
-                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                    .parse::<PublicKey>()
+                    .unwrap(),
                 terms_hash: "a".repeat(64),
                 stake,
                 limit,
@@ -443,23 +619,40 @@ mod tests {
         c
     }
 
-    fn transfer(c: &mut X207Circle, token: &str, sender: &str, amount: u128, msg: &str) -> PromiseOrValue<U128> {
+    fn transfer(
+        c: &mut X207Circle,
+        token: &str,
+        sender: &str,
+        amount: u128,
+        msg: &str,
+    ) -> PromiseOrValue<U128> {
         as_caller(token);
         c.ft_on_transfer(acc(sender), U128(amount), msg.to_string())
     }
 
     /// A valid stake transfer; the whole amount is used, so nothing is refunded.
     fn stake(c: &mut X207Circle, sender: &str, amount: u128) {
-        zero(transfer(c, "usdt.near", sender, amount, r#"{"action":"stake"}"#));
+        zero(transfer(
+            c,
+            "usdt.near",
+            sender,
+            amount,
+            r#"{"action":"stake"}"#,
+        ));
     }
 
     fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).unwrap_err();
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     fn rejected(c: &mut X207Circle, token: &str, sender: &str, amount: u128, msg: &str) -> String {
-        panic_text(std::panic::AssertUnwindSafe(|| drop(transfer(c, token, sender, amount, msg))))
+        panic_text(std::panic::AssertUnwindSafe(|| {
+            drop(transfer(c, token, sender, amount, msg))
+        }))
     }
 
     fn zero(result: PromiseOrValue<U128>) {
@@ -480,15 +673,34 @@ mod tests {
         let _ = get_logs();
         stake(&mut c, "translator.near", 100 * CREDIT);
         let m = view(&c, "translator.near");
-        assert_eq!((m.status, m.stake.0, m.limit.0), (MemberStatus::Active, 100 * CREDIT, 80 * CREDIT));
+        assert_eq!(
+            (m.status, m.stake.0, m.limit.0),
+            (MemberStatus::Active, 100 * CREDIT, 80 * CREDIT)
+        );
         assert_eq!(c.total_stake, 100 * CREDIT);
-        let log = get_logs().into_iter().find_map(|l| l.strip_prefix("EVENT_JSON:").map(str::to_string)).unwrap();
+        let log = get_logs()
+            .into_iter()
+            .find_map(|l| l.strip_prefix("EVENT_JSON:").map(str::to_string))
+            .unwrap();
         let event: Value = serde_json::from_str(&log).unwrap();
         assert_eq!(event["event"], "stake_added");
         let data = &event["data"][0];
         assert_eq!(data["account_id"], "translator.near");
         assert_eq!(data["sender_id"], "translator.near");
-        assert_eq!((data["amount"].as_str(), data["stake"].as_str(), data["limit"].as_str(), data["status"].as_str()), (Some("100000000"), Some("100000000"), Some("80000000"), Some("active")));
+        assert_eq!(
+            (
+                data["amount"].as_str(),
+                data["stake"].as_str(),
+                data["limit"].as_str(),
+                data["status"].as_str()
+            ),
+            (
+                Some("100000000"),
+                Some("100000000"),
+                Some("80000000"),
+                Some("active")
+            )
+        );
         c.assert_d6(Some(100 * CREDIT));
     }
 
@@ -497,10 +709,23 @@ mod tests {
     fn stake_on_behalf_of_an_agent() {
         let mut c = pending();
         let _ = get_logs();
-        zero(transfer(&mut c, "usdt.near", "outsider.near", 100 * CREDIT, r#"{"action":"stake","member_id":"translator.near"}"#));
+        zero(transfer(
+            &mut c,
+            "usdt.near",
+            "outsider.near",
+            100 * CREDIT,
+            r#"{"action":"stake","member_id":"translator.near"}"#,
+        ));
         assert_eq!(view(&c, "translator.near").stake.0, 100 * CREDIT);
-        let log = get_logs().into_iter().find(|l| l.contains("stake_added")).unwrap();
-        assert!(log.contains(r#""sender_id":"outsider.near""#) && log.contains(r#""account_id":"translator.near""#), "{log}");
+        let log = get_logs()
+            .into_iter()
+            .find(|l| l.contains("stake_added"))
+            .unwrap();
+        assert!(
+            log.contains(r#""sender_id":"outsider.near""#)
+                && log.contains(r#""account_id":"translator.near""#),
+            "{log}"
+        );
     }
 
     // TC-CT-017-03
@@ -510,7 +735,10 @@ mod tests {
         stake(&mut c, "translator.near", 100 * CREDIT);
         stake(&mut c, "translator.near", 50 * CREDIT);
         let m = view(&c, "translator.near");
-        assert_eq!((m.status, m.stake.0, m.limit.0), (MemberStatus::Active, 150 * CREDIT, 120 * CREDIT));
+        assert_eq!(
+            (m.status, m.stake.0, m.limit.0),
+            (MemberStatus::Active, 150 * CREDIT, 120 * CREDIT)
+        );
         c.assert_d6(Some(150 * CREDIT));
     }
 
@@ -519,7 +747,17 @@ mod tests {
     fn only_the_usdt_contract_may_call() {
         let mut c = pending();
         for caller in ["usdt_palsu.near", "outsider.near"] {
-            assert!(rejected(&mut c, caller, "translator.near", 100 * CREDIT, r#"{"action":"stake"}"#).contains("ERR_WRONG_TOKEN"), "{caller}");
+            assert!(
+                rejected(
+                    &mut c,
+                    caller,
+                    "translator.near",
+                    100 * CREDIT,
+                    r#"{"action":"stake"}"#
+                )
+                .contains("ERR_WRONG_TOKEN"),
+                "{caller}"
+            );
         }
         assert_eq!(view(&c, "translator.near").stake.0, 0);
         assert_eq!(c.total_stake, 0);
@@ -529,8 +767,18 @@ mod tests {
     #[test]
     fn unknown_action_or_bad_json() {
         let mut c = pending();
-        for msg in [r#"{"action":"burn"}"#, "stake", "", r#"{"action":"stake","member_id":42}"#, "{}"] {
-            assert!(rejected(&mut c, "usdt.near", "translator.near", CREDIT, msg).contains("ERR_BAD_MSG"), "{msg:?}");
+        for msg in [
+            r#"{"action":"burn"}"#,
+            "stake",
+            "",
+            r#"{"action":"stake","member_id":42}"#,
+            "{}",
+        ] {
+            assert!(
+                rejected(&mut c, "usdt.near", "translator.near", CREDIT, msg)
+                    .contains("ERR_BAD_MSG"),
+                "{msg:?}"
+            );
         }
         assert_eq!(c.total_stake, 0);
     }
@@ -539,23 +787,54 @@ mod tests {
     #[test]
     fn stake_needs_a_member() {
         let mut c = pending();
-        assert!(rejected(&mut c, "usdt.near", "outsider.near", CREDIT, r#"{"action":"stake"}"#).contains("ERR_NOT_MEMBER"));
-        assert!(rejected(&mut c, "usdt.near", "translator.near", CREDIT, r#"{"action":"stake","member_id":"outsider.near"}"#).contains("ERR_NOT_MEMBER"));
+        assert!(rejected(
+            &mut c,
+            "usdt.near",
+            "outsider.near",
+            CREDIT,
+            r#"{"action":"stake"}"#
+        )
+        .contains("ERR_NOT_MEMBER"));
+        assert!(rejected(
+            &mut c,
+            "usdt.near",
+            "translator.near",
+            CREDIT,
+            r#"{"action":"stake","member_id":"outsider.near"}"#
+        )
+        .contains("ERR_NOT_MEMBER"));
     }
 
     // TC-CT-017-10
     #[test]
     fn zero_amount_is_rejected() {
         let mut c = pending();
-        assert!(rejected(&mut c, "usdt.near", "translator.near", 0, r#"{"action":"stake"}"#).contains("ERR_ZERO_AMOUNT"));
+        assert!(rejected(
+            &mut c,
+            "usdt.near",
+            "translator.near",
+            0,
+            r#"{"action":"stake"}"#
+        )
+        .contains("ERR_ZERO_AMOUNT"));
     }
 
     // TC-CT-017-11
     #[test]
     fn dao_admission_blocks_an_unadmitted_member() {
-        let mut c = circle_with(Params { admission: Admission::Dao, ..Params::default() });
+        let mut c = circle_with(Params {
+            admission: Admission::Dao,
+            ..Params::default()
+        });
         add(&mut c, "translator.near", MemberStatus::Pending, 0, 0);
-        assert!(rejected(&mut c, "usdt.near", "translator.near", 100 * CREDIT, r#"{"action":"stake"}"#).contains("ERR_NOT_ADMITTED"));
+        assert!(rejected(
+            &mut c,
+            "usdt.near",
+            "translator.near",
+            100 * CREDIT,
+            r#"{"action":"stake"}"#
+        )
+        .contains("ERR_NOT_ADMITTED"));
         assert_eq!(view(&c, "translator.near").status, MemberStatus::Pending);
         c.members.get_mut(&acc("translator.near")).unwrap().admitted = true;
         stake(&mut c, "translator.near", 100 * CREDIT);
@@ -564,7 +843,9 @@ mod tests {
 
     fn call_admit(c: &mut X207Circle, caller: &str, account: &str) -> String {
         as_caller(caller);
-        panic_text(std::panic::AssertUnwindSafe(|| c.admit_member(acc(account))))
+        panic_text(std::panic::AssertUnwindSafe(|| {
+            c.admit_member(acc(account))
+        }))
     }
 
     // TC-CT-018-01
@@ -577,15 +858,25 @@ mod tests {
     // TC-CT-018-02 and the positive path: admit, event, then the stake activates
     #[test]
     fn admit_then_stake_activates_and_a_second_admit_fails() {
-        let mut c = circle_with(Params { admission: Admission::Dao, ..Params::default() });
+        let mut c = circle_with(Params {
+            admission: Admission::Dao,
+            ..Params::default()
+        });
         add(&mut c, "translator.near", MemberStatus::Pending, 0, 0);
         as_caller("dao.near");
         let _ = near_sdk::test_utils::get_logs();
         c.admit_member(acc("translator.near"));
         let log = near_sdk::test_utils::get_logs().join("\n");
-        assert!(log.contains(r#""event":"member_admitted""#) && log.contains(r#""status":"pending""#), "{log}");
+        assert!(
+            log.contains(r#""event":"member_admitted""#) && log.contains(r#""status":"pending""#),
+            "{log}"
+        );
         assert!(c.members.get(&acc("translator.near")).unwrap().admitted);
-        assert_eq!(view(&c, "translator.near").status, MemberStatus::Pending, "status stays pending until the stake");
+        assert_eq!(
+            view(&c, "translator.near").status,
+            MemberStatus::Pending,
+            "status stays pending until the stake"
+        );
         assert!(call_admit(&mut c, "dao.near", "translator.near").contains("ERR_ALREADY_ADMITTED"));
         stake(&mut c, "translator.near", 100 * CREDIT);
         assert_eq!(view(&c, "translator.near").status, MemberStatus::Active);
@@ -594,7 +885,10 @@ mod tests {
     // TC-CT-018-03
     #[test]
     fn admit_is_for_the_owner_and_for_members() {
-        let mut c = circle_with(Params { admission: Admission::Dao, ..Params::default() });
+        let mut c = circle_with(Params {
+            admission: Admission::Dao,
+            ..Params::default()
+        });
         add(&mut c, "translator.near", MemberStatus::Pending, 0, 0);
         assert!(call_admit(&mut c, "outsider.near", "translator.near").contains("ERR_NOT_OWNER"));
         assert!(call_admit(&mut c, "dao.near", "outsider.near").contains("ERR_NOT_MEMBER"));
@@ -610,36 +904,81 @@ mod tests {
     #[test]
     fn ct_079_reactivation_by_stake() {
         let mut c = circle();
-        add(&mut c, "scraper.near", MemberStatus::Suspended, 65 * CREDIT, 0);
-        c.members.get_mut(&acc("scraper.near")).unwrap().settled_history = 35 * CREDIT;
+        add(
+            &mut c,
+            "scraper.near",
+            MemberStatus::Suspended,
+            65 * CREDIT,
+            0,
+        );
+        c.members
+            .get_mut(&acc("scraper.near"))
+            .unwrap()
+            .settled_history = 35 * CREDIT;
         let _ = logs();
         stake(&mut c, "scraper.near", 35 * CREDIT);
         let log = logs();
         assert!(log.contains(r#""event":"member_reactivated""#), "{log}");
-        assert!(log.contains(r#""effective_epoch":2"#) && log.contains(r#""limit":"80000000""#) && log.contains(r#""stake":"100000000""#), "{log}");
+        assert!(
+            log.contains(r#""effective_epoch":2"#)
+                && log.contains(r#""limit":"80000000""#)
+                && log.contains(r#""stake":"100000000""#),
+            "{log}"
+        );
         let m = c.members.get(&acc("scraper.near")).unwrap();
-        assert_eq!((m.status, m.reactivate_epoch, m.settled_history, m.limit, m.stake), (MemberStatus::Suspended, Some(2), 0, 0, 100 * CREDIT));
-        assert_eq!(c.headroom(acc("scraper.near")).0, 0, "not usable before the epoch opens");
+        assert_eq!(
+            (
+                m.status,
+                m.reactivate_epoch,
+                m.settled_history,
+                m.limit,
+                m.stake
+            ),
+            (MemberStatus::Suspended, Some(2), 0, 0, 100 * CREDIT)
+        );
+        assert_eq!(
+            c.headroom(acc("scraper.near")).0,
+            0,
+            "not usable before the epoch opens"
+        );
 
         // epoch 2 opens: the view reads active with limit 80, nothing is written yet
         c.current_epoch = 2;
-        c.epochs.insert(2, crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()));
+        c.epochs.insert(
+            2,
+            crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()),
+        );
         let v = view(&c, "scraper.near");
-        assert_eq!((v.status, v.limit.0, v.settled_history.0), (MemberStatus::Active, 80 * CREDIT, 0));
+        assert_eq!(
+            (v.status, v.limit.0, v.settled_history.0),
+            (MemberStatus::Active, 80 * CREDIT, 0)
+        );
         assert_eq!(c.headroom(acc("scraper.near")).0, 80 * CREDIT);
-        assert_eq!(c.members.get(&acc("scraper.near")).unwrap().status, MemberStatus::Suspended);
+        assert_eq!(
+            c.members.get(&acc("scraper.near")).unwrap().status,
+            MemberStatus::Suspended
+        );
 
         // the next stake writes it
         stake(&mut c, "scraper.near", CREDIT);
         let m = c.members.get(&acc("scraper.near")).unwrap();
-        assert_eq!((m.status, m.reactivate_epoch, m.limit), (MemberStatus::Active, None, 80_800_000));
+        assert_eq!(
+            (m.status, m.reactivate_epoch, m.limit),
+            (MemberStatus::Active, None, 80_800_000)
+        );
     }
 
     // CT-079: an active member's top-up emits no member_reactivated
     #[test]
     fn ct_079_active_member_is_not_reactivated() {
         let mut c = circle();
-        add(&mut c, "coder.near", MemberStatus::Active, 100 * CREDIT, 80 * CREDIT);
+        add(
+            &mut c,
+            "coder.near",
+            MemberStatus::Active,
+            100 * CREDIT,
+            80 * CREDIT,
+        );
         let _ = logs();
         stake(&mut c, "coder.near", CREDIT);
         assert!(!logs().contains("member_reactivated"));
@@ -649,10 +988,19 @@ mod tests {
     #[test]
     fn suspended_member_adds_stake_but_stays_suspended() {
         let mut c = circle();
-        add(&mut c, "scraper.near", MemberStatus::Suspended, 65 * CREDIT, 0);
+        add(
+            &mut c,
+            "scraper.near",
+            MemberStatus::Suspended,
+            65 * CREDIT,
+            0,
+        );
         stake(&mut c, "scraper.near", 50 * CREDIT);
         let m = view(&c, "scraper.near");
-        assert_eq!((m.status, m.stake.0, m.limit.0), (MemberStatus::Suspended, 115 * CREDIT, 0));
+        assert_eq!(
+            (m.status, m.stake.0, m.limit.0),
+            (MemberStatus::Suspended, 115 * CREDIT, 0)
+        );
         c.assert_d6(Some(115 * CREDIT));
     }
 
@@ -661,7 +1009,14 @@ mod tests {
     fn exited_member_cannot_stake() {
         let mut c = circle();
         add(&mut c, "gpu.near", MemberStatus::Exited, 0, 0);
-        assert!(rejected(&mut c, "usdt.near", "gpu.near", 10 * CREDIT, r#"{"action":"stake"}"#).contains("ERR_MEMBER_EXITED"));
+        assert!(rejected(
+            &mut c,
+            "usdt.near",
+            "gpu.near",
+            10 * CREDIT,
+            r#"{"action":"stake"}"#
+        )
+        .contains("ERR_MEMBER_EXITED"));
     }
 
     // TC-CT-017-14
@@ -670,23 +1025,45 @@ mod tests {
         let mut c = pending();
         stake(&mut c, "translator.near", 1);
         let m = view(&c, "translator.near");
-        assert_eq!((m.status, m.stake.0, m.limit.0), (MemberStatus::Active, 1, 0));
+        assert_eq!(
+            (m.status, m.stake.0, m.limit.0),
+            (MemberStatus::Active, 1, 0)
+        );
     }
 
     // K-06: no stake while an exit is requested
     #[test]
     fn stake_during_exit_is_rejected() {
         let mut c = circle();
-        add(&mut c, "gpu.near", MemberStatus::Active, 100 * CREDIT, 80 * CREDIT);
-        c.members.get_mut(&acc("gpu.near")).unwrap().exit_requested_epoch = Some(1);
-        assert!(rejected(&mut c, "usdt.near", "gpu.near", 10 * CREDIT, r#"{"action":"stake"}"#).contains("ERR_EXITING"));
+        add(
+            &mut c,
+            "gpu.near",
+            MemberStatus::Active,
+            100 * CREDIT,
+            80 * CREDIT,
+        );
+        c.members
+            .get_mut(&acc("gpu.near"))
+            .unwrap()
+            .exit_requested_epoch = Some(1);
+        assert!(rejected(
+            &mut c,
+            "usdt.near",
+            "gpu.near",
+            10 * CREDIT,
+            r#"{"action":"stake"}"#
+        )
+        .contains("ERR_EXITING"));
         assert_eq!(view(&c, "gpu.near").stake.0, 100 * CREDIT);
     }
 
     // limit is capped by `limit_cap` and never above stake (I-01, I-02)
     #[test]
     fn limit_respects_cap_and_stake() {
-        let mut c = circle_with(Params { limit_cap: U128(50 * CREDIT), ..Params::default() });
+        let mut c = circle_with(Params {
+            limit_cap: U128(50 * CREDIT),
+            ..Params::default()
+        });
         add(&mut c, "translator.near", MemberStatus::Pending, 0, 0);
         stake(&mut c, "translator.near", 100 * CREDIT);
         assert_eq!(view(&c, "translator.near").limit.0, 50 * CREDIT);
@@ -696,9 +1073,14 @@ mod tests {
     #[test]
     fn check_order() {
         let mut c = pending();
-        assert!(rejected(&mut c, "outsider.near", "x.near", 0, "not json").contains("ERR_WRONG_TOKEN"));
+        assert!(
+            rejected(&mut c, "outsider.near", "x.near", 0, "not json").contains("ERR_WRONG_TOKEN")
+        );
         assert!(rejected(&mut c, "usdt.near", "x.near", 0, "not json").contains("ERR_BAD_MSG"));
-        assert!(rejected(&mut c, "usdt.near", "x.near", 0, r#"{"action":"stake"}"#).contains("ERR_ZERO_AMOUNT"));
+        assert!(
+            rejected(&mut c, "usdt.near", "x.near", 0, r#"{"action":"stake"}"#)
+                .contains("ERR_ZERO_AMOUNT")
+        );
     }
 }
 
@@ -722,7 +1104,9 @@ mod exit_tests {
 
     fn ctx(caller: &str, deposit: u128) -> VMContextBuilder {
         let mut b = VMContextBuilder::new();
-        b.predecessor_account_id(acc(caller)).current_account_id(acc("circle")).attached_deposit(NearToken::from_yoctonear(deposit));
+        b.predecessor_account_id(acc(caller))
+            .current_account_id(acc("circle"))
+            .attached_deposit(NearToken::from_yoctonear(deposit));
         b
     }
 
@@ -735,7 +1119,9 @@ mod exit_tests {
             acc(name),
             Member {
                 account_id: acc(name),
-                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                    .parse::<PublicKey>()
+                    .unwrap(),
                 terms_hash: "a".repeat(64),
                 stake,
                 limit,
@@ -756,9 +1142,28 @@ mod exit_tests {
 
     fn circle() -> X207Circle {
         testing_env!(VMContextBuilder::new().block_timestamp(0).build());
-        let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), Params::default(), 0);
-        add(&mut c, "coder", MemberStatus::Active, 100 * CREDIT, 80 * CREDIT);
-        add(&mut c, "scraper", MemberStatus::Active, 100 * CREDIT, 80 * CREDIT);
+        let mut c = X207Circle::with_config(
+            acc("dao"),
+            "agents-main".into(),
+            acc("usdt"),
+            acc("intents"),
+            Params::default(),
+            0,
+        );
+        add(
+            &mut c,
+            "coder",
+            MemberStatus::Active,
+            100 * CREDIT,
+            80 * CREDIT,
+        );
+        add(
+            &mut c,
+            "scraper",
+            MemberStatus::Active,
+            100 * CREDIT,
+            80 * CREDIT,
+        );
         add(&mut c, "pending", MemberStatus::Pending, 0, 0);
         c
     }
@@ -772,12 +1177,20 @@ mod exit_tests {
     }
 
     fn panics(f: impl FnOnce()) -> String {
-        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).expect_err("expected a panic");
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+            .expect_err("expected a panic");
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     fn events() -> Vec<Value> {
-        get_logs().iter().filter_map(|l| l.strip_prefix("EVENT_JSON:")).map(|b| serde_json::from_str(b).unwrap()).collect()
+        get_logs()
+            .iter()
+            .filter_map(|l| l.strip_prefix("EVENT_JSON:"))
+            .map(|b| serde_json::from_str(b).unwrap())
+            .collect()
     }
 
     fn calls() -> Vec<(String, String, Value)> {
@@ -786,9 +1199,13 @@ mod exit_tests {
             .flat_map(|r| {
                 let receiver = r.receiver_id.to_string();
                 r.actions.into_iter().filter_map(move |a| match a {
-                    MockAction::FunctionCallWeight { method_name, args, .. } => {
-                        Some((receiver.clone(), String::from_utf8(method_name).unwrap(), serde_json::from_slice(&args).unwrap()))
-                    }
+                    MockAction::FunctionCallWeight {
+                        method_name, args, ..
+                    } => Some((
+                        receiver.clone(),
+                        String::from_utf8(method_name).unwrap(),
+                        serde_json::from_slice(&args).unwrap(),
+                    )),
                     _ => None,
                 })
             })
@@ -810,7 +1227,13 @@ mod exit_tests {
     }
 
     fn resolve(c: &mut X207Circle, result: PromiseResult, amount: u128) -> bool {
-        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![result]);
+        testing_env!(
+            ctx("circle", 0).build(),
+            test_vm_config(),
+            RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![result]
+        );
         c.on_withdraw_resolved(acc("coder"), U128(amount))
     }
 
@@ -821,9 +1244,18 @@ mod exit_tests {
         call_as("coder");
         c.request_exit();
         let m = c.members.get(&acc("coder")).unwrap();
-        assert_eq!((m.exit_requested_epoch, m.status), (Some(1), MemberStatus::Active));
+        assert_eq!(
+            (m.exit_requested_epoch, m.status),
+            (Some(1), MemberStatus::Active)
+        );
         let ev = events();
-        assert_eq!((ev[0]["event"].as_str(), &ev[0]["data"][0]), (Some("exit_requested"), &serde_json::json!({"account_id": "coder.near", "epoch": 1})));
+        assert_eq!(
+            (ev[0]["event"].as_str(), &ev[0]["data"][0]),
+            (
+                Some("exit_requested"),
+                &serde_json::json!({"account_id": "coder.near", "epoch": 1})
+            )
+        );
     }
 
     // TC-CT-077-02
@@ -832,9 +1264,13 @@ mod exit_tests {
         let mut c = circle();
         for deposit in [0, 2] {
             testing_env!(ctx("coder", deposit).build());
-            assert!(panics(|| c.request_exit()).contains("Requires attached deposit of exactly 1 yoctoNEAR"));
+            assert!(panics(|| c.request_exit())
+                .contains("Requires attached deposit of exactly 1 yoctoNEAR"));
         }
-        assert_eq!(c.members.get(&acc("coder")).unwrap().exit_requested_epoch, None);
+        assert_eq!(
+            c.members.get(&acc("coder")).unwrap().exit_requested_epoch,
+            None
+        );
     }
 
     // TC-CT-077-03, TC-CT-077-14
@@ -855,7 +1291,10 @@ mod exit_tests {
         c.members.get_mut(&acc("scraper")).unwrap().status = MemberStatus::Suspended;
         call_as("scraper");
         c.request_exit();
-        assert_eq!(c.members.get(&acc("scraper")).unwrap().exit_requested_epoch, Some(1));
+        assert_eq!(
+            c.members.get(&acc("scraper")).unwrap().exit_requested_epoch,
+            Some(1)
+        );
         call_as("scraper");
         assert!(panics(|| c.request_exit()).contains("ERR_WRONG_STATUS"));
     }
@@ -864,16 +1303,28 @@ mod exit_tests {
     #[test]
     fn tc_ct_077_07_08_09_exit_epoch_must_be_final() {
         let mut c = circle();
-        assert!(panics(|| drop(withdraw(&mut c, "coder"))).contains("ERR_EXIT_NOT_READY"), "no request");
+        assert!(
+            panics(|| drop(withdraw(&mut c, "coder"))).contains("ERR_EXIT_NOT_READY"),
+            "no request"
+        );
         call_as("coder");
         c.request_exit();
-        assert!(panics(|| drop(withdraw(&mut c, "coder"))).contains("ERR_EXIT_NOT_READY"), "epoch open");
+        assert!(
+            panics(|| drop(withdraw(&mut c, "coder"))).contains("ERR_EXIT_NOT_READY"),
+            "epoch open"
+        );
         let e = c.epochs.get_mut(&1).unwrap();
         e.start_clearing(3_600_000_000_000);
         e.start_payment_window(4_200_000_000_000);
-        assert!(panics(|| drop(withdraw(&mut c, "coder"))).contains("ERR_EXIT_NOT_READY"), "payment_window");
+        assert!(
+            panics(|| drop(withdraw(&mut c, "coder"))).contains("ERR_EXIT_NOT_READY"),
+            "payment_window"
+        );
         c.epochs.get_mut(&1).unwrap().finalize(6_000_000_000_000);
-        assert!(matches!(withdraw(&mut c, "coder"), PromiseOrValue::Promise(_)));
+        assert!(matches!(
+            withdraw(&mut c, "coder"),
+            PromiseOrValue::Promise(_)
+        ));
     }
 
     // TC-CT-077-10: stake left after a default is paid back
@@ -891,11 +1342,35 @@ mod exit_tests {
         c.put_position(
             1,
             acc("scraper"),
-            Position { net: -35 * CREDIT as i128, role: PositionRole::Debtor, status: PositionStatus::Defaulted, amount: 35 * CREDIT, recovered: 35 * CREDIT, payment_deadline: 9, updated_at_block: 5 },
+            Position {
+                net: -35 * CREDIT as i128,
+                role: PositionRole::Debtor,
+                status: PositionStatus::Defaulted,
+                amount: 35 * CREDIT,
+                recovered: 35 * CREDIT,
+                payment_deadline: 9,
+                updated_at_block: 5,
+            },
         );
-        assert!(matches!(withdraw(&mut c, "scraper"), PromiseOrValue::Promise(_)));
+        assert!(matches!(
+            withdraw(&mut c, "scraper"),
+            PromiseOrValue::Promise(_)
+        ));
         let c0 = &calls()[0];
-        assert_eq!((c0.0.as_str(), c0.1.as_str(), &c0.2["receiver_id"], &c0.2["amount"]), ("usdt.near", "ft_transfer", &serde_json::json!("scraper.near"), &serde_json::json!("65000000")));
+        assert_eq!(
+            (
+                c0.0.as_str(),
+                c0.1.as_str(),
+                &c0.2["receiver_id"],
+                &c0.2["amount"]
+            ),
+            (
+                "usdt.near",
+                "ft_transfer",
+                &serde_json::json!("scraper.near"),
+                &serde_json::json!("65000000")
+            )
+        );
     }
 
     // TC-CT-077-11
@@ -913,20 +1388,50 @@ mod exit_tests {
     fn tc_ct_077_12_19_withdraw_success() {
         let mut c = ready();
         let before = c.accounted();
-        assert!(matches!(withdraw(&mut c, "coder"), PromiseOrValue::Promise(_)));
+        assert!(matches!(
+            withdraw(&mut c, "coder"),
+            PromiseOrValue::Promise(_)
+        ));
         let calls = calls();
-        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str(), &calls[0].2["amount"]), ("usdt.near", "ft_transfer", &serde_json::json!("100000000")));
-        assert_eq!((calls[1].1.as_str(), &calls[1].2["amount"]), ("on_withdraw_resolved", &serde_json::json!("100000000")));
+        assert_eq!(
+            (
+                calls[0].0.as_str(),
+                calls[0].1.as_str(),
+                &calls[0].2["amount"]
+            ),
+            ("usdt.near", "ft_transfer", &serde_json::json!("100000000"))
+        );
+        assert_eq!(
+            (calls[1].1.as_str(), &calls[1].2["amount"]),
+            ("on_withdraw_resolved", &serde_json::json!("100000000"))
+        );
         let m = c.members.get(&acc("coder")).unwrap();
         assert_eq!((m.stake, m.limit, m.withdraw_pending), (0, 0, true));
-        assert_eq!((c.in_flight, c.total_stake, c.accounted()), (100 * CREDIT, 100 * CREDIT, before), "K-08: the sum of D6 does not change");
+        assert_eq!(
+            (c.in_flight, c.total_stake, c.accounted()),
+            (100 * CREDIT, 100 * CREDIT, before),
+            "K-08: the sum of D6 does not change"
+        );
 
-        assert!(resolve(&mut c, PromiseResult::Successful(vec![]), 100 * CREDIT));
+        assert!(resolve(
+            &mut c,
+            PromiseResult::Successful(vec![]),
+            100 * CREDIT
+        ));
         let m = c.members.get(&acc("coder")).unwrap();
-        assert_eq!((m.status, m.stake, m.limit, m.withdraw_pending), (MemberStatus::Exited, 0, 0, false));
+        assert_eq!(
+            (m.status, m.stake, m.limit, m.withdraw_pending),
+            (MemberStatus::Exited, 0, 0, false)
+        );
         assert_eq!((c.in_flight, c.total_stake), (0, 100 * CREDIT));
         let ev = events();
-        assert_eq!((ev[0]["event"].as_str(), &ev[0]["data"][0]), (Some("stake_withdrawn"), &serde_json::json!({"account_id": "coder.near", "amount": "100000000"})));
+        assert_eq!(
+            (ev[0]["event"].as_str(), &ev[0]["data"][0]),
+            (
+                Some("stake_withdrawn"),
+                &serde_json::json!({"account_id": "coder.near", "amount": "100000000"})
+            )
+        );
         c.assert_d6(None);
     }
 
@@ -937,11 +1442,29 @@ mod exit_tests {
         let _ = withdraw(&mut c, "coder");
         assert!(!resolve(&mut c, PromiseResult::Failed, 100 * CREDIT));
         let m = c.members.get(&acc("coder")).unwrap();
-        assert_eq!((m.stake, m.limit, m.status, m.exit_requested_epoch, m.withdraw_pending), (100 * CREDIT, 80 * CREDIT, MemberStatus::Active, Some(1), false));
+        assert_eq!(
+            (
+                m.stake,
+                m.limit,
+                m.status,
+                m.exit_requested_epoch,
+                m.withdraw_pending
+            ),
+            (
+                100 * CREDIT,
+                80 * CREDIT,
+                MemberStatus::Active,
+                Some(1),
+                false
+            )
+        );
         assert_eq!((c.in_flight, c.total_stake), (0, 200 * CREDIT));
         assert_eq!(events()[0]["event"], "stake_withdraw_failed");
         c.assert_d6(None);
-        assert!(matches!(withdraw(&mut c, "coder"), PromiseOrValue::Promise(_)), "may try again");
+        assert!(
+            matches!(withdraw(&mut c, "coder"), PromiseOrValue::Promise(_)),
+            "may try again"
+        );
     }
 
     // TC-CT-077-15
@@ -969,7 +1492,13 @@ mod exit_tests {
         call_as("coder");
         c.request_exit();
         testing_env!(ctx("usdt", 0).build());
-        let text = panics(|| drop(c.ft_on_transfer(acc("coder"), U128(10 * CREDIT), r#"{"action":"stake"}"#.to_string())));
+        let text = panics(|| {
+            drop(c.ft_on_transfer(
+                acc("coder"),
+                U128(10 * CREDIT),
+                r#"{"action":"stake"}"#.to_string(),
+            ))
+        });
         assert!(text.contains("ERR_EXITING"), "{text}");
         assert_eq!(c.members.get(&acc("coder")).unwrap().stake, 100 * CREDIT);
     }
@@ -989,9 +1518,15 @@ mod exit_tests {
             PromiseOrValue::Promise(_) => panic!("no promise for a stake of 0"),
         }
         assert!(calls().is_empty());
-        assert_eq!(c.members.get(&acc("coder")).unwrap().status, MemberStatus::Exited);
+        assert_eq!(
+            c.members.get(&acc("coder")).unwrap().status,
+            MemberStatus::Exited
+        );
         let ev = events();
-        assert_eq!((ev[0]["event"].as_str(), ev[0]["data"][0]["amount"].as_str()), (Some("stake_withdrawn"), Some("0")));
+        assert_eq!(
+            (ev[0]["event"].as_str(), ev[0]["data"][0]["amount"].as_str()),
+            (Some("stake_withdrawn"), Some("0"))
+        );
     }
 
     // ---- CT-117: relayer fee on withdraw_stake_evm ----
@@ -1005,8 +1540,20 @@ mod exit_tests {
     }
 
     fn resolve_fee2(c: &mut X207Circle, payout: PromiseResult, fee_leg: PromiseResult) -> bool {
-        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![payout, fee_leg]);
-        c.on_withdraw_resolved_fee(acc("coder"), U128(100 * CREDIT), U128(FEE), acc("relayer"), acc("coder"))
+        testing_env!(
+            ctx("circle", 0).build(),
+            test_vm_config(),
+            RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![payout, fee_leg]
+        );
+        c.on_withdraw_resolved_fee(
+            acc("coder"),
+            U128(100 * CREDIT),
+            U128(FEE),
+            acc("relayer"),
+            acc("coder"),
+        )
     }
 
     fn ok() -> PromiseResult {
@@ -1019,8 +1566,30 @@ mod exit_tests {
         withdraw_fee(&mut c, FEE);
         let calls = calls();
         assert_eq!(calls.len(), 3);
-        assert_eq!((calls[0].1.as_str(), &calls[0].2["receiver_id"], &calls[0].2["amount"]), ("ft_transfer", &serde_json::json!("coder.near"), &serde_json::json!((100 * CREDIT - FEE).to_string())));
-        assert_eq!((calls[1].1.as_str(), &calls[1].2["receiver_id"], &calls[1].2["amount"]), ("ft_transfer", &serde_json::json!("relayer.near"), &serde_json::json!(FEE.to_string())));
+        assert_eq!(
+            (
+                calls[0].1.as_str(),
+                &calls[0].2["receiver_id"],
+                &calls[0].2["amount"]
+            ),
+            (
+                "ft_transfer",
+                &serde_json::json!("coder.near"),
+                &serde_json::json!((100 * CREDIT - FEE).to_string())
+            )
+        );
+        assert_eq!(
+            (
+                calls[1].1.as_str(),
+                &calls[1].2["receiver_id"],
+                &calls[1].2["amount"]
+            ),
+            (
+                "ft_transfer",
+                &serde_json::json!("relayer.near"),
+                &serde_json::json!(FEE.to_string())
+            )
+        );
         assert_eq!(calls[2].1, "on_withdraw_resolved_fee");
         assert_eq!(c.in_flight, 100 * CREDIT);
         c.assert_d6(None);
@@ -1031,7 +1600,10 @@ mod exit_tests {
         let mut c = ready();
         withdraw_fee(&mut c, FEE);
         assert!(resolve_fee2(&mut c, ok(), ok()));
-        assert_eq!((c.members.get(&acc("coder")).unwrap().status, c.in_flight), (MemberStatus::Exited, 0));
+        assert_eq!(
+            (c.members.get(&acc("coder")).unwrap().status, c.in_flight),
+            (MemberStatus::Exited, 0)
+        );
         assert!(events().iter().any(|e| e["event"] == "relayer_fee_paid"));
         c.assert_d6(Some(100 * CREDIT));
     }
@@ -1042,11 +1614,29 @@ mod exit_tests {
         let mut c = ready();
         withdraw_fee(&mut c, FEE);
         assert!(resolve_fee2(&mut c, ok(), PromiseResult::Failed));
-        assert_eq!((c.members.get(&acc("coder")).unwrap().status, c.in_flight), (MemberStatus::Exited, FEE));
+        assert_eq!(
+            (c.members.get(&acc("coder")).unwrap().status, c.in_flight),
+            (MemberStatus::Exited, FEE)
+        );
         let calls = calls();
-        let refund = calls.iter().find(|(_, m, _)| m == "ft_transfer").expect("refund transfer");
-        assert_eq!((&refund.2["receiver_id"], &refund.2["amount"]), (&serde_json::json!("coder.near"), &serde_json::json!(FEE.to_string())));
-        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![ok()]);
+        let refund = calls
+            .iter()
+            .find(|(_, m, _)| m == "ft_transfer")
+            .expect("refund transfer");
+        assert_eq!(
+            (&refund.2["receiver_id"], &refund.2["amount"]),
+            (
+                &serde_json::json!("coder.near"),
+                &serde_json::json!(FEE.to_string())
+            )
+        );
+        testing_env!(
+            ctx("circle", 0).build(),
+            test_vm_config(),
+            RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![ok()]
+        );
         c.on_fee_refund_resolved(acc("coder"), U128(FEE));
         assert_eq!(c.in_flight, 0);
         c.assert_d6(Some(100 * CREDIT));
@@ -1058,7 +1648,13 @@ mod exit_tests {
         withdraw_fee(&mut c, FEE);
         assert!(resolve_fee2(&mut c, ok(), PromiseResult::Failed));
         let reserve = c.reserve;
-        testing_env!(ctx("circle", 0).build(), test_vm_config(), RuntimeFeesConfig::test(), Default::default(), vec![PromiseResult::Failed]);
+        testing_env!(
+            ctx("circle", 0).build(),
+            test_vm_config(),
+            RuntimeFeesConfig::test(),
+            Default::default(),
+            vec![PromiseResult::Failed]
+        );
         c.on_fee_refund_resolved(acc("coder"), U128(FEE));
         assert_eq!((c.in_flight, c.reserve), (0, reserve + FEE));
         assert!(events().iter().any(|e| e["event"] == "relayer_fee_failed"));
@@ -1071,7 +1667,10 @@ mod exit_tests {
         withdraw_fee(&mut c, FEE);
         assert!(!resolve_fee2(&mut c, PromiseResult::Failed, ok()));
         let m = c.members.get(&acc("coder")).unwrap();
-        assert_eq!((m.stake, m.withdraw_pending, c.in_flight), (100 * CREDIT - FEE, false, 0));
+        assert_eq!(
+            (m.stake, m.withdraw_pending, c.in_flight),
+            (100 * CREDIT - FEE, false, 0)
+        );
         c.assert_d6(Some(200 * CREDIT - FEE));
     }
 
@@ -1079,9 +1678,16 @@ mod exit_tests {
     fn ct117_withdraw_both_fail_whole_stake_returns() {
         let mut c = ready();
         withdraw_fee(&mut c, FEE);
-        assert!(!resolve_fee2(&mut c, PromiseResult::Failed, PromiseResult::Failed));
+        assert!(!resolve_fee2(
+            &mut c,
+            PromiseResult::Failed,
+            PromiseResult::Failed
+        ));
         let m = c.members.get(&acc("coder")).unwrap();
-        assert_eq!((m.stake, m.withdraw_pending, c.in_flight, m.status), (100 * CREDIT, false, 0, MemberStatus::Active));
+        assert_eq!(
+            (m.stake, m.withdraw_pending, c.in_flight, m.status),
+            (100 * CREDIT, false, 0, MemberStatus::Active)
+        );
         c.assert_d6(Some(200 * CREDIT));
     }
 

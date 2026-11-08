@@ -25,11 +25,13 @@ pub struct PoolView {
 }
 
 fn add(a: u128, b: u128) -> u128 {
-    a.checked_add(b).unwrap_or_else(|| env::panic_str("ERR_D6_ACCOUNTING: overflow"))
+    a.checked_add(b)
+        .unwrap_or_else(|| env::panic_str("ERR_D6_ACCOUNTING: overflow"))
 }
 
 fn sub(a: u128, b: u128) -> u128 {
-    a.checked_sub(b).unwrap_or_else(|| env::panic_str("ERR_D6_ACCOUNTING: underflow"))
+    a.checked_sub(b)
+        .unwrap_or_else(|| env::panic_str("ERR_D6_ACCOUNTING: underflow"))
 }
 
 impl X207Circle {
@@ -45,17 +47,28 @@ impl X207Circle {
     }
 
     pub fn accounted(&self) -> u128 {
-        [self.reserve, self.epoch_pools, self.solver_fees_total, self.in_flight]
-            .into_iter()
-            .fold(self.total_stake, add)
+        [
+            self.reserve,
+            self.epoch_pools,
+            self.solver_fees_total,
+            self.in_flight,
+        ]
+        .into_iter()
+        .fold(self.total_stake, add)
     }
 
     fn epoch_pool(&self, epoch: EpochId) -> u128 {
-        self.epochs.get(&epoch).unwrap_or_else(|| env::panic_str("ERR_UNKNOWN_EPOCH")).pool
+        self.epochs
+            .get(&epoch)
+            .unwrap_or_else(|| env::panic_str("ERR_UNKNOWN_EPOCH"))
+            .pool
     }
 
     fn set_epoch_pool(&mut self, epoch: EpochId, pool: u128) {
-        self.epochs.get_mut(&epoch).unwrap_or_else(|| env::panic_str("ERR_UNKNOWN_EPOCH")).pool = pool;
+        self.epochs
+            .get_mut(&epoch)
+            .unwrap_or_else(|| env::panic_str("ERR_UNKNOWN_EPOCH"))
+            .pool = pool;
     }
 
     fn pool_up(&mut self, epoch: EpochId, amount: u128) {
@@ -150,9 +163,16 @@ impl X207Circle {
     /// Checks I-04 against the real USDT balance (when given) and the stored sums against the
     /// records: `total_stake = Σ Member.stake` and `epoch_pools = Σ Epoch.pool`.
     pub fn assert_d6(&self, usdt_balance: Option<u128>) {
-        let stake: u128 = self.member_index.iter().map(|id| self.members.get(id).expect("indexed member").stake).sum();
+        let stake: u128 = self
+            .member_index
+            .iter()
+            .map(|id| self.members.get(id).expect("indexed member").stake)
+            .sum();
         assert_eq!(self.total_stake, stake, "total_stake != Σ member.stake");
-        let pools: u128 = (1..=self.current_epoch).filter_map(|e| self.epochs.get(&e)).map(|e| e.pool).sum();
+        let pools: u128 = (1..=self.current_epoch)
+            .filter_map(|e| self.epochs.get(&e))
+            .map(|e| e.pool)
+            .sum();
         assert_eq!(self.epoch_pools, pools, "epoch_pools != Σ epoch.pool");
         if let Some(balance) = usdt_balance {
             assert_eq!(self.accounted(), balance, "accounted != USDT balance");
@@ -195,7 +215,9 @@ mod tests {
     fn add_member(c: &mut X207Circle, id: &str, stake: u128) {
         let member = Member {
             account_id: acc(id),
-            pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+            pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                .parse::<PublicKey>()
+                .unwrap(),
             terms_hash: "a".repeat(64),
             stake,
             limit: stake * 8 / 10,
@@ -228,7 +250,17 @@ mod tests {
     fn pool_is_zero_after_init() {
         let c = circle();
         let view = c.get_pool();
-        assert_eq!(view, PoolView { total_stake: U128(0), reserve: U128(0), epoch_pools: U128(0), solver_fees: U128(0), in_flight: U128(0), accounted: U128(0) });
+        assert_eq!(
+            view,
+            PoolView {
+                total_stake: U128(0),
+                reserve: U128(0),
+                epoch_pools: U128(0),
+                solver_fees: U128(0),
+                in_flight: U128(0),
+                accounted: U128(0)
+            }
+        );
         c.assert_d6(Some(0));
     }
 
@@ -247,7 +279,10 @@ mod tests {
     #[test]
     fn stake_raises_total_and_accounted() {
         let c = funded();
-        assert_eq!((c.get_pool().total_stake.0, c.get_pool().accounted.0), (300, 300));
+        assert_eq!(
+            (c.get_pool().total_stake.0, c.get_pool().accounted.0),
+            (300, 300)
+        );
         c.assert_d6(Some(300));
     }
 
@@ -256,7 +291,10 @@ mod tests {
     fn settle_raises_epoch_pool() {
         let mut c = funded();
         c.d6_deposit_epoch_pool(1, 35);
-        assert_eq!((c.get_pool().epoch_pools.0, c.get_pool().accounted.0), (35, 335));
+        assert_eq!(
+            (c.get_pool().epoch_pools.0, c.get_pool().accounted.0),
+            (35, 335)
+        );
         assert_eq!(c.epochs.get(&1).unwrap().pool, 35);
         c.assert_d6(Some(335));
     }
@@ -268,7 +306,10 @@ mod tests {
         c.members.get_mut(&acc("scraper.near")).unwrap().stake -= 35;
         c.d6_stake_to_pool(1, 35);
         let view = c.get_pool();
-        assert_eq!((view.total_stake.0, view.epoch_pools.0, view.accounted.0), (265, 35, 300));
+        assert_eq!(
+            (view.total_stake.0, view.epoch_pools.0, view.accounted.0),
+            (265, 35, 300)
+        );
         c.assert_d6(Some(300));
     }
 
@@ -288,7 +329,10 @@ mod tests {
         c.d6_pool_to_in_flight(1, 35);
         c.d6_in_flight_out(35);
         let view = c.get_pool();
-        assert_eq!((view.epoch_pools.0, view.in_flight.0, view.accounted.0), (0, 0, 300));
+        assert_eq!(
+            (view.epoch_pools.0, view.in_flight.0, view.accounted.0),
+            (0, 0, 300)
+        );
         c.assert_d6(Some(300));
     }
 
@@ -330,11 +374,21 @@ mod tests {
     #[test]
     fn pools_are_tracked_per_epoch() {
         let mut c = funded();
-        c.epochs.insert(2, crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()));
+        c.epochs.insert(
+            2,
+            crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()),
+        );
         c.current_epoch = 2;
         c.d6_deposit_epoch_pool(1, 5);
         c.d6_deposit_epoch_pool(2, 7);
-        assert_eq!((c.epochs.get(&1).unwrap().pool, c.epochs.get(&2).unwrap().pool, c.epoch_pools), (5, 7, 12));
+        assert_eq!(
+            (
+                c.epochs.get(&1).unwrap().pool,
+                c.epochs.get(&2).unwrap().pool,
+                c.epoch_pools
+            ),
+            (5, 7, 12)
+        );
         c.assert_d6(Some(312));
     }
 

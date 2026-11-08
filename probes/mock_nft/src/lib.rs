@@ -4,7 +4,9 @@
 
 use near_sdk::serde_json::json;
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{assert_one_yocto, env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue};
+use near_sdk::{
+    assert_one_yocto, env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue,
+};
 
 const RESOLVE_GAS: Gas = Gas::from_tgas(10);
 const RESERVED_GAS: Gas = Gas::from_tgas(15);
@@ -26,7 +28,10 @@ pub struct Token {
 impl MockNft {
     #[init]
     pub fn new() -> Self {
-        Self { owners: LookupMap::new(b"o"), blocked: LookupSet::new(b"b") }
+        Self {
+            owners: LookupMap::new(b"o"),
+            blocked: LookupSet::new(b"b"),
+        }
     }
 
     pub fn nft_mint(&mut self, token_id: String, owner_id: AccountId) {
@@ -39,11 +44,20 @@ impl MockNft {
     }
 
     pub fn nft_token(&self, token_id: String) -> Option<Token> {
-        self.owners.get(&token_id).map(|owner_id| Token { token_id, owner_id: owner_id.clone() })
+        self.owners.get(&token_id).map(|owner_id| Token {
+            token_id,
+            owner_id: owner_id.clone(),
+        })
     }
 
     #[payable]
-    pub fn nft_transfer(&mut self, receiver_id: AccountId, token_id: String, approval_id: Option<u64>, memo: Option<String>) {
+    pub fn nft_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        token_id: String,
+        approval_id: Option<u64>,
+        memo: Option<String>,
+    ) {
         assert_one_yocto();
         let _ = (approval_id, memo);
         self.move_token(&env::predecessor_account_id(), &receiver_id, &token_id);
@@ -69,14 +83,21 @@ impl MockNft {
             NearToken::from_yoctonear(0),
             env::prepaid_gas().saturating_sub(RESERVED_GAS),
         );
-        let resolve = Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).nft_resolve_transfer(sender_id, receiver_id, token_id);
+        let resolve = Self::ext(env::current_account_id())
+            .with_static_gas(RESOLVE_GAS)
+            .nft_resolve_transfer(sender_id, receiver_id, token_id);
         PromiseOrValue::Promise(call.then(resolve))
     }
 
     /// Standard NEP-171 resolve: `true` from the receiver (return the token) or a failed receiver gives the token back. Returns whether
     /// the token stayed with the receiver.
     #[private]
-    pub fn nft_resolve_transfer(&mut self, previous_owner_id: AccountId, receiver_id: AccountId, token_id: String) -> bool {
+    pub fn nft_resolve_transfer(
+        &mut self,
+        previous_owner_id: AccountId,
+        receiver_id: AccountId,
+        token_id: String,
+    ) -> bool {
         let return_it = match env::promise_result_checked(0, 16) {
             Ok(bytes) => near_sdk::serde_json::from_slice::<bool>(&bytes).unwrap_or(true),
             Err(_) => true,
@@ -91,8 +112,14 @@ impl MockNft {
 
 impl MockNft {
     fn move_token(&mut self, from: &AccountId, to: &AccountId, token_id: &String) {
-        require!(self.owners.get(token_id) == Some(from), "Sender must be the token owner");
-        require!(!self.blocked.contains(to), "The receiver cannot receive tokens");
+        require!(
+            self.owners.get(token_id) == Some(from),
+            "Sender must be the token owner"
+        );
+        require!(
+            !self.blocked.contains(to),
+            "The receiver cannot receive tokens"
+        );
         self.owners.insert(token_id.clone(), to.clone());
     }
 }

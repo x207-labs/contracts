@@ -234,7 +234,10 @@ mod tests {
             limit_growth: 1000,
             limit_cap: U128(1_000_000_000),
             limit_decay: 0,
-            fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
+            fees: Fees {
+                clearing_fee_bps: 0,
+                solver_fee_bps: 0,
+            },
             admission: Admission::Open,
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
@@ -259,7 +262,9 @@ mod tests {
     fn member(id: &str) -> Member {
         Member {
             account_id: acc(id),
-            pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+            pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                .parse::<PublicKey>()
+                .unwrap(),
             terms_hash: "a".repeat(64),
             stake: 100,
             limit: 80,
@@ -284,7 +289,10 @@ mod tests {
         assert_eq!(all.len(), ALL_KEYS.len());
         assert_eq!(prefix_bytes(StorageKey::Members), b"m");
         assert_eq!(prefix_bytes(StorageKey::MemberIndex), b"M");
-        assert_eq!(prefix_bytes(StorageKey::EpochEdges(1)), [b'E', 1, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(
+            prefix_bytes(StorageKey::EpochEdges(1)),
+            [b'E', 1, 0, 0, 0, 0, 0, 0, 0]
+        );
     }
 
     #[test]
@@ -309,10 +317,24 @@ mod tests {
         e2.participants.push(acc("y.near"));
         c.epochs.flush();
         let e1 = c.epochs.get(&1).unwrap();
-        assert_eq!((e1.edges.len(), e1.participants.len(), e1.position_accounts.len()), (2, 1, 1));
+        assert_eq!(
+            (
+                e1.edges.len(),
+                e1.participants.len(),
+                e1.position_accounts.len()
+            ),
+            (2, 1, 1)
+        );
         assert_eq!(e1.edges.get(1).unwrap().1, acc("c.near"));
         let e2 = c.epochs.get(&2).unwrap();
-        assert_eq!((e2.edges.len(), e2.participants.len(), e2.position_accounts.len()), (1, 2, 0));
+        assert_eq!(
+            (
+                e2.edges.len(),
+                e2.participants.len(),
+                e2.position_accounts.len()
+            ),
+            (1, 2, 0)
+        );
         assert_eq!(e2.edges.get(0).unwrap().0, acc("x.near"));
     }
 
@@ -335,22 +357,36 @@ mod tests {
         c.outstanding_debt.insert(a.clone(), 7);
         assert_eq!(c.outstanding_debt.get(&a), Some(&7));
 
-        let pair = PairState { cumulative: 10, last_seq: 3, cleared: 4 };
+        let pair = PairState {
+            cumulative: 10,
+            last_seq: 3,
+            cleared: 4,
+        };
         c.pairs.insert((1, a.clone(), b.clone()), pair.clone());
         assert_eq!(c.pairs.get(&(1, a.clone(), b.clone())), Some(&pair));
         assert_eq!(c.pairs.get(&(1, b.clone(), a.clone())), None);
 
-        let totals = ParticipantTotals { owed_out: 10, owed_in: 2 };
+        let totals = ParticipantTotals {
+            owed_out: 10,
+            owed_in: 2,
+        };
         c.totals.insert((1, a.clone()), totals.clone());
         assert_eq!(c.totals.get(&(1, a.clone())), Some(&totals));
 
         let e = c.epochs.get(&1).unwrap();
-        assert_eq!((e.phase, e.cutoff_at, e.params.clone()), (EpochPhase::Open, 1_000 + 3600 * 1_000_000_000, params()));
+        assert_eq!(
+            (e.phase, e.cutoff_at, e.params.clone()),
+            (EpochPhase::Open, 1_000 + 3600 * 1_000_000_000, params())
+        );
 
         let proposal = ClearingProposal {
             epoch: 1,
             solver: acc("solver.near"),
-            edges: vec![ClearingEdge { debtor: a.clone(), creditor: b.clone(), cleared: U128(5) }],
+            edges: vec![ClearingEdge {
+                debtor: a.clone(),
+                creditor: b.clone(),
+                cleared: U128(5),
+            }],
             edge_count: 1,
             cleared_total: U128(5),
             submitted_at: near_sdk::json_types::U64(1),
@@ -384,7 +420,10 @@ mod tests {
         assert_eq!(c.intents_id, acc("intents.near"));
         assert_eq!(c.current_epoch, 1);
         assert!(c.pending_params.is_none() && c.upgrade.is_none());
-        assert_eq!((c.total_stake, c.reserve, c.in_flight, c.member_count), (0, 0, 0, 0));
+        assert_eq!(
+            (c.total_stake, c.reserve, c.in_flight, c.member_count),
+            (0, 0, 0, 0)
+        );
         assert_eq!(c.interface_version(), crate::INTERFACE_VERSION);
     }
 }

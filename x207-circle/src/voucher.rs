@@ -71,24 +71,40 @@ impl X207Circle {
 
     /// D3 `last_seq` of `(payer, payee, epoch)`; `0` before the first registration.
     pub fn last_seq(&self, payer: AccountId, payee: AccountId, epoch: EpochId) -> u64 {
-        self.pairs.get(&(epoch, payer, payee)).map_or(0, |p| p.last_seq)
+        self.pairs
+            .get(&(epoch, payer, payee))
+            .map_or(0, |p| p.last_seq)
     }
 
     /// D2 and D3 of one pair, or `None` before the first registration.
-    pub fn obligation(&self, epoch: EpochId, debtor: AccountId, creditor: AccountId) -> Option<ObligationView> {
+    pub fn obligation(
+        &self,
+        epoch: EpochId,
+        debtor: AccountId,
+        creditor: AccountId,
+    ) -> Option<ObligationView> {
         let pair = self.pairs.get(&(epoch, debtor.clone(), creditor.clone()))?;
         Some(ObligationView::new(epoch, debtor, creditor, pair))
     }
 
     /// Pairs of `epoch` in first-registration order (the D2 snapshot index); `limit` 0, an unknown
     /// epoch, or a `from_index` past the end gives `[]`.
-    pub fn list_obligations(&self, epoch: EpochId, from_index: u32, limit: u32) -> Vec<ObligationView> {
-        let Some(e) = self.epochs.get(&epoch) else { return vec![] };
+    pub fn list_obligations(
+        &self,
+        epoch: EpochId,
+        from_index: u32,
+        limit: u32,
+    ) -> Vec<ObligationView> {
+        let Some(e) = self.epochs.get(&epoch) else {
+            return vec![];
+        };
         e.edges
             .iter()
             .skip(from_index as usize)
             .take(limit as usize)
-            .filter_map(|(debtor, creditor)| self.obligation(epoch, debtor.clone(), creditor.clone()))
+            .filter_map(|(debtor, creditor)| {
+                self.obligation(epoch, debtor.clone(), creditor.clone())
+            })
             .collect()
     }
 }
@@ -128,21 +144,45 @@ impl X207Circle {
 
     /// `register` for a leg of bundle `bundle` (CT-064): the credit check is the reserved amount of the leg, not the
     /// free headroom, and the registered obligation is booked on the leg.
-    pub fn register_with(&mut self, voucher: Voucher, signature: String, mode: RegisterMode, bundle: Option<u64>) -> U128 {
+    pub fn register_with(
+        &mut self,
+        voucher: Voucher,
+        signature: String,
+        mode: RegisterMode,
+        bundle: Option<u64>,
+    ) -> U128 {
         let now = env::block_timestamp();
         // 1-3
-        require!(voucher.circle == env::current_account_id(), format!("ERR_WRONG_CIRCLE: {}", voucher.circle));
-        require!(voucher.unit == "credit", format!("ERR_BAD_UNIT: {}", voucher.unit));
-        require!(voucher.resource.is_ascii(), "ERR_RESOURCE_NOT_ASCII: resource must be ASCII");
-        require!(voucher.payer != voucher.payee, "ERR_SELF_PAYMENT: payer equals payee");
+        require!(
+            voucher.circle == env::current_account_id(),
+            format!("ERR_WRONG_CIRCLE: {}", voucher.circle)
+        );
+        require!(
+            voucher.unit == "credit",
+            format!("ERR_BAD_UNIT: {}", voucher.unit)
+        );
+        require!(
+            voucher.resource.is_ascii(),
+            "ERR_RESOURCE_NOT_ASCII: resource must be ASCII"
+        );
+        require!(
+            voucher.payer != voucher.payee,
+            "ERR_SELF_PAYMENT: payer equals payee"
+        );
         // 4-5
         let epoch_id = voucher.epoch;
         let epoch = self.epochs.get(&epoch_id);
         let cutoff_at = match epoch {
             Some(e) if epoch_id == self.current_epoch && e.phase == EpochPhase::Open => e.cutoff_at,
-            _ => env::panic_str(&format!("ERR_EPOCH_MISMATCH: voucher epoch {epoch_id}, current {}", self.current_epoch)),
+            _ => env::panic_str(&format!(
+                "ERR_EPOCH_MISMATCH: voucher epoch {epoch_id}, current {}",
+                self.current_epoch
+            )),
         };
-        require!(now < cutoff_at, format!("ERR_PAST_CUTOFF: cutoff_at {cutoff_at}"));
+        require!(
+            now < cutoff_at,
+            format!("ERR_PAST_CUTOFF: cutoff_at {cutoff_at}")
+        );
         // 6-8
         let payer = self.active_member(&voucher.payer, "ERR_PAYER_NOT_ACTIVE");
         let payee = self.active_member(&voucher.payee, "ERR_PAYEE_NOT_ACTIVE");
@@ -151,50 +191,99 @@ impl X207Circle {
         crate::freeze::assert_not_frozen_for_voucher(&voucher.payee, epoch_id);
         for m in [&payer, &payee] {
             if let Some(exit) = m.exit_requested_epoch {
-                require!(exit >= epoch_id, format!("ERR_EXITING: {} exit_requested_epoch {exit}", m.account_id));
+                require!(
+                    exit >= epoch_id,
+                    format!("ERR_EXITING: {} exit_requested_epoch {exit}", m.account_id)
+                );
             }
         }
         let (limit, pubkey) = (payer.limit, payer.pubkey_voucher.clone());
         // 9-10
         let key = (epoch_id, voucher.payer.clone(), voucher.payee.clone());
-        require!(!crate::escrow::pair_locked(epoch_id, &voucher.payer, &voucher.payee), "ERR_ESCROW_PENDING: an escrow payment of this pair is in flight");
+        require!(
+            !crate::escrow::pair_locked(epoch_id, &voucher.payer, &voucher.payee),
+            "ERR_ESCROW_PENDING: an escrow payment of this pair is in flight"
+        );
         let pair = self.pairs.get(&key).cloned();
         let is_new_pair = pair.is_none();
         let pair = pair.unwrap_or_default();
-        require!(voucher.seq > pair.last_seq, format!("ERR_SEQ_NOT_INCREASING: seq {} last_seq {}", voucher.seq, pair.last_seq));
+        require!(
+            voucher.seq > pair.last_seq,
+            format!(
+                "ERR_SEQ_NOT_INCREASING: seq {} last_seq {}",
+                voucher.seq, pair.last_seq
+            )
+        );
         if mode == RegisterMode::PerRequest {
-            require!(voucher.seq == pair.last_seq + 1, format!("ERR_SEQ_GAP: seq {} last_seq {}", voucher.seq, pair.last_seq));
+            require!(
+                voucher.seq == pair.last_seq + 1,
+                format!(
+                    "ERR_SEQ_GAP: seq {} last_seq {}",
+                    voucher.seq, pair.last_seq
+                )
+            );
         }
         let cumulative = voucher.cumulative_amount.0;
         require!(
             cumulative >= pair.cumulative,
-            format!("ERR_CUMULATIVE_DECREASED: {cumulative} < {}", pair.cumulative)
+            format!(
+                "ERR_CUMULATIVE_DECREASED: {cumulative} < {}",
+                pair.cumulative
+            )
         );
         // 11
         let delta = cumulative - pair.cumulative;
-        let debt = self.outstanding_debt.get(&voucher.payer).copied().unwrap_or(0);
+        let debt = self
+            .outstanding_debt
+            .get(&voucher.payer)
+            .copied()
+            .unwrap_or(0);
         let mut leg_index = None;
         if let Some(bundle_id) = bundle {
             let record = crate::bundle::load_bundle(bundle_id);
-            require!(record.epoch == epoch_id, format!("ERR_EPOCH_MISMATCH: bundle epoch {}, voucher epoch {epoch_id}", record.epoch));
-            let Some((index, remaining)) = crate::bundle::leg_remaining(&record, &voucher.payer, &voucher.payee) else {
-                env::panic_str(&format!("ERR_BUNDLE_LEG: {} -> {} is not a leg of bundle {bundle_id}", voucher.payer, voucher.payee))
+            require!(
+                record.epoch == epoch_id,
+                format!(
+                    "ERR_EPOCH_MISMATCH: bundle epoch {}, voucher epoch {epoch_id}",
+                    record.epoch
+                )
+            );
+            let Some((index, remaining)) =
+                crate::bundle::leg_remaining(&record, &voucher.payer, &voucher.payee)
+            else {
+                env::panic_str(&format!(
+                    "ERR_BUNDLE_LEG: {} -> {} is not a leg of bundle {bundle_id}",
+                    voucher.payer, voucher.payee
+                ))
             };
-            require!(delta <= remaining, format!("ERR_BUNDLE_LEG_EXCEEDED: delta {delta} remaining on the leg {remaining}"));
+            require!(
+                delta <= remaining,
+                format!("ERR_BUNDLE_LEG_EXCEEDED: delta {delta} remaining on the leg {remaining}")
+            );
             leg_index = Some(index);
         } else {
             // headroom held for bundle legs of this epoch is not free
-            let headroom = limit.saturating_sub(debt).saturating_sub(crate::bundle::reserved(epoch_id, &voucher.payer));
-            require!(delta <= headroom, format!("ERR_INSUFFICIENT_CREDIT: delta {delta} headroom {headroom}"));
+            let headroom = limit
+                .saturating_sub(debt)
+                .saturating_sub(crate::bundle::reserved(epoch_id, &voucher.payer));
+            require!(
+                delta <= headroom,
+                format!("ERR_INSUFFICIENT_CREDIT: delta {delta} headroom {headroom}")
+            );
         }
         // 12
         if crate::evm::is_evm_member(&voucher.payer) {
             // CT-104: an EVM payer signs EIP-712; the recovered address must be the payer id
-            require!(crate::evm::verify_voucher(&voucher, &signature), "ERR_BAD_EVM_SIG: eip712 verification failed");
+            require!(
+                crate::evm::verify_voucher(&voucher, &signature),
+                "ERR_BAD_EVM_SIG: eip712 verification failed"
+            );
         } else {
             let verified = parse_signature(&signature)
                 .zip(<[u8; 32]>::try_from(&pubkey.as_bytes()[1..]).ok())
-                .is_some_and(|(sig, pk)| env::ed25519_verify(&sig, &voucher_signing_hash(&voucher), &pk));
+                .is_some_and(|(sig, pk)| {
+                    env::ed25519_verify(&sig, &voucher_signing_hash(&voucher), &pk)
+                });
             require!(verified, "ERR_BAD_SIGNATURE: ed25519 verification failed");
         }
 
@@ -204,8 +293,16 @@ impl X207Circle {
         }
         let new_debt = debt + delta;
         let obligation = cumulative - pair.cleared;
-        self.pairs.insert(key, crate::voucher::PairState { cumulative, last_seq: voucher.seq, cleared: pair.cleared });
-        self.outstanding_debt.insert(voucher.payer.clone(), new_debt);
+        self.pairs.insert(
+            key,
+            crate::voucher::PairState {
+                cumulative,
+                last_seq: voucher.seq,
+                cleared: pair.cleared,
+            },
+        );
+        self.outstanding_debt
+            .insert(voucher.payer.clone(), new_debt);
         let mut new_participants = 0;
         for (account, out, inn) in [(&voucher.payer, delta, 0), (&voucher.payee, 0, delta)] {
             let tkey = (epoch_id, account.clone());
@@ -216,7 +313,11 @@ impl X207Circle {
             self.totals.insert(tkey, t);
             if is_new {
                 new_participants += 1;
-                self.epochs.get_mut(&epoch_id).unwrap().participants.push(account.clone());
+                self.epochs
+                    .get_mut(&epoch_id)
+                    .unwrap()
+                    .participants
+                    .push(account.clone());
             }
         }
         let e = self.epochs.get_mut(&epoch_id).unwrap();
@@ -258,8 +359,18 @@ impl X207Circle {
 
     /// F5 (CT-064): registers a voucher that settles a leg of bundle `bundle_id`. The voucher bytes are the usual ones
     /// (cumulative mode); the leg fixes the most the pair may owe in the bundle epoch. Returns the pair obligation.
-    pub fn register_in_bundle(&mut self, bundle_id: u64, voucher: Voucher, signature: String) -> U128 {
-        self.register_with(voucher, signature, RegisterMode::Cumulative, Some(bundle_id))
+    pub fn register_in_bundle(
+        &mut self,
+        bundle_id: u64,
+        voucher: Voucher,
+        signature: String,
+    ) -> U128 {
+        self.register_with(
+            voucher,
+            signature,
+            RegisterMode::Cumulative,
+            Some(bundle_id),
+        )
     }
 
     /// Demo mode (ADR-26): one voucher per request, `seq` must be `last_seq + 1`. Same checks and
@@ -297,7 +408,11 @@ mod tests {
     /// Stands in for registration: one entry in the pair map and one in the epoch edge index.
     fn put(c: &mut X207Circle, epoch: EpochId, payer: &str, payee: &str, pair: PairState) {
         c.pairs.insert((epoch, acc(payer), acc(payee)), pair);
-        c.epochs.get_mut(&epoch).unwrap().edges.push((acc(payer), acc(payee)));
+        c.epochs
+            .get_mut(&epoch)
+            .unwrap()
+            .edges
+            .push((acc(payer), acc(payee)));
     }
 
     // TC-CT-011-05
@@ -305,7 +420,10 @@ mod tests {
     fn tc_ct_011_05_missing_pair() {
         let c = circle();
         assert_eq!(c.last_seq(acc("gpu.near"), acc("scraper.near"), 1), 0);
-        assert_eq!(serde_json::to_value(c.obligation(1, acc("gpu.near"), acc("scraper.near"))).unwrap(), json!(null));
+        assert_eq!(
+            serde_json::to_value(c.obligation(1, acc("gpu.near"), acc("scraper.near"))).unwrap(),
+            json!(null)
+        );
         assert_eq!(c.outstanding_debt(acc("gpu.near")), U128(0));
     }
 
@@ -313,8 +431,19 @@ mod tests {
     #[test]
     fn tc_ct_011_06_obligation_is_cumulative_minus_cleared() {
         let mut c = circle();
-        put(&mut c, 1, "scraper.near", "gpu.near", PairState { cumulative: 60_000_000, last_seq: 3, cleared: 25_000_000 });
-        let v = serde_json::to_value(c.obligation(1, acc("scraper.near"), acc("gpu.near"))).unwrap();
+        put(
+            &mut c,
+            1,
+            "scraper.near",
+            "gpu.near",
+            PairState {
+                cumulative: 60_000_000,
+                last_seq: 3,
+                cleared: 25_000_000,
+            },
+        );
+        let v =
+            serde_json::to_value(c.obligation(1, acc("scraper.near"), acc("gpu.near"))).unwrap();
         assert_eq!(
             v,
             json!({"epoch":1,"debtor":"scraper.near","creditor":"gpu.near","cumulative":"60000000",
@@ -327,21 +456,58 @@ mod tests {
     #[test]
     fn tc_ct_011_03_epochs_are_separate_entries() {
         let mut c = circle();
-        c.epochs.insert(2, crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()));
-        put(&mut c, 1, "translator.near", "scraper.near", PairState { cumulative: 25_000_000, last_seq: 2, cleared: 0 });
-        put(&mut c, 2, "translator.near", "scraper.near", PairState { cumulative: 5_000_000, last_seq: 1, cleared: 0 });
+        c.epochs.insert(
+            2,
+            crate::clearing::Epoch::open(2, 2_000, 9_000, Params::default()),
+        );
+        put(
+            &mut c,
+            1,
+            "translator.near",
+            "scraper.near",
+            PairState {
+                cumulative: 25_000_000,
+                last_seq: 2,
+                cleared: 0,
+            },
+        );
+        put(
+            &mut c,
+            2,
+            "translator.near",
+            "scraper.near",
+            PairState {
+                cumulative: 5_000_000,
+                last_seq: 1,
+                cleared: 0,
+            },
+        );
         assert_eq!(c.list_obligations(1, 0, 10).len(), 1);
         assert_eq!(c.list_obligations(2, 0, 10).len(), 1);
-        assert_eq!(c.obligation(1, acc("translator.near"), acc("scraper.near")).unwrap().cumulative, U128(25_000_000));
-        assert_eq!(c.obligation(2, acc("translator.near"), acc("scraper.near")).unwrap().cumulative, U128(5_000_000));
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 2), 1);
+        assert_eq!(
+            c.obligation(1, acc("translator.near"), acc("scraper.near"))
+                .unwrap()
+                .cumulative,
+            U128(25_000_000)
+        );
+        assert_eq!(
+            c.obligation(2, acc("translator.near"), acc("scraper.near"))
+                .unwrap()
+                .cumulative,
+            U128(5_000_000)
+        );
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 2),
+            1
+        );
     }
 
     // TC-CT-011-04 (view reads the stored per-account total)
     #[test]
     fn tc_ct_011_04_outstanding_debt_view() {
         let mut c = circle();
-        c.outstanding_debt.insert(acc("translator.near"), 55_000_000);
+        c.outstanding_debt
+            .insert(acc("translator.near"), 55_000_000);
         assert_eq!(c.outstanding_debt(acc("translator.near")), U128(55_000_000));
     }
 
@@ -350,7 +516,17 @@ mod tests {
     fn tc_ct_011_07_list_obligations_pages() {
         let mut c = circle();
         for i in 0..6u64 {
-            put(&mut c, 1, &format!("p{i}.near"), "q.near", PairState { cumulative: 1, last_seq: i + 1, cleared: 0 });
+            put(
+                &mut c,
+                1,
+                &format!("p{i}.near"),
+                "q.near",
+                PairState {
+                    cumulative: 1,
+                    last_seq: i + 1,
+                    cleared: 0,
+                },
+            );
         }
         assert_eq!(c.list_obligations(1, 0, 4).len(), 4);
         let tail = c.list_obligations(1, 4, 4);
@@ -389,12 +565,19 @@ mod register_tests {
     }
 
     fn at(ns: u64) {
-        testing_env!(VMContextBuilder::new().current_account_id(acc(CIRCLE)).block_timestamp(ns).build());
+        testing_env!(VMContextBuilder::new()
+            .current_account_id(acc(CIRCLE))
+            .block_timestamp(ns)
+            .build());
     }
 
     fn add(c: &mut X207Circle, name: &str, status: MemberStatus, limit: u128) {
         let id = acc(&format!("{name}.near"));
-        let pk = PublicKey::from_parts(CurveType::ED25519, signing_key(name).verifying_key().to_bytes().to_vec()).unwrap();
+        let pk = PublicKey::from_parts(
+            CurveType::ED25519,
+            signing_key(name).verifying_key().to_bytes().to_vec(),
+        )
+        .unwrap();
         c.members.insert(
             id.clone(),
             Member {
@@ -419,7 +602,14 @@ mod register_tests {
     /// translator, scraper, gpu active with limit 80; `pending` is pending.
     fn circle() -> X207Circle {
         at(1_000);
-        let mut c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), 1_000);
+        let mut c = X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".into(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            1_000,
+        );
         for n in ["translator", "scraper", "gpu"] {
             add(&mut c, n, MemberStatus::Active, 80 * CREDIT);
         }
@@ -441,7 +631,9 @@ mod register_tests {
     }
 
     fn sig_with(key_of: &str, voucher: &Voucher) -> String {
-        let s = signing_key(key_of).sign(&voucher_signing_hash(voucher)).to_bytes();
+        let s = signing_key(key_of)
+            .sign(&voucher_signing_hash(voucher))
+            .to_bytes();
         format!("ed25519:{}", near_sdk::bs58::encode(s).into_string())
     }
 
@@ -451,40 +643,77 @@ mod register_tests {
     }
 
     fn last_event() -> serde_json::Value {
-        let line = get_logs().into_iter().rev().find(|l| l.contains("voucher_registered")).unwrap();
-        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone()
+        let line = get_logs()
+            .into_iter()
+            .rev()
+            .find(|l| l.contains("voucher_registered"))
+            .unwrap();
+        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()
+            ["data"][0]
+            .clone()
     }
 
     #[test]
     fn tc_ct_020_01_first_registration() {
         let mut c = circle();
-        assert_eq!(reg(&mut c, v("translator", "scraper", 1, 1, 10 * CREDIT)), U128(10 * CREDIT));
-        let ob = c.obligation(1, acc("translator.near"), acc("scraper.near")).unwrap();
+        assert_eq!(
+            reg(&mut c, v("translator", "scraper", 1, 1, 10 * CREDIT)),
+            U128(10 * CREDIT)
+        );
+        let ob = c
+            .obligation(1, acc("translator.near"), acc("scraper.near"))
+            .unwrap();
         assert_eq!((ob.obligation, ob.last_seq), (U128(10 * CREDIT), 1));
-        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(10 * CREDIT));
+        assert_eq!(
+            c.outstanding_debt(acc("translator.near")),
+            U128(10 * CREDIT)
+        );
         assert_eq!(
             last_event(),
             json!({"payer":"translator.near","payee":"scraper.near","epoch":1,"seq":1,"cumulative_amount":"10000000",
                    "delta":"10000000","obligation":"10000000","outstanding_debt":"10000000","mode":"cumulative"})
         );
-        assert_eq!(c.member(acc("translator.near")).unwrap().last_active_epoch, 1);
+        assert_eq!(
+            c.member(acc("translator.near")).unwrap().last_active_epoch,
+            1
+        );
         assert_eq!(c.member(acc("scraper.near")).unwrap().last_active_epoch, 1);
         let e = c.get_epoch(Some(1)).unwrap();
-        assert_eq!((e.edge_count, e.participant_count, e.total_obligation), (1, 2, U128(10 * CREDIT)));
+        assert_eq!(
+            (e.edge_count, e.participant_count, e.total_obligation),
+            (1, 2, U128(10 * CREDIT))
+        );
     }
 
     #[test]
     fn tc_ct_020_02_to_04_increase_zero_delta_and_retry() {
         let mut c = circle();
         reg(&mut c, v("translator", "scraper", 1, 1, 10 * CREDIT));
-        assert_eq!(reg(&mut c, v("translator", "scraper", 1, 5, 25 * CREDIT)), U128(25 * CREDIT));
+        assert_eq!(
+            reg(&mut c, v("translator", "scraper", 1, 5, 25 * CREDIT)),
+            U128(25 * CREDIT)
+        );
         assert_eq!(last_event()["delta"], json!("15000000"));
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 5);
-        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(25 * CREDIT));
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 1),
+            5
+        );
+        assert_eq!(
+            c.outstanding_debt(acc("translator.near")),
+            U128(25 * CREDIT)
+        );
         reg(&mut c, v("translator", "scraper", 1, 6, 25 * CREDIT));
         assert_eq!(last_event()["delta"], json!("0"));
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 6);
-        assert_eq!(c.obligation(1, acc("translator.near"), acc("scraper.near")).unwrap().obligation, U128(25 * CREDIT));
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 1),
+            6
+        );
+        assert_eq!(
+            c.obligation(1, acc("translator.near"), acc("scraper.near"))
+                .unwrap()
+                .obligation,
+            U128(25 * CREDIT)
+        );
         // still one edge and two participants
         let e = c.get_epoch(Some(1)).unwrap();
         assert_eq!((e.edge_count, e.participant_count), (1, 2));
@@ -499,26 +728,38 @@ mod register_tests {
     #[test]
     #[should_panic(expected = "ERR_SEQ_NOT_INCREASING")]
     fn tc_ct_020_04_retry_same_seq_rejected() {
-        reg(&mut setup_25(), v("translator", "scraper", 1, 6, 25 * CREDIT));
+        reg(
+            &mut setup_25(),
+            v("translator", "scraper", 1, 6, 25 * CREDIT),
+        );
     }
 
     #[test]
     #[should_panic(expected = "ERR_SEQ_NOT_INCREASING")]
     fn tc_ct_020_05_lower_seq_rejected() {
-        reg(&mut setup_25(), v("translator", "scraper", 1, 4, 30 * CREDIT));
+        reg(
+            &mut setup_25(),
+            v("translator", "scraper", 1, 4, 30 * CREDIT),
+        );
     }
 
     #[test]
     #[should_panic(expected = "ERR_CUMULATIVE_DECREASED")]
     fn tc_ct_020_06_cumulative_decrease_rejected() {
-        reg(&mut setup_25(), v("translator", "scraper", 1, 7, 24 * CREDIT));
+        reg(
+            &mut setup_25(),
+            v("translator", "scraper", 1, 7, 24 * CREDIT),
+        );
     }
 
     #[test]
     fn tc_ct_020_07_exactly_at_headroom() {
         let mut c = circle();
         reg(&mut c, v("translator", "scraper", 1, 1, 80 * CREDIT));
-        assert_eq!(c.outstanding_debt(acc("translator.near")), U128(80 * CREDIT));
+        assert_eq!(
+            c.outstanding_debt(acc("translator.near")),
+            U128(80 * CREDIT)
+        );
     }
 
     #[test]
@@ -636,15 +877,32 @@ mod register_tests {
         let signed = v("translator", "scraper", 1, 1, 10 * CREDIT);
         let sig = sig_with("translator", &signed);
         let tampered = [
-            Voucher { cumulative_amount: U128(11 * CREDIT), ..signed.clone() },
-            Voucher { payee: acc("gpu.near"), ..signed.clone() },
-            Voucher { resource: "https://evil.example".into(), ..signed.clone() },
-            Voucher { seq: 2, ..signed.clone() },
+            Voucher {
+                cumulative_amount: U128(11 * CREDIT),
+                ..signed.clone()
+            },
+            Voucher {
+                payee: acc("gpu.near"),
+                ..signed.clone()
+            },
+            Voucher {
+                resource: "https://evil.example".into(),
+                ..signed.clone()
+            },
+            Voucher {
+                seq: 2,
+                ..signed.clone()
+            },
         ];
         for t in tampered {
             let mut c = circle();
-            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(t, sig.clone())));
-            let msg = *err.unwrap_err().downcast::<String>().unwrap_or_else(|e| Box::new(e.downcast_ref::<&str>().unwrap().to_string()));
+            let err = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.register_cumulative(t, sig.clone())
+            }));
+            let msg = *err
+                .unwrap_err()
+                .downcast::<String>()
+                .unwrap_or_else(|e| Box::new(e.downcast_ref::<&str>().unwrap().to_string()));
             assert!(msg.contains("ERR_BAD_SIGNATURE"), "{msg}");
             assert_eq!(c.outstanding_debt(acc("translator.near")), U128(0));
         }
@@ -653,7 +911,10 @@ mod register_tests {
     #[test]
     #[should_panic(expected = "ERR_BAD_SIGNATURE")]
     fn tc_ct_020_21_malformed_signature_string() {
-        circle().register_cumulative(v("translator", "scraper", 1, 1, CREDIT), "ed25519:abc".into());
+        circle().register_cumulative(
+            v("translator", "scraper", 1, 1, CREDIT),
+            "ed25519:abc".into(),
+        );
     }
 
     #[test]
@@ -667,33 +928,53 @@ mod register_tests {
     #[test]
     #[should_panic(expected = "ERR_INSUFFICIENT_CREDIT")]
     fn tc_ct_020_22_credit_before_signature() {
-        circle().register_cumulative(v("translator", "scraper", 1, 1, 81 * CREDIT), "ed25519:abc".into());
+        circle().register_cumulative(
+            v("translator", "scraper", 1, 1, 81 * CREDIT),
+            "ed25519:abc".into(),
+        );
     }
 
     #[test]
     #[should_panic(expected = "ERR_EXITING")]
     fn exiting_member_rejected_for_later_epoch() {
         let mut c = circle();
-        c.members.get_mut(&acc("scraper.near")).unwrap().exit_requested_epoch = Some(0);
+        c.members
+            .get_mut(&acc("scraper.near"))
+            .unwrap()
+            .exit_requested_epoch = Some(0);
         reg(&mut c, v("translator", "scraper", 1, 1, CREDIT));
     }
 
     #[test]
     fn exiting_member_still_registers_in_exit_epoch() {
         let mut c = circle();
-        c.members.get_mut(&acc("scraper.near")).unwrap().exit_requested_epoch = Some(1);
+        c.members
+            .get_mut(&acc("scraper.near"))
+            .unwrap()
+            .exit_requested_epoch = Some(1);
         reg(&mut c, v("translator", "scraper", 1, 1, CREDIT));
     }
 
     #[test]
     fn state_unchanged_after_rejected_registration() {
         let mut c = setup_25();
-        let before = (c.get_epoch(Some(1)).unwrap(), c.outstanding_debt(acc("translator.near")));
+        let before = (
+            c.get_epoch(Some(1)).unwrap(),
+            c.outstanding_debt(acc("translator.near")),
+        );
         let x = v("translator", "scraper", 1, 7, 24 * CREDIT);
         let sig = sig_with("translator", &x);
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(x, sig)));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            c.register_cumulative(x, sig)
+        }));
         assert!(r.is_err());
-        assert_eq!(before, (c.get_epoch(Some(1)).unwrap(), c.outstanding_debt(acc("translator.near"))));
+        assert_eq!(
+            before,
+            (
+                c.get_epoch(Some(1)).unwrap(),
+                c.outstanding_debt(acc("translator.near"))
+            )
+        );
     }
 
     fn reg_demo(c: &mut X207Circle, voucher: Voucher) -> U128 {
@@ -709,15 +990,23 @@ mod register_tests {
             .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
             .unwrap_or_default();
         // The mocked host wraps `env::panic_str` text in a `HostError`, so pick the code out of the message.
-        let start = msg.find("ERR_").unwrap_or_else(|| panic!("no ERR_ code in: {msg}"));
-        msg[start..].chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect()
+        let start = msg
+            .find("ERR_")
+            .unwrap_or_else(|| panic!("no ERR_ code in: {msg}"));
+        msg[start..]
+            .chars()
+            .take_while(|c| c.is_ascii_uppercase() || *c == '_')
+            .collect()
     }
 
     // TC-CT-022-01
     #[test]
     fn tc_ct_022_01_first_per_request_registration() {
         let mut c = circle();
-        assert_eq!(reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000)), U128(20_000));
+        assert_eq!(
+            reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000)),
+            U128(20_000)
+        );
         let e = last_event();
         assert_eq!(e["mode"], json!("per_request"));
         assert_eq!(e["delta"], json!("20000"));
@@ -729,7 +1018,10 @@ mod register_tests {
     fn tc_ct_022_02_next_seq() {
         let mut c = circle();
         reg_demo(&mut c, v("translator", "scraper", 1, 1, 20_000));
-        assert_eq!(reg_demo(&mut c, v("translator", "scraper", 1, 2, 40_000)), U128(40_000));
+        assert_eq!(
+            reg_demo(&mut c, v("translator", "scraper", 1, 2, 40_000)),
+            U128(40_000)
+        );
         assert_eq!(last_event()["delta"], json!("20000"));
     }
 
@@ -743,7 +1035,10 @@ mod register_tests {
             reg_demo(&mut c, v("translator", "scraper", 1, 4, 80_000));
         }));
         assert_eq!(code, "ERR_SEQ_GAP");
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 2);
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 1),
+            2
+        );
     }
 
     // TC-CT-022-04
@@ -760,13 +1055,26 @@ mod register_tests {
 
     /// TC-CT-022-05: one test per negative fixture and mode, so each gets its own mocked storage
     /// (`testing_env!` keeps storage inside one test). Both modes must give the same error code.
-    fn negative_case(demo: bool, prior: Option<(u64, u128)>, mutate: fn(&mut Voucher), signer: &str, now: u64, expected: &str) {
+    fn negative_case(
+        demo: bool,
+        prior: Option<(u64, u128)>,
+        mutate: fn(&mut Voucher),
+        signer: &str,
+        now: u64,
+        expected: &str,
+    ) {
         let mut c = circle();
         if let Some((seq, cumulative)) = prior {
             reg(&mut c, v("translator", "scraper", 1, seq, cumulative));
         }
         at(now);
-        let mut voucher = v("translator", "scraper", 1, if prior.is_some() { 2 } else { 1 }, CREDIT);
+        let mut voucher = v(
+            "translator",
+            "scraper",
+            1,
+            if prior.is_some() { 2 } else { 1 },
+            CREDIT,
+        );
         mutate(&mut voucher);
         let sig = sig_with(signer, &voucher);
         let code = panic_code(std::panic::AssertUnwindSafe(|| {
@@ -818,10 +1126,16 @@ mod register_tests {
         let mut c = circle();
         reg(&mut c, v("translator", "scraper", 1, 3, 30_000));
         assert_eq!(last_event()["mode"], json!("cumulative"));
-        assert_eq!(reg_demo(&mut c, v("translator", "scraper", 1, 4, 50_000)), U128(50_000));
+        assert_eq!(
+            reg_demo(&mut c, v("translator", "scraper", 1, 4, 50_000)),
+            U128(50_000)
+        );
         assert_eq!(last_event()["mode"], json!("per_request"));
         assert_eq!(last_event()["delta"], json!("20000"));
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 4);
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 1),
+            4
+        );
     }
 
     // TC-CT-021-07
@@ -829,8 +1143,14 @@ mod register_tests {
     fn tc_ct_021_07_last_seq_other_epoch_is_zero() {
         let mut c = circle();
         reg(&mut c, v("translator", "scraper", 1, 5, CREDIT));
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 1), 5);
-        assert_eq!(c.last_seq(acc("translator.near"), acc("scraper.near"), 2), 0);
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 1),
+            5
+        );
+        assert_eq!(
+            c.last_seq(acc("translator.near"), acc("scraper.near"), 2),
+            0
+        );
     }
     type Snapshot = (u128, u64, u128, u128);
 
@@ -857,9 +1177,27 @@ mod register_tests {
             (v("translator", "scraper", 1, 7, 24 * CREDIT), None),
             (v("translator", "scraper", 1, 7, 81 * CREDIT), None),
             (v("translator", "gpu", 1, 1, 56 * CREDIT), None),
-            (Voucher { circle: acc("other.test.near"), ..v("translator", "scraper", 1, 7, 26 * CREDIT) }, None),
-            (Voucher { unit: "eur".into(), ..v("translator", "scraper", 1, 7, 26 * CREDIT) }, None),
-            (Voucher { resource: "caf\u{e9}".into(), ..v("translator", "scraper", 1, 7, 26 * CREDIT) }, None),
+            (
+                Voucher {
+                    circle: acc("other.test.near"),
+                    ..v("translator", "scraper", 1, 7, 26 * CREDIT)
+                },
+                None,
+            ),
+            (
+                Voucher {
+                    unit: "eur".into(),
+                    ..v("translator", "scraper", 1, 7, 26 * CREDIT)
+                },
+                None,
+            ),
+            (
+                Voucher {
+                    resource: "caf\u{e9}".into(),
+                    ..v("translator", "scraper", 1, 7, 26 * CREDIT)
+                },
+                None,
+            ),
             (v("translator", "translator", 1, 7, 26 * CREDIT), None),
             (v("translator", "scraper", 2, 7, 26 * CREDIT), None),
             (v("pending", "scraper", 1, 1, CREDIT), None),
@@ -869,12 +1207,22 @@ mod register_tests {
         ];
         let mut c = setup_25();
         for (i, (voucher, sig)) in cases.into_iter().enumerate() {
-            let before = (snapshot(&c, "translator", "scraper"), snapshot(&c, "translator", "gpu"), c.get_epoch(Some(1)).unwrap().edge_count);
+            let before = (
+                snapshot(&c, "translator", "scraper"),
+                snapshot(&c, "translator", "gpu"),
+                c.get_epoch(Some(1)).unwrap().edge_count,
+            );
             let payer = voucher.payer.as_str().trim_end_matches(".near").to_string();
             let sig = sig.unwrap_or_else(|| sig_with(&payer, &voucher));
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(voucher, sig)));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.register_cumulative(voucher, sig)
+            }));
             assert!(result.is_err(), "case {i} was accepted");
-            let after = (snapshot(&c, "translator", "scraper"), snapshot(&c, "translator", "gpu"), c.get_epoch(Some(1)).unwrap().edge_count);
+            let after = (
+                snapshot(&c, "translator", "scraper"),
+                snapshot(&c, "translator", "gpu"),
+                c.get_epoch(Some(1)).unwrap().edge_count,
+            );
             assert_eq!(before, after, "case {i} left a trace");
         }
     }
@@ -899,19 +1247,38 @@ mod register_tests {
             let (seq, cumulative) = (1 + next(12), u128::from(next(30_000_001)));
             let voucher = v(names[a], names[b], 1, seq, cumulative);
             let sig = sig_with(names[a], &voucher);
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.register_cumulative(voucher, sig)));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.register_cumulative(voucher, sig)
+            }));
             let (last_seq, last_cum) = model.get(&(a, b)).copied().unwrap_or((0, 0));
             if result.is_ok() {
                 accepted += 1;
-                assert!(a != b && seq > last_seq && cumulative >= last_cum, "accepted a bad voucher {a}->{b} seq {seq} cum {cumulative}");
+                assert!(
+                    a != b && seq > last_seq && cumulative >= last_cum,
+                    "accepted a bad voucher {a}->{b} seq {seq} cum {cumulative}"
+                );
                 model.insert((a, b), (seq, cumulative));
             }
             for (&(x, y), &(s, cum)) in &model {
-                let pair = c.obligation(1, acc(&format!("{}.near", names[x])), acc(&format!("{}.near", names[y]))).unwrap();
-                assert_eq!((pair.last_seq, pair.obligation.0), (s, cum), "I-05 {x}->{y}");
+                let pair = c
+                    .obligation(
+                        1,
+                        acc(&format!("{}.near", names[x])),
+                        acc(&format!("{}.near", names[y])),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    (pair.last_seq, pair.obligation.0),
+                    (s, cum),
+                    "I-05 {x}->{y}"
+                );
             }
             for (i, n) in names.iter().enumerate() {
-                let owed: u128 = model.iter().filter(|((x, _), _)| *x == i).map(|(_, (_, cum))| cum).sum();
+                let owed: u128 = model
+                    .iter()
+                    .filter(|((x, _), _)| *x == i)
+                    .map(|(_, (_, cum))| cum)
+                    .sum();
                 assert_eq!(c.outstanding_debt(acc(&format!("{n}.near"))).0, owed);
                 assert!(owed <= 80 * CREDIT, "I-03 {n} owes {owed}");
             }
