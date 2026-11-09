@@ -1,0 +1,457 @@
+{
+  "circle": "x207-v018.testnet",
+  "owner": "x207-v18-own.testnet",
+  "accounts": {
+    "alice": "alice.x207-v18-own.testnet",
+    "bob": "bob.x207-v18-own.testnet",
+    "sold2": "sold2.x207-v18-own.testnet",
+    "exp2": "exp2.x207-v18-own.testnet",
+    "dan2": "dan2.x207-v18-own.testnet"
+  },
+  "steps": [
+    {
+      "label": "claim epoch 6 (alice, near)",
+      "ok": true,
+      "tx": "7AiRjZdC2PpU7Z2V6nUHXf2dKxuX3m5z1fVenyeJWukm",
+      "failure": null,
+      "value": "11000000"
+    },
+    {
+      "label": "usdt storage_deposit dan2",
+      "ok": true,
+      "tx": "EcWRHPDDYRyJxHe1EsRzPCx6JkCCX2Fhuig3pZQ9PB39",
+      "failure": null,
+      "value": {
+        "total": "1250000000000000000000",
+        "available": "0"
+      }
+    },
+    {
+      "label": "usdt mint dan2",
+      "ok": true,
+      "tx": "GymMgwvTMwvzphjuYqNp6f8eNT6p63wvfVMBptu7bwcH",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "join dan2",
+      "ok": true,
+      "tx": "5gyyAD4TrKoJjdzMdvEo6ZaD8XBWwaJ5HxLc57Gg9Pnc",
+      "failure": null,
+      "value": {
+        "account_id": "dan2.x207-v18-own.testnet",
+        "pubkey_voucher": "ed25519:MpU4yaJXrVrDTQkYpWVxJvowiV5QJFCJo1bWhYETigA",
+        "terms_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stake": "0",
+        "limit": "0",
+        "status": "pending",
+        "admitted": false,
+        "joined_at": "1794190764755430027",
+        "settled_history": "0",
+        "last_active_epoch": 8,
+        "exit_requested_epoch": null
+      }
+    },
+    {
+      "label": "stake dan2",
+      "ok": true,
+      "tx": "A3SN7xZV7uxiAqv3WmKayRg4jKQFd9Pea7WT6zi1Yzmx",
+      "failure": null,
+      "value": "150000000"
+    },
+    {
+      "label": "set_params epoch_length 600 (applies to the next epoch)",
+      "ok": true,
+      "tx": "B18wL76koHzPxkLmB5eXFZtNNcBFnrQqxdE7zkPVkmQv",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "set_params epoch_length 900 (applies to the epoch after the lock epoch)",
+      "ok": true,
+      "tx": "8aEUjCo6GfpCNcn2zaz7255sChZGCJETp8RMwtoQMUv9",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "offer_grant 9 min near:account (exp2)",
+      "ok": true,
+      "tx": "EhpcksX8LeRxkWXvmNiBUZZWkYiNWEStnMo5sUV93aAR",
+      "failure": null,
+      "value": 5
+    },
+    {
+      "label": "offer_grant #11 near:account (sold2)",
+      "ok": true,
+      "tx": "HCWtAA2amePCB6DJGyxw3M33VUdgNq46z8Ht4KcVyZ2i",
+      "failure": null,
+      "value": 6
+    },
+    {
+      "label": "offer_grant #14 near:member_account (dan2)",
+      "ok": true,
+      "tx": "DYW5XsuhKsHNzDnCUZsdyhMRtsy5bk9z8ePsyueMrXds",
+      "failure": null,
+      "value": 7
+    },
+    {
+      "label": "lock exp2 (9 min grant)",
+      "ok": true,
+      "tx": "63UN74Ud3wdxZEq5Tveb8nAYGkYSH5rbo7Hef8DLrcyb",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "lock sold2 (#11)",
+      "ok": true,
+      "tx": "9ETn6d9xjZBE3PA7nUdtLtsckqTeifBk6Dgo4E5VzE2q",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "lock dan2 (#14)",
+      "ok": true,
+      "tx": "5vyGwRjc6Lui6rwmSSaz8YZwoAMbcba9bVM7fMHxFT3s",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "complete_account_escrow #11 (buyer pays, gets the key)",
+      "ok": true,
+      "tx": "13AHbm6AwKEXHCovdTXGtjbSLz9xmvSmifsebMMKJ6gR",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "cancel_expired_account_escrow (bob, a stranger)",
+      "ok": true,
+      "tx": "5mUqbeo34pxBFCFqTC732Hnrrv9zWACXd9EuYfWXbSqH",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "close_epoch 8",
+      "ok": true,
+      "tx": "EcxhzwnAxkvtT2FbPwmXWtQAMtGQUYYUP9c8eSCK61GQ",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "commit_epoch 8",
+      "ok": true,
+      "tx": "BkDPvAvt9wcJ4uQZURXqkPLjHnBQesGvjuGGR2Rv7gUv",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "settle epoch 8 (bob pays 10 credits for #11)",
+      "ok": true,
+      "tx": "DQoC34JZNLCe9CxmCevqT62Eteh7PLC9qPAmyxZhiTBR",
+      "failure": null,
+      "value": "10000000"
+    },
+    {
+      "label": "finalize_epoch 8",
+      "ok": true,
+      "tx": "HkNaZ7fzccjc48BnpemAToGC4EK49hUhqkUn29raMNu5",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "commit_epoch 9",
+      "ok": false,
+      "tx": "4AU5eBqFCwyLRgQyNh5iK9R5Md6NRAQj3dJ7acaWzG9a",
+      "failure": "Smart contract panicked: ERR_WRONG_PHASE: epoch 9 is PaymentWindow, expected Clearing",
+      "value": null
+    },
+    {
+      "label": "finalize_epoch 9",
+      "ok": true,
+      "tx": "EZB1j81eA8QiMRv5cX7hYYLAkRVDKKWwRrH4hP1bX7Nj",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "finalize_epoch 10",
+      "ok": true,
+      "tx": "BTNPFiiSaZzq9GC7r8itDTmwqp4JyRS1WEe6pEtECZ4b",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "commit_epoch 11",
+      "ok": true,
+      "tx": "3mXZBpHzAhFm4m7CsGHqkNuNXQi1jP5r1RNMtuNWwDLT",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "finalize_epoch 11",
+      "ok": true,
+      "tx": "7kjoFyWSeVdWp4PXmM29Lox63S13MdQwNVkX4ZbdX9wL",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "finalize_epoch 12",
+      "ok": true,
+      "tx": "GAx8xqmbUG6XaS78TwjpmdXtP2km3fTbxaEYaPdA8f6r",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "complete_account_escrow #14 (member account delivered)",
+      "ok": true,
+      "tx": "9vRmaYFbc56y2vSiuFM7PayogVSZH8jbSJvXbkgYzEjj",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "close_epoch 13",
+      "ok": true,
+      "tx": "GzGt4omq35WgXZqU4mFwVhtxFF3K8SKMYRALrdzK2zMY",
+      "failure": null,
+      "value": null
+    },
+    {
+      "label": "commit_epoch 13",
+      "ok": false,
+      "tx": "CKLEEw8RaL9jwV3B4abojfnR2LTUrRbjX7fJy2rpPmYG",
+      "failure": "Smart contract panicked: ERR_WRONG_PHASE: epoch 13 is PaymentWindow, expected Clearing",
+      "value": null
+    },
+    {
+      "label": "settle epoch 13 (bob pays 10000000 for #14)",
+      "ok": true,
+      "tx": "CuYvBdUXGEV1mRZhjheKKp8RE5NCqD9hhPhBJqXPM5iD",
+      "failure": null,
+      "value": "10000000"
+    },
+    {
+      "label": "finalize_epoch 13",
+      "ok": true,
+      "tx": "CJMhQgomNP2UCTGE6MA42nWWpCbtr4AigCLHhyNuNbk6",
+      "failure": null,
+      "value": null
+    }
+  ],
+  "checks": {
+    "codeHash": "5nBeeNaeWbVH7Q1c3mfG1NPThENb9PA8BvVgjauf6Aib",
+    "alicePositionBeforeClaim": {
+      "epoch": 6,
+      "account_id": "alice.x207-v18-own.testnet",
+      "net": "11000000",
+      "role": "creditor",
+      "status": "claimed",
+      "amount": "11000000",
+      "recovered": "0",
+      "payment_deadline": "1794162786576962627",
+      "updated_at_block": 276859324
+    },
+    "alicePositionAfterClaim": {
+      "epoch": 6,
+      "account_id": "alice.x207-v18-own.testnet",
+      "net": "11000000",
+      "role": "creditor",
+      "status": "claimed",
+      "amount": "11000000",
+      "recovered": "0",
+      "payment_deadline": "1794162786576962627",
+      "updated_at_block": 276859324
+    },
+    "aliceUsdtGained": "11000000",
+    "aliceUsdtBefore": "150000000",
+    "escrowExpAfterLock": {
+      "grant_id": 5,
+      "account_id": "exp2.x207-v18-own.testnet",
+      "state": "cancelled",
+      "buyer": null,
+      "locked_epoch": 8,
+      "delivery_pubkey": null
+    },
+    "afterLock11": {
+      "ok": false,
+      "reasons": [
+        "keys_left",
+        "locker_not_held",
+        "escrow_not_held"
+      ]
+    },
+    "escrow14AfterLock": {
+      "grant_id": 7,
+      "account_id": "dan2.x207-v18-own.testnet",
+      "state": "delivered",
+      "buyer": "bob.x207-v18-own.testnet",
+      "locked_epoch": 8,
+      "delivery_pubkey": "ed25519:2C34DtGBdbEGiozTnavcibDW66uLvboeMNwH2F92eUTu"
+    },
+    "after11": {
+      "keys": [
+        "ed25519:9txeVsXhpRMZ3qu5XBQZ35RH4YYPvCg7hPo6uhrYXfuH"
+      ],
+      "buyerKey": "ed25519:9txeVsXhpRMZ3qu5XBQZ35RH4YYPvCg7hPo6uhrYXfuH",
+      "locker": {
+        "circle": "x207-v018.testnet",
+        "grant_id": 6,
+        "return_pubkey": "ed25519:8CZ7UJrpvbx5Nb1DuRyJ5MHx9ft3sF7QR4qogvtrD7Mp",
+        "state": "released"
+      },
+      "escrow": {
+        "grant_id": 6,
+        "account_id": "sold2.x207-v18-own.testnet",
+        "state": "delivered",
+        "buyer": "bob.x207-v18-own.testnet",
+        "locked_epoch": 8,
+        "delivery_pubkey": "ed25519:9txeVsXhpRMZ3qu5XBQZ35RH4YYPvCg7hPo6uhrYXfuH"
+      }
+    },
+    "keysExpBeforeCancel": [],
+    "afterCancelExp": {
+      "keys": [
+        "ed25519:BDW1U7LBGg455aVLuh9VEaUQZtaHdcMEJXvke6cZBRgN"
+      ],
+      "returnKey": "ed25519:BDW1U7LBGg455aVLuh9VEaUQZtaHdcMEJXvke6cZBRgN",
+      "locker": {
+        "circle": "x207-v018.testnet",
+        "grant_id": 5,
+        "return_pubkey": "ed25519:BDW1U7LBGg455aVLuh9VEaUQZtaHdcMEJXvke6cZBRgN",
+        "state": "returned"
+      },
+      "escrow": {
+        "grant_id": 5,
+        "account_id": "exp2.x207-v18-own.testnet",
+        "state": "cancelled",
+        "buyer": null,
+        "locked_epoch": 8,
+        "delivery_pubkey": null
+      }
+    },
+    "after14": {
+      "keys": [
+        "ed25519:2C34DtGBdbEGiozTnavcibDW66uLvboeMNwH2F92eUTu"
+      ],
+      "buyerKey": "ed25519:2C34DtGBdbEGiozTnavcibDW66uLvboeMNwH2F92eUTu",
+      "member": {
+        "account_id": "dan2.x207-v18-own.testnet",
+        "pubkey_voucher": "ed25519:2C34DtGBdbEGiozTnavcibDW66uLvboeMNwH2F92eUTu",
+        "terms_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "stake": "150000000",
+        "limit": "120000000",
+        "status": "active",
+        "admitted": false,
+        "joined_at": "1794190764755430027",
+        "settled_history": "0",
+        "last_active_epoch": 8,
+        "exit_requested_epoch": null
+      },
+      "locker": {
+        "circle": "x207-v018.testnet",
+        "grant_id": 7,
+        "return_pubkey": "ed25519:HK9ZDLhjoWtjKBKfPwEJZmZPPQFhmSEsdxVMPvtouMTo",
+        "state": "released"
+      },
+      "escrow": {
+        "grant_id": 7,
+        "account_id": "dan2.x207-v18-own.testnet",
+        "state": "delivered",
+        "buyer": "bob.x207-v18-own.testnet",
+        "locked_epoch": 8,
+        "delivery_pubkey": "ed25519:2C34DtGBdbEGiozTnavcibDW66uLvboeMNwH2F92eUTu"
+      }
+    },
+    "positionsDelivery14": [
+      {
+        "epoch": 13,
+        "account_id": "bob.x207-v18-own.testnet",
+        "net": "-10000000",
+        "role": "debtor",
+        "status": "due",
+        "amount": "10000000",
+        "recovered": "0",
+        "payment_deadline": "1794198712801850076",
+        "updated_at_block": 276870817
+      },
+      {
+        "epoch": 13,
+        "account_id": "alice.x207-v18-own.testnet",
+        "net": "10000000",
+        "role": "creditor",
+        "status": "claimable",
+        "amount": "10000000",
+        "recovered": "0",
+        "payment_deadline": "1794198712801850076",
+        "updated_at_block": 276870817
+      }
+    ],
+    "delivery14Final": {
+      "epoch": 13,
+      "phase": "finalized",
+      "opened_at": "1794195955727811438",
+      "cutoff_at": "1794197742637425679",
+      "closed_at": "1794197748754159489",
+      "proposal_deadline": "1794197808754159489",
+      "committed_at": "1794197812801850076",
+      "payment_deadline": "1794198712801850076",
+      "finalized_at": "1794198718222383695",
+      "edge_count": 1,
+      "participant_count": 2,
+      "total_obligation": "10000000",
+      "total_cleared": "0",
+      "pool": "10000000",
+      "shortfall": "0",
+      "params": {
+        "epoch_length": 1800,
+        "payment_window": 900,
+        "proposal_window": 60,
+        "base_limit_ratio": 8000,
+        "limit_growth": 1000,
+        "limit_cap": "1000000000",
+        "limit_decay": 0,
+        "fees": {
+          "clearing_fee_bps": 0,
+          "solver_fee_bps": 0
+        },
+        "admission": "open",
+        "max_search_share_bps": 500,
+        "bond_threshold": "100000000",
+        "bond_bps": 2000,
+        "prune_delay_epochs": 2,
+        "relayer_fee": "0"
+      }
+    },
+    "positionsDelivery14After": [
+      {
+        "epoch": 13,
+        "account_id": "bob.x207-v18-own.testnet",
+        "net": "-10000000",
+        "role": "debtor",
+        "status": "paid",
+        "amount": "10000000",
+        "recovered": "0",
+        "payment_deadline": "1794198712801850076",
+        "updated_at_block": 276870985
+      },
+      {
+        "epoch": 13,
+        "account_id": "alice.x207-v18-own.testnet",
+        "net": "10000000",
+        "role": "creditor",
+        "status": "claimable",
+        "amount": "10000000",
+        "recovered": "0",
+        "payment_deadline": "1794198712801850076",
+        "updated_at_block": 276870817
+      }
+    ]
+  },
+  "lockEpoch": 8,
+  "expiresExpMs": 1794191322372,
+  "grantExp": 5,
+  "grant11": 6,
+  "grant14": 7,
+  "deliveryEpoch14": 13,
+  "notCovered": [
+    "the GC behaviour of node 2.14.0",
+    "alice has not claimed the residual of the two new epochs of this run"
+  ]
+}
