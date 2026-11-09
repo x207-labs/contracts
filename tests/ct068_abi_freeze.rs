@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 62] = [
+const CHANGE_METHODS: [&str; 63] = [
     "new",
     "join",
     "ft_on_transfer",
@@ -96,10 +96,13 @@ const CHANGE_METHODS: [&str; 62] = [
     "cancel_expired_account_escrow",
     "set_locker_code_hashes",
     "set_pending_gc_delay",
+    // 0.0.18: CT-129 (limit of the escrow time)
+    "set_max_escrow_ttl",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 42] = [
+const VIEWS: [&str; 43] = [
+    "get_max_escrow_ttl",
     "get_pending_gc_delay",
     "get_account_escrow",
     "get_locker_code_hashes",
@@ -148,7 +151,7 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 104] = [
+const SIGNATURES: [&str; 106] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
     "account_on_lock(grant_id:integer:uint64)-> []",
     "admit_member(account_id:string)-> []",
@@ -185,6 +188,7 @@ const SIGNATURES: [&str; 104] = [
     "get_grant(grant_id:integer:uint64)->AccessGrant|null []",
     "get_intent(intent_hash:string)->IntentView|null []",
     "get_locker_code_hashes()->array<string> []",
+    "get_max_escrow_ttl()->string []",
     "get_mt_escrow(grant_id:integer:uint64)->MtEscrowView|null []",
     "get_owner()->string []",
     "get_params()->Params []",
@@ -243,6 +247,7 @@ const SIGNATURES: [&str; 104] = [
     "set_auto_settle(enabled:boolean)-> [payable]",
     "set_auto_settle_evm(member:string,enabled:boolean,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
     "set_locker_code_hashes(hashes:array<string>)-> []",
+    "set_max_escrow_ttl(ttl_ns:string)-> []",
     "set_params(params:Params)-> []",
     "set_pending_gc_delay(seconds:string)-> []",
     "settle_deal(bundle_id:integer:uint64)-> []",

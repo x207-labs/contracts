@@ -486,6 +486,7 @@ impl X207Circle {
             env::block_timestamp() < grant.limits.expires_at.0,
             "ERR_GRANT_EXPIRED: the grant ran out"
         );
+        crate::account_escrow::assert_escrow_ttl(grant.limits.expires_at.0);
         let named = crate::account_escrow::account_scope(&grant.limits.scope);
         require!(
             named.as_ref().is_ok_and(|a| *a == account),
@@ -546,6 +547,18 @@ impl X207Circle {
 
     pub fn get_locker_code_hashes(&self) -> Vec<String> {
         crate::account_escrow::locker_code_hashes()
+    }
+
+    /// Owner only (the DAO). CT-129: the longest time, in nanoseconds, that the grant of an account may still run when the locker registers
+    /// (`account_on_lock`, `ERR_ESCROW_TTL_TOO_LONG`). Default 72 hours; `ERR_BAD_ESCROW_TTL` outside 1 hour to 30 days. `ERR_NOT_OWNER`.
+    pub fn set_max_escrow_ttl(&mut self, ttl_ns: near_sdk::json_types::U64) {
+        self.assert_owner();
+        crate::account_escrow::set_max_escrow_ttl_ns(ttl_ns.0);
+    }
+
+    /// The limit in force, in nanoseconds.
+    pub fn get_max_escrow_ttl(&self) -> near_sdk::json_types::U64 {
+        near_sdk::json_types::U64(crate::account_escrow::max_escrow_ttl_ns())
     }
 }
 
@@ -2718,6 +2731,60 @@ mod tests {
         c.account_on_lock(GRANT);
         let again = lock_text(&mut c).expect_err("second lock");
         assert!(again.contains("ERR_ESCROW_EXISTS"), "{again}");
+    }
+
+    // TC-CT-129-01: the lock is refused when the grant runs longer than `now + max_escrow_ttl`; exactly at the limit passes
+    #[test]
+    fn the_lock_is_bounded_by_the_escrow_ttl() {
+        let now = 5_000u64;
+        let ttl = crate::account_escrow::DEFAULT_MAX_ESCROW_TTL_NS;
+        let mut c = circle();
+        assert_eq!(c.get_max_escrow_ttl().0, ttl, "default is 72 hours");
+        let with_expiry = |expires_at: u64| {
+            let mut g = grant_account("near:account");
+            g.limits.expires_at = U64(expires_at);
+            crate::grant::store_grant_for_test(&g);
+        };
+        with_expiry(now + ttl + 1);
+        as_locker(now);
+        refused_lock(&mut c, "ERR_ESCROW_TTL_TOO_LONG");
+        with_expiry(now + ttl);
+        as_locker(now);
+        c.account_on_lock(GRANT);
+        assert!(c.get_account_escrow(GRANT).is_some());
+    }
+
+    // TC-CT-129-02: `set_max_escrow_ttl` is for the owner, within 1 hour to 30 days, and the new limit is the one that counts
+    #[test]
+    fn set_max_escrow_ttl_is_owner_only_and_in_range() {
+        use crate::account_escrow::{MAX_MAX_ESCROW_TTL_NS, MIN_MAX_ESCROW_TTL_NS};
+        let mut c = circle();
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("eve.near"))
+            .build());
+        let eve = refusal(|| c.set_max_escrow_ttl(U64(MIN_MAX_ESCROW_TTL_NS)));
+        assert!(eve.contains("ERR_NOT_OWNER"), "{eve}");
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc("dao.near"))
+            .build());
+        for bad in [MIN_MAX_ESCROW_TTL_NS - 1, MAX_MAX_ESCROW_TTL_NS + 1, 0] {
+            let err = refusal(|| c.set_max_escrow_ttl(U64(bad)));
+            assert!(err.contains("ERR_BAD_ESCROW_TTL"), "{bad}: {err}");
+        }
+        c.set_max_escrow_ttl(U64(MIN_MAX_ESCROW_TTL_NS));
+        c.set_max_escrow_ttl(U64(MAX_MAX_ESCROW_TTL_NS));
+        assert_eq!(c.get_max_escrow_ttl().0, MAX_MAX_ESCROW_TTL_NS);
+        c.set_max_escrow_ttl(U64(MIN_MAX_ESCROW_TTL_NS));
+        let now = 5_000u64;
+        let mut g = grant_account("near:account");
+        g.limits.expires_at = U64(now + MIN_MAX_ESCROW_TTL_NS + 1);
+        crate::grant::store_grant_for_test(&g);
+        as_locker(now);
+        refused_lock(&mut c, "ERR_ESCROW_TTL_TOO_LONG");
+        g.limits.expires_at = U64(now + MIN_MAX_ESCROW_TTL_NS);
+        crate::grant::store_grant_for_test(&g);
+        c.account_on_lock(GRANT);
+        assert!(c.get_account_escrow(GRANT).is_some());
     }
 
     // TC-CT-126-03: the asset type follows the account: a member is sold as near:member_account only, anybody else as near:account

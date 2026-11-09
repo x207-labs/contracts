@@ -22,6 +22,40 @@ const LOCKER_HASHES_KEY: &[u8] = b"x207_locker_code_hashes";
 /// At most this many official locker code hashes (the list is for the SDK to read, so it stays short).
 pub const MAX_LOCKER_HASHES: usize = 8;
 
+/// CT-129: the grant of an account that is locked may not run longer than this from the moment of the lock (`ERR_ESCROW_TTL_TOO_LONG`). A locked account
+/// can be taken back only after `expires_at` (`cancel_expired_account_escrow`), so the limit bounds how long a seller can be stuck when nobody drives the
+/// epochs. The default of 72 hours covers a full epoch cycle (close, commit, finalize) of the epoch lengths in use (5 to 30 minutes plus the 15 minute payment
+/// window) many times over. The owner may set it between 1 hour and 30 days (`set_max_escrow_ttl`). It lives in its own storage key, so a circle that was
+/// deployed before CT-129 reads the default and its stored state is unchanged; an escrow that exists already is not checked again.
+pub const DEFAULT_MAX_ESCROW_TTL_NS: u64 = 72 * 3_600 * 1_000_000_000;
+pub const MIN_MAX_ESCROW_TTL_NS: u64 = 3_600 * 1_000_000_000;
+pub const MAX_MAX_ESCROW_TTL_NS: u64 = 30 * 24 * 3_600 * 1_000_000_000;
+const MAX_ESCROW_TTL_KEY: &[u8] = b"x207_max_escrow_ttl_ns";
+
+/// The limit in force, in nanoseconds.
+pub fn max_escrow_ttl_ns() -> u64 {
+    env::storage_read(MAX_ESCROW_TTL_KEY)
+        .and_then(|b| <[u8; 8]>::try_from(b.as_slice()).ok())
+        .map_or(DEFAULT_MAX_ESCROW_TTL_NS, u64::from_le_bytes)
+}
+
+pub(crate) fn set_max_escrow_ttl_ns(ttl_ns: u64) {
+    require!(
+        (MIN_MAX_ESCROW_TTL_NS..=MAX_MAX_ESCROW_TTL_NS).contains(&ttl_ns),
+        format!("ERR_BAD_ESCROW_TTL: between {MIN_MAX_ESCROW_TTL_NS} and {MAX_MAX_ESCROW_TTL_NS} nanoseconds")
+    );
+    env::storage_write(MAX_ESCROW_TTL_KEY, &ttl_ns.to_le_bytes());
+}
+
+/// `expires_at` of the grant must be at most `now + max_escrow_ttl` (`ERR_ESCROW_TTL_TOO_LONG`).
+pub(crate) fn assert_escrow_ttl(expires_at: u64) {
+    let latest = env::block_timestamp().saturating_add(max_escrow_ttl_ns());
+    require!(
+        expires_at <= latest,
+        format!("ERR_ESCROW_TTL_TOO_LONG: expires_at {expires_at} is after {latest} (now plus the limit of {} ns)", max_escrow_ttl_ns())
+    );
+}
+
 /// Class A escrow of one NEAR account held by its locker. Kept apart from `Escrow`, `FtEscrow` and `MtEscrow` so that the stored rows of 0.0.17 read unchanged.
 #[near(serializers = [borsh])]
 #[derive(Clone, Debug, PartialEq, Eq)]

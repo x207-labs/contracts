@@ -230,6 +230,33 @@ async fn a_refused_registration_returns_the_key() -> anyhow::Result<()> {
     Ok(())
 }
 
+// TC-CT-129-03 (CT-129): a grant that runs longer than the limit (default 72 hours) is refused at the lock with `ERR_ESCROW_TTL_TOO_LONG`, the locker gives
+// the account back, and the same account locks with a grant inside the limit
+#[tokio::test]
+async fn a_grant_longer_than_the_escrow_ttl_is_refused_at_the_lock() -> anyhow::Result<()> {
+    let mut w = world().await?;
+    let ttl: Value = w.f.circle.view("get_max_escrow_ttl", json!({})).await?;
+    assert_eq!(ttl.as_str(), Some("259200000000000"), "default 72 hours");
+    let sold = w.f.account("sold").await?;
+    let sold_id = sold.id().clone();
+    let (_, seller_key) = fresh_key();
+    let long = w.offer("near:account", &sold_id, 80 * HOUR_NS).await?;
+    let lock = w
+        .lock(&sold, long, &seller_key, &[sold.secret_key().public_key()])
+        .await?;
+    assert!(lock.is_success(), "the deploy itself succeeds");
+    assert_eq!(w.locker_state(&sold_id).await?, "returned");
+    assert_eq!(w.keys(&sold_id).await?, vec![seller_key.to_string()]);
+    assert!(w.escrow_state(long).await?.is_null());
+    let logs = format!("{:?}", lock.logs());
+    let receipts = format!("{:?}", lock.outcomes());
+    assert!(
+        logs.contains("ERR_ESCROW_TTL_TOO_LONG") || receipts.contains("ERR_ESCROW_TTL_TOO_LONG"),
+        "the circle names the limit: {logs} {receipts}"
+    );
+    Ok(())
+}
+
 // TC-CT-127-04 (threat: a fake circle or a wrong caller): only the circle moves the account; the keys stay out
 #[tokio::test]
 async fn only_the_circle_can_release_or_give_back() -> anyhow::Result<()> {

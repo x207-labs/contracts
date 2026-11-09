@@ -910,6 +910,16 @@
       },
       {
         "kind": "view",
+        "name": "get_max_escrow_ttl",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_mt_escrow",
         "params": {
           "args": [
@@ -2554,6 +2564,21 @@
                   "type": "string"
                 },
                 "type": "array"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "set_max_escrow_ttl",
+        "params": {
+          "args": [
+            {
+              "name": "ttl_ns",
+              "type_schema": {
+                "type": "string"
               }
             }
           ],
