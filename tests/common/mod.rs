@@ -481,8 +481,13 @@ pub mod circle {
 
         /// Fast-forwards blocks until the block time reaches `target_ns`.
         pub async fn advance_to(&self, target_ns: u64) -> anyhow::Result<()> {
-            while self.now_ns().await? < target_ns {
-                let missing_s = (target_ns - self.now_ns().await?).div_ceil(SEC);
+            loop {
+                // One read per pass: a second read can already be past the target.
+                let now = self.now_ns().await?;
+                if now >= target_ns {
+                    break;
+                }
+                let missing_s = (target_ns - now).div_ceil(SEC);
                 self.worker
                     .fast_forward(missing_s.clamp(20, self.max_jump.max(20)))
                     .await?;
