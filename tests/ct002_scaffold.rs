@@ -27,6 +27,10 @@ fn near_sdk_is_pinned_exact() {
     assert!(
         manifest.contains("near-sdk = \"=5.30.1\"")
             || manifest.contains("near-sdk = { version = \"=5.30.1\", features = [\"unstable\"] }")
+            // CT-122: the default feature wee_alloc is off
+            || manifest.contains(
+                "near-sdk = { version = \"=5.30.1\", default-features = false, features = [\"unstable\"] }"
+            )
     );
     let lock = std::fs::read_to_string("Cargo.lock").unwrap();
     assert!(lock.contains("name = \"near-sdk\"\nversion = \"5.30.1\""));
