@@ -33,13 +33,19 @@ impl X207Circle {
             return Err(format!("ERR_UNKNOWN_EPOCH: {epoch}"));
         };
         if e.phase != EpochPhase::Clearing {
-            return Err(format!("ERR_WRONG_PHASE: epoch {epoch} is {:?}, expected Clearing", e.phase));
+            return Err(format!(
+                "ERR_WRONG_PHASE: epoch {epoch} is {:?}, expected Clearing",
+                e.phase
+            ));
         }
         if edges.is_empty() {
             return Err("ERR_EMPTY_PROPOSAL: no edges".to_string());
         }
         if edges.len() > MAX_EDGES_PER_TX as usize {
-            return Err(format!("ERR_TOO_MANY_EDGES: {} > {MAX_EDGES_PER_TX}", edges.len()));
+            return Err(format!(
+                "ERR_TOO_MANY_EDGES: {} > {MAX_EDGES_PER_TX}",
+                edges.len()
+            ));
         }
         let mut seen: HashSet<(&AccountId, &AccountId)> = HashSet::with_capacity(edges.len());
         let mut net: BTreeMap<&AccountId, (u128, u128)> = BTreeMap::new();
@@ -62,12 +68,16 @@ impl X207Circle {
                 ));
             }
             // Sums are bounded by `total_obligation` (a u128 that registration already added up).
-            total = total.checked_add(cleared).ok_or("ERR_CLEARED_EXCEEDS_OBLIGATION: total overflow")?;
+            total = total
+                .checked_add(cleared)
+                .ok_or("ERR_CLEARED_EXCEEDS_OBLIGATION: total overflow")?;
             net.entry(creditor).or_default().0 += cleared;
             net.entry(debtor).or_default().1 += cleared;
         }
         if let Some((account, (inn, out))) = net.iter().find(|(_, (inn, out))| inn != out) {
-            return Err(format!("ERR_UNBALANCED_MEMBER: {account} in {inn} out {out}"));
+            return Err(format!(
+                "ERR_UNBALANCED_MEMBER: {account} in {inn} out {out}"
+            ));
         }
         Ok(total)
     }
@@ -129,7 +139,11 @@ mod tests {
     }
 
     fn edge(d: &str, c: &str, cleared: u128) -> ClearingEdge {
-        ClearingEdge { debtor: acc(d), creditor: acc(c), cleared: U128(cleared) }
+        ClearingEdge {
+            debtor: acc(d),
+            creditor: acc(c),
+            cleared: U128(cleared),
+        }
     }
 
     /// Epoch 1 in phase `clearing` with the given `(payer, payee, cumulative)` pairs.
@@ -144,8 +158,19 @@ mod tests {
             env::block_timestamp(),
         );
         for (payer, payee, cumulative) in pairs {
-            c.pairs.insert((1, acc(payer), acc(payee)), PairState { cumulative: *cumulative, last_seq: 1, cleared: 0 });
-            c.epochs.get_mut(&1).unwrap().edges.push((acc(payer), acc(payee)));
+            c.pairs.insert(
+                (1, acc(payer), acc(payee)),
+                PairState {
+                    cumulative: *cumulative,
+                    last_seq: 1,
+                    cleared: 0,
+                },
+            );
+            c.epochs
+                .get_mut(&1)
+                .unwrap()
+                .edges
+                .push((acc(payer), acc(payee)));
         }
         let e = c.epochs.get_mut(&1).unwrap();
         e.phase = EpochPhase::Clearing;
@@ -203,14 +228,20 @@ mod tests {
     // TC-CT-026-04
     #[test]
     fn tc_ct_026_04_duplicate_pair() {
-        let edges = vec![edge("gpu.near", "translator.near", 10 * CREDIT), edge("gpu.near", "translator.near", 10 * CREDIT)];
+        let edges = vec![
+            edge("gpu.near", "translator.near", 10 * CREDIT),
+            edge("gpu.near", "translator.near", 10 * CREDIT),
+        ];
         assert!(reason(&s1(), edges).starts_with("ERR_DUPLICATE_EDGE"));
     }
 
     // TC-CT-026-05
     #[test]
     fn tc_ct_026_05_edge_outside_snapshot() {
-        assert!(reason(&s1(), vec![edge("gpu.near", "scraper.near", 5 * CREDIT)]).starts_with("ERR_EDGE_NOT_IN_SNAPSHOT"));
+        assert!(
+            reason(&s1(), vec![edge("gpu.near", "scraper.near", 5 * CREDIT)])
+                .starts_with("ERR_EDGE_NOT_IN_SNAPSHOT")
+        );
     }
 
     // TC-CT-026-06
@@ -271,7 +302,10 @@ mod tests {
                 committed: false,
             },
         );
-        let p_2c = vec![edge("summarizer.near", "analyst.near", 15 * CREDIT), edge("analyst.near", "summarizer.near", 15 * CREDIT)];
+        let p_2c = vec![
+            edge("summarizer.near", "analyst.near", 15 * CREDIT),
+            edge("analyst.near", "summarizer.near", 15 * CREDIT),
+        ];
         let r = c.simulate_clearing(1, p_2c);
         assert!(r.valid && !r.better_than_current, "{r:?}");
         assert_eq!(r.cleared_total, U128(30 * CREDIT));
@@ -303,7 +337,11 @@ mod tests {
     #[test]
     fn tc_ct_026_11_wrong_phase_and_unknown_epoch() {
         let mut c = s1();
-        assert!(c.simulate_clearing(99, p_s1()).reason.unwrap().starts_with("ERR_UNKNOWN_EPOCH"));
+        assert!(c
+            .simulate_clearing(99, p_s1())
+            .reason
+            .unwrap()
+            .starts_with("ERR_UNKNOWN_EPOCH"));
         c.epochs.get_mut(&1).unwrap().phase = EpochPhase::Open;
         let r = c.simulate_clearing(1, p_s1());
         assert!(!r.valid);
@@ -324,7 +362,10 @@ mod tests {
     // Per-edge order: zero is reported before duplicate, a later bad edge does not hide an earlier one.
     #[test]
     fn first_failing_edge_in_input_order_wins() {
-        let edges = vec![edge("gpu.near", "scraper.near", 5 * CREDIT), edge("gpu.near", "translator.near", 0)];
+        let edges = vec![
+            edge("gpu.near", "scraper.near", 5 * CREDIT),
+            edge("gpu.near", "translator.near", 0),
+        ];
         assert!(reason(&s1(), edges).starts_with("ERR_EDGE_NOT_IN_SNAPSHOT"));
     }
 
@@ -334,7 +375,10 @@ mod tests {
         let c = s1();
         let before = c.obligation(1, acc("gpu.near"), acc("translator.near"));
         let _ = c.simulate_clearing(1, p_s1());
-        assert_eq!(c.obligation(1, acc("gpu.near"), acc("translator.near")), before);
+        assert_eq!(
+            c.obligation(1, acc("gpu.near"), acc("translator.near")),
+            before
+        );
         assert!(c.proposals.get(&1).is_none());
     }
 }

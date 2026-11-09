@@ -1,0 +1,162 @@
+{
+  "circle": "x207-v018.testnet",
+  "steps": [
+    {
+      "label": "offer_grant 24 h near:account (ttlok)",
+      "ok": true,
+      "tx": "CbjPdxzDPbKUpXfkGiSKCioTDTiJho1bAw8AkpxtPTT",
+      "value": 3,
+      "errors": []
+    },
+    {
+      "label": "lock ttlok (24 h grant, must be accepted)",
+      "ok": true,
+      "tx": "GVW8QGo27A7sM3gBsvdRkwoAkxxL4um3kmeGcgEV7kxV",
+      "value": null,
+      "errors": []
+    },
+    {
+      "label": "offer_grant 80 h near:account (ttllong)",
+      "ok": true,
+      "tx": "AUwXzRWEd9HNB8fqBqHjezqST4JsSFcfsuYjY2S6k5eL",
+      "value": 4,
+      "errors": []
+    },
+    {
+      "label": "lock ttllong (80 h grant, circle must refuse, locker gives the key back)",
+      "ok": true,
+      "tx": "GUeG384ueMSPgooBv2fSHKuBa4iYfYjvKYpgPLbrdAPV",
+      "value": null,
+      "errors": [
+        "ERR_ESCROW_TTL_TOO_LONG"
+      ]
+    }
+  ],
+  "checks": {
+    "codeHashBefore": "GW19E89YzCbXLxgC1UHPqDeDGD9sxUuMSLUgPK5nd2SD",
+    "circleBefore": {
+      "circle_id": "agents-main",
+      "contract_id": "x207-v018.testnet",
+      "network": "x207:agents-main",
+      "owner_id": "x207-v18-own.testnet",
+      "usdt_token_id": "usdt.x207-deployer.testnet",
+      "intents_id": "intents.testnet",
+      "unit": "credit",
+      "decimals": 6,
+      "member_count": 3
+    },
+    "epochBefore": {
+      "epoch": 7,
+      "phase": "cutoff",
+      "opened_at": "1794161821794243242",
+      "cutoff_at": "1794163616929531615",
+      "closed_at": null,
+      "proposal_deadline": null,
+      "committed_at": null,
+      "payment_deadline": null,
+      "finalized_at": null,
+      "edge_count": 0,
+      "participant_count": 0,
+      "total_obligation": "0",
+      "total_cleared": "0",
+      "pool": "0",
+      "shortfall": "0",
+      "params": {
+        "epoch_length": 1800,
+        "payment_window": 900,
+        "proposal_window": 60,
+        "base_limit_ratio": 8000,
+        "limit_growth": 1000,
+        "limit_cap": "1000000000",
+        "limit_decay": 0,
+        "fees": {
+          "clearing_fee_bps": 0,
+          "solver_fee_bps": 0
+        },
+        "admission": "open",
+        "max_search_share_bps": 500,
+        "bond_threshold": "100000000",
+        "bond_bps": 2000,
+        "prune_delay_epochs": 2,
+        "relayer_fee": "0"
+      }
+    },
+    "codeHashAfter": "5nBeeNaeWbVH7Q1c3mfG1NPThENb9PA8BvVgjauf6Aib",
+    "maxEscrowTtl": "259200000000000",
+    "circleAfter": {
+      "circle_id": "agents-main",
+      "contract_id": "x207-v018.testnet",
+      "network": "x207:agents-main",
+      "owner_id": "x207-v18-own.testnet",
+      "usdt_token_id": "usdt.x207-deployer.testnet",
+      "intents_id": "intents.testnet",
+      "unit": "credit",
+      "decimals": 6,
+      "member_count": 3
+    },
+    "epochAfter": {
+      "epoch": 7,
+      "phase": "cutoff",
+      "opened_at": "1794161821794243242",
+      "cutoff_at": "1794163616929531615",
+      "closed_at": null,
+      "proposal_deadline": null,
+      "committed_at": null,
+      "payment_deadline": null,
+      "finalized_at": null,
+      "edge_count": 0,
+      "participant_count": 0,
+      "total_obligation": "0",
+      "total_cleared": "0",
+      "pool": "0",
+      "shortfall": "0",
+      "params": {
+        "epoch_length": 1800,
+        "payment_window": 900,
+        "proposal_window": 60,
+        "base_limit_ratio": 8000,
+        "limit_growth": 1000,
+        "limit_cap": "1000000000",
+        "limit_decay": 0,
+        "fees": {
+          "clearing_fee_bps": 0,
+          "solver_fee_bps": 0
+        },
+        "admission": "open",
+        "max_search_share_bps": 500,
+        "bond_threshold": "100000000",
+        "bond_bps": 2000,
+        "prune_delay_epochs": 2,
+        "relayer_fee": "0"
+      }
+    },
+    "interfaceVersion": "0.0.18",
+    "escrowOk": {
+      "grant_id": 3,
+      "account_id": "ttlok.x207-v18-p2.testnet",
+      "state": "held",
+      "buyer": null,
+      "locked_epoch": 7,
+      "delivery_pubkey": null
+    },
+    "refusalNamed": true,
+    "escrowLong": null,
+    "keysLongAfter": [
+      "ed25519:2m9B14h7f5QtLfjZFTHADuPq6J5L57LZpSXBkR7xqwCU"
+    ],
+    "returnKeyLong": "ed25519:2m9B14h7f5QtLfjZFTHADuPq6J5L57LZpSXBkR7xqwCU",
+    "lockerStateLong": {
+      "circle": "x207-v018.testnet",
+      "grant_id": 4,
+      "return_pubkey": "ed25519:2m9B14h7f5QtLfjZFTHADuPq6J5L57LZpSXBkR7xqwCU",
+      "state": "returned"
+    }
+  },
+  "redeploy": {
+    "tx": "Bx2qeVrB9z8WTH2FXnHvxp5DztEpmuJRGPaQ3SwgzTXu",
+    "sha256": "4701ecce4168d18b0674b6b4af9f789219afc33be99d89c09f3a433c0bd0d198",
+    "base58": "5nBeeNaeWbVH7Q1c3mfG1NPThENb9PA8BvVgjauf6Aib"
+  },
+  "grantOk": 3,
+  "grantLong": 4
+}

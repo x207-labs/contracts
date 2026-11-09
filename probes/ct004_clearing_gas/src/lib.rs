@@ -73,12 +73,22 @@ impl Probe {
     pub fn seed(&mut self, edges: Vec<Edge>) {
         for edge in edges {
             let amount = edge.cleared.0;
-            self.pairs.insert((EPOCH, edge.debtor.clone(), edge.creditor.clone()), PairState { cumulative: amount, last_seq: 1, cleared: 0 });
+            self.pairs.insert(
+                (EPOCH, edge.debtor.clone(), edge.creditor.clone()),
+                PairState {
+                    cumulative: amount,
+                    last_seq: 1,
+                    cleared: 0,
+                },
+            );
             for (account, out, inn) in [(&edge.debtor, amount, 0), (&edge.creditor, 0, amount)] {
                 let key = (EPOCH, account.clone());
                 let mut totals = self.totals.get(&key).cloned().unwrap_or_else(|| {
                     self.participants.push(account.clone());
-                    Totals { owed_out: 0, owed_in: 0 }
+                    Totals {
+                        owed_out: 0,
+                        owed_in: 0,
+                    }
                 });
                 totals.owed_out += out;
                 totals.owed_in += inn;
@@ -97,9 +107,18 @@ impl Probe {
         for edge in &edges {
             let cleared = edge.cleared.0;
             assert!(cleared > 0, "ERR_ZERO_CLEARED");
-            assert!(seen.insert((&edge.debtor, &edge.creditor)), "ERR_DUPLICATE_EDGE");
-            let pair = self.pairs.get(&(EPOCH, edge.debtor.clone(), edge.creditor.clone())).expect("ERR_EDGE_NOT_IN_SNAPSHOT");
-            assert!(cleared <= pair.cumulative - pair.cleared, "ERR_CLEARED_EXCEEDS_OBLIGATION");
+            assert!(
+                seen.insert((&edge.debtor, &edge.creditor)),
+                "ERR_DUPLICATE_EDGE"
+            );
+            let pair = self
+                .pairs
+                .get(&(EPOCH, edge.debtor.clone(), edge.creditor.clone()))
+                .expect("ERR_EDGE_NOT_IN_SNAPSHOT");
+            assert!(
+                cleared <= pair.cumulative - pair.cleared,
+                "ERR_CLEARED_EXCEEDS_OBLIGATION"
+            );
             *balance.entry(edge.creditor.clone()).or_default() += cleared as i128;
             *balance.entry(edge.debtor.clone()).or_default() -= cleared as i128;
             total += cleared;
@@ -128,12 +147,24 @@ impl Probe {
         }
         let mut entries = Vec::new();
         for account in &self.participants {
-            let totals = self.totals.get(&(EPOCH, account.clone())).cloned().expect("totals");
+            let totals = self
+                .totals
+                .get(&(EPOCH, account.clone()))
+                .cloned()
+                .expect("totals");
             let net = totals.owed_in as i128 - totals.owed_out as i128;
             if net != 0 {
                 self.positions.insert(
                     (EPOCH, account.clone()),
-                    Position { net, role: 1, status: 1, amount: net.unsigned_abs(), recovered: 0, payment_deadline: 1, updated_at_block: env::block_height() },
+                    Position {
+                        net,
+                        role: 1,
+                        status: 1,
+                        amount: net.unsigned_abs(),
+                        recovered: 0,
+                        payment_deadline: 1,
+                        updated_at_block: env::block_height(),
+                    },
                 );
             }
             entries.push(json!({"account_id": account, "net": net.to_string(), "role": "none", "status": null, "amount": "0", "outstanding_debt": "0"}));
@@ -147,12 +178,17 @@ impl Probe {
             }
         };
         for chunk in edges.chunks(50) {
-            emit(format!("EVENT_JSON:{}", json!({"standard": "x207", "version": "0.0.1", "event": "clearing_applied", "data": [{"edges": chunk}]})));
+            emit(format!(
+                "EVENT_JSON:{}",
+                json!({"standard": "x207", "version": "0.0.1", "event": "clearing_applied", "data": [{"edges": chunk}]})
+            ));
         }
         for chunk in entries.chunks(50) {
-            emit(format!("EVENT_JSON:{}", json!({"standard": "x207", "version": "0.0.1", "event": "epoch_committed", "data": [{"positions": chunk}]})));
+            emit(format!(
+                "EVENT_JSON:{}",
+                json!({"standard": "x207", "version": "0.0.1", "event": "epoch_committed", "data": [{"positions": chunk}]})
+            ));
         }
         edges.len() as u32
     }
 }
-

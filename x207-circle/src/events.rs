@@ -26,17 +26,50 @@ pub struct EventSchema {
 }
 
 const fn schema(name: &'static str, fields: &'static [&'static str]) -> EventSchema {
-    EventSchema { name, fields, items: &[] }
+    EventSchema {
+        name,
+        fields,
+        items: &[],
+    }
 }
 
 /// The 17 P0 events of interface `0.0.1` (K-20) and the P1 events that joined with a patch bump: `member_admitted`
 /// (CT-018, `0.0.2`), `member_reactivated` (CT-079, `0.0.2`), `solver_fee_claimed` and `solver_fee_claim_failed` (CT-052, `0.0.2`), `upgrade_proposed` and `upgrade_applied` (CT-055, `0.0.3`). The other P1/P2 events join when their items are built.
-pub const EVENT_SCHEMAS: [EventSchema; 50] = [
-    schema("member_joined", &["account_id", "pubkey_voucher", "terms_hash", "status", "joined_at"]),
-    schema("stake_added", &["account_id", "sender_id", "amount", "stake", "limit", "status"]),
+pub const EVENT_SCHEMAS: [EventSchema; 52] = [
+    schema(
+        "member_joined",
+        &[
+            "account_id",
+            "pubkey_voucher",
+            "terms_hash",
+            "status",
+            "joined_at",
+        ],
+    ),
+    schema(
+        "stake_added",
+        &[
+            "account_id",
+            "sender_id",
+            "amount",
+            "stake",
+            "limit",
+            "status",
+        ],
+    ),
     schema(
         "voucher_registered",
-        &["payer", "payee", "epoch", "seq", "cumulative_amount", "delta", "obligation", "outstanding_debt", "mode"],
+        &[
+            "payer",
+            "payee",
+            "epoch",
+            "seq",
+            "cumulative_amount",
+            "delta",
+            "obligation",
+            "outstanding_debt",
+            "mode",
+        ],
     ),
     schema(
         "epoch_cutoff",
@@ -53,11 +86,26 @@ pub const EVENT_SCHEMAS: [EventSchema; 50] = [
     ),
     schema(
         "clearing_submitted",
-        &["epoch", "solver", "cleared_total", "edge_count", "replaced_solver", "replaced_cleared_total"],
+        &[
+            "epoch",
+            "solver",
+            "cleared_total",
+            "edge_count",
+            "replaced_solver",
+            "replaced_cleared_total",
+        ],
     ),
     EventSchema {
         name: "clearing_applied",
-        fields: &["epoch", "solver", "cleared_total", "edge_count", "edges_hash", "clearing_fee", "solver_fee"],
+        fields: &[
+            "epoch",
+            "solver",
+            "cleared_total",
+            "edge_count",
+            "edges_hash",
+            "clearing_fee",
+            "solver_fee",
+        ],
         items: &[],
     },
     EventSchema {
@@ -72,9 +120,26 @@ pub const EVENT_SCHEMAS: [EventSchema; 50] = [
             "positions_hash",
             "positions",
         ],
-        items: &["account_id", "net", "role", "status", "amount", "outstanding_debt"],
+        items: &[
+            "account_id",
+            "net",
+            "role",
+            "status",
+            "amount",
+            "outstanding_debt",
+        ],
     },
-    schema("residual_paid", &["epoch", "account_id", "sender_id", "amount", "refunded", "settled_history"]),
+    schema(
+        "residual_paid",
+        &[
+            "epoch",
+            "account_id",
+            "sender_id",
+            "amount",
+            "refunded",
+            "settled_history",
+        ],
+    ),
     schema(
         "member_defaulted",
         &[
@@ -95,23 +160,59 @@ pub const EVENT_SCHEMAS: [EventSchema; 50] = [
         fields: &["epoch", "changes", "chunk", "chunks"],
         items: &["account_id", "old_limit", "new_limit", "status"],
     },
-    schema("epoch_finalized", &["epoch", "finalized_at", "defaulted_count", "total_defaulted", "pool", "shortfall"]),
-    schema("residual_claimed", &["epoch", "account_id", "amount", "destination", "status"]),
-    schema("residual_claim_failed", &["epoch", "account_id", "amount", "destination", "status"]),
-    schema("params_updated", &["old", "new", "changed", "effective_epoch"]),
+    schema(
+        "epoch_finalized",
+        &[
+            "epoch",
+            "finalized_at",
+            "defaulted_count",
+            "total_defaulted",
+            "pool",
+            "shortfall",
+        ],
+    ),
+    schema(
+        "residual_claimed",
+        &["epoch", "account_id", "amount", "destination", "status"],
+    ),
+    schema(
+        "residual_claim_failed",
+        &["epoch", "account_id", "amount", "destination", "status"],
+    ),
+    schema(
+        "params_updated",
+        &["old", "new", "changed", "effective_epoch"],
+    ),
     schema("exit_requested", &["account_id", "epoch"]),
     schema("stake_withdrawn", &["account_id", "amount"]),
     schema("stake_withdraw_failed", &["account_id", "amount"]),
     schema("member_admitted", &["account_id", "status"]),
-    schema("member_reactivated", &["account_id", "stake", "limit", "effective_epoch"]),
+    schema(
+        "member_reactivated",
+        &["account_id", "stake", "limit", "effective_epoch"],
+    ),
     schema("solver_fee_claimed", &["account_id", "amount"]),
     schema("solver_fee_claim_failed", &["account_id", "amount"]),
     schema("upgrade_proposed", &["code_hash", "eta"]),
     schema("upgrade_applied", &["code_hash", "applied_at"]),
     schema("intent_posted", &["intent_hash", "account_id", "posted_at"]),
     schema("asset_class_set", &["asset_type", "class"]),
-    schema("grant_offered", &["grant_id", "asset_type", "grantor", "class", "unit", "unit_price", "expires_at"]),
-    schema("grant_activated", &["grant_id", "grantee", "delivery_pubkey"]),
+    schema(
+        "grant_offered",
+        &[
+            "grant_id",
+            "asset_type",
+            "grantor",
+            "class",
+            "unit",
+            "unit_price",
+            "expires_at",
+        ],
+    ),
+    schema(
+        "grant_activated",
+        &["grant_id", "grantee", "delivery_pubkey"],
+    ),
     schema("grant_revoked", &["grant_id", "reason"]),
     schema("escrow_held", &["grant_id", "nft_contract", "token_id"]),
     schema("ft_escrow_held", &["grant_id", "ft_contract", "amount"]),
@@ -122,12 +223,42 @@ pub const EVENT_SCHEMAS: [EventSchema; 50] = [
     schema("asset_contracts_set", &["asset_type", "contracts"]),
     schema("bond_locked", &["bundle_id", "account_id", "amount"]),
     schema("deal_confirmed", &["bundle_id", "account_id", "of"]),
-    schema("deal_disputed", &["bundle_id", "complainant", "accused", "evidence_hash", "disputed_at"]),
+    schema(
+        "deal_disputed",
+        &[
+            "bundle_id",
+            "complainant",
+            "accused",
+            "evidence_hash",
+            "disputed_at",
+        ],
+    ),
     schema("deal_ruled", &["bundle_id", "arbiter", "verdict"]),
-    schema("bond_slashed", &["bundle_id", "from", "to", "amount", "from_stake", "to_stake"]),
-    schema("bond_released", &["bundle_id", "account_id", "amount", "reason"]),
-    schema("mt_escrow_held", &["grant_id", "mt_contract", "token_id", "amount"]),
-    schema("escrow_failed", &["grant_id", "step", "epoch", "payer", "payee", "delta", "reverted"]),
+    schema(
+        "bond_slashed",
+        &[
+            "bundle_id",
+            "from",
+            "to",
+            "amount",
+            "from_stake",
+            "to_stake",
+        ],
+    ),
+    schema(
+        "bond_released",
+        &["bundle_id", "account_id", "amount", "reason"],
+    ),
+    schema(
+        "mt_escrow_held",
+        &["grant_id", "mt_contract", "token_id", "amount"],
+    ),
+    schema(
+        "escrow_failed",
+        &[
+            "grant_id", "step", "epoch", "payer", "payee", "delta", "reverted",
+        ],
+    ),
     EventSchema {
         name: "bundle_committed",
         fields: &["bundle_id", "terms_hash", "epoch", "legs", "solver"],
@@ -137,10 +268,30 @@ pub const EVENT_SCHEMAS: [EventSchema; 50] = [
     schema("intent_removed", &["intent_hash", "account_id"]),
     // 0.0.15: CT-108 (opt-in settlement from the stake)
     schema("auto_settle_set", &["account_id", "enabled"]),
-    schema("auto_settled", &["epoch", "account_id", "due", "stake", "status", "position_status", "outstanding_debt"]),
+    schema(
+        "auto_settled",
+        &[
+            "epoch",
+            "account_id",
+            "due",
+            "stake",
+            "status",
+            "position_status",
+            "outstanding_debt",
+        ],
+    ),
     // 0.0.16: CT-117 (relayer fee of `claim_evm` and `withdraw_stake_evm`)
-    schema("relayer_fee_paid", &["account_id", "relayer", "action", "epoch", "amount"]),
-    schema("relayer_fee_failed", &["account_id", "relayer", "action", "epoch", "amount"]),
+    schema(
+        "relayer_fee_paid",
+        &["account_id", "relayer", "action", "epoch", "amount"],
+    ),
+    schema(
+        "relayer_fee_failed",
+        &["account_id", "relayer", "action", "epoch", "amount"],
+    ),
+    // 0.0.18: CT-123 (a `pending` member leaves) and CT-126 (account escrow, P1)
+    schema("member_removed", &["account_id", "by_owner"]),
+    schema("account_escrow_held", &["grant_id", "account_id"]),
 ];
 
 pub trait X207Event: Serialize {
@@ -175,45 +326,57 @@ macro_rules! event {
     };
 }
 
-event!("member_joined", MemberJoined {
-    account_id: AccountId,
-    pubkey_voucher: String,
-    terms_hash: String,
-    status: String,
-    joined_at: U64,
-});
+event!(
+    "member_joined",
+    MemberJoined {
+        account_id: AccountId,
+        pubkey_voucher: String,
+        terms_hash: String,
+        status: String,
+        joined_at: U64,
+    }
+);
 
-event!("stake_added", StakeAdded {
-    account_id: AccountId,
-    sender_id: AccountId,
-    amount: U128,
-    stake: U128,
-    limit: U128,
-    status: String,
-});
+event!(
+    "stake_added",
+    StakeAdded {
+        account_id: AccountId,
+        sender_id: AccountId,
+        amount: U128,
+        stake: U128,
+        limit: U128,
+        status: String,
+    }
+);
 
-event!("voucher_registered", VoucherRegistered {
-    payer: AccountId,
-    payee: AccountId,
-    epoch: EpochId,
-    seq: Seq,
-    cumulative_amount: U128,
-    delta: U128,
-    obligation: U128,
-    outstanding_debt: U128,
-    mode: String,
-});
+event!(
+    "voucher_registered",
+    VoucherRegistered {
+        payer: AccountId,
+        payee: AccountId,
+        epoch: EpochId,
+        seq: Seq,
+        cumulative_amount: U128,
+        delta: U128,
+        obligation: U128,
+        outstanding_debt: U128,
+        mode: String,
+    }
+);
 
-event!("epoch_cutoff", EpochCutoff {
-    epoch: EpochId,
-    closed_at: U64,
-    proposal_deadline: U64,
-    edge_count: u32,
-    participant_count: u32,
-    total_obligation: U128,
-    next_epoch: EpochId,
-    next_cutoff_at: U64,
-});
+event!(
+    "epoch_cutoff",
+    EpochCutoff {
+        epoch: EpochId,
+        closed_at: U64,
+        proposal_deadline: U64,
+        edge_count: u32,
+        participant_count: u32,
+        total_obligation: U128,
+        next_epoch: EpochId,
+        next_cutoff_at: U64,
+    }
+);
 
 event!("clearing_submitted", ClearingSubmitted {
     epoch: EpochId,
@@ -263,27 +426,33 @@ event!("epoch_committed", EpochCommitted {
     positions: Vec<PositionEntry>,
 });
 
-event!("residual_paid", ResidualPaid {
-    epoch: EpochId,
-    account_id: AccountId,
-    sender_id: AccountId,
-    amount: U128,
-    refunded: U128,
-    settled_history: U128,
-});
+event!(
+    "residual_paid",
+    ResidualPaid {
+        epoch: EpochId,
+        account_id: AccountId,
+        sender_id: AccountId,
+        amount: U128,
+        refunded: U128,
+        settled_history: U128,
+    }
+);
 
-event!("member_defaulted", MemberDefaulted {
-    epoch: EpochId,
-    account_id: AccountId,
-    due: U128,
-    from_stake: U128,
-    from_reserve: U128,
-    shortfall: U128,
-    stake: U128,
-    status: String,
-    position_status: String,
-    outstanding_debt: U128,
-});
+event!(
+    "member_defaulted",
+    MemberDefaulted {
+        epoch: EpochId,
+        account_id: AccountId,
+        due: U128,
+        from_stake: U128,
+        from_reserve: U128,
+        shortfall: U128,
+        stake: U128,
+        status: String,
+        position_status: String,
+        outstanding_debt: U128,
+    }
+);
 
 /// One element of `limits_updated.changes[]`: only `active` members whose limit changed (K-11).
 #[derive(Serialize, Debug, Clone)]
@@ -302,34 +471,41 @@ event!("limits_updated", LimitsUpdated {
     chunks: u32,
 });
 
-event!("epoch_finalized", EpochFinalized {
-    epoch: EpochId,
-    finalized_at: U64,
-    defaulted_count: u32,
-    total_defaulted: U128,
-    pool: U128,
-    shortfall: U128,
-});
+event!(
+    "epoch_finalized",
+    EpochFinalized {
+        epoch: EpochId,
+        finalized_at: U64,
+        defaulted_count: u32,
+        total_defaulted: U128,
+        pool: U128,
+        shortfall: U128,
+    }
+);
 
-event!("residual_claimed", ResidualClaimed {
-    epoch: EpochId,
-    account_id: AccountId,
-    amount: U128,
-    destination: String,
-    status: String,
-});
+event!(
+    "residual_claimed",
+    ResidualClaimed {
+        epoch: EpochId,
+        account_id: AccountId,
+        amount: U128,
+        destination: String,
+        status: String,
+    }
+);
 
-event!("intents_withdrawn", IntentsWithdrawn {
-    amount: U128,
-});
+event!("intents_withdrawn", IntentsWithdrawn { amount: U128 });
 
-event!("residual_claim_failed", ResidualClaimFailed {
-    epoch: EpochId,
-    account_id: AccountId,
-    amount: U128,
-    destination: String,
-    status: String,
-});
+event!(
+    "residual_claim_failed",
+    ResidualClaimFailed {
+        epoch: EpochId,
+        account_id: AccountId,
+        amount: U128,
+        destination: String,
+        status: String,
+    }
+);
 
 /// `old` and `new` are `Params`; generic so this schema does not depend on `params.rs`.
 #[derive(Serialize, Debug, Clone)]
@@ -346,51 +522,298 @@ impl<P: Serialize> X207Event for ParamsUpdated<P> {
 }
 
 // CT-117 (0.0.16): the relayer of a `claim_evm` or `withdraw_stake_evm` was paid. `epoch` is 0 for a withdrawal.
-event!("relayer_fee_paid", RelayerFeePaid { account_id: AccountId, relayer: AccountId, action: String, epoch: EpochId, amount: U128 });
+event!(
+    "relayer_fee_paid",
+    RelayerFeePaid {
+        account_id: AccountId,
+        relayer: AccountId,
+        action: String,
+        epoch: EpochId,
+        amount: U128
+    }
+);
 // CT-117: the fee transfer failed (the relayer has no storage at the token); `amount` stays with the member.
-event!("relayer_fee_failed", RelayerFeeFailed { account_id: AccountId, relayer: AccountId, action: String, epoch: EpochId, amount: U128 });
-event!("exit_requested", ExitRequested { account_id: AccountId, epoch: EpochId });
-event!("stake_withdrawn", StakeWithdrawn { account_id: AccountId, amount: U128 });
-event!("stake_withdraw_failed", StakeWithdrawFailed { account_id: AccountId, amount: U128 });
-event!("member_admitted", MemberAdmitted { account_id: AccountId, status: String });
-event!("intent_posted", IntentPosted { intent_hash: near_sdk::json_types::Base58CryptoHash, account_id: AccountId, posted_at: U64 });
-event!("intent_removed", IntentRemoved { intent_hash: near_sdk::json_types::Base58CryptoHash, account_id: AccountId });
-event!("auto_settle_set", AutoSettleSet { account_id: AccountId, enabled: bool });
-event!("auto_settled", AutoSettled { epoch: EpochId, account_id: AccountId, due: U128, stake: U128, status: String, position_status: String, outstanding_debt: U128 });
-event!("asset_class_set", AssetClassSet { asset_type: String, class: crate::grant::AssetClass });
-event!("grant_offered", GrantOffered { grant_id: u64, asset_type: String, grantor: AccountId, class: crate::grant::AssetClass, unit: String, unit_price: U128, expires_at: U64 });
+event!(
+    "relayer_fee_failed",
+    RelayerFeeFailed {
+        account_id: AccountId,
+        relayer: AccountId,
+        action: String,
+        epoch: EpochId,
+        amount: U128
+    }
+);
+// CT-123 (0.0.18): a `pending` member with no stake was removed (`by_owner` false: garbage collected after the pending time).
+event!(
+    "member_removed",
+    MemberRemoved {
+        account_id: AccountId,
+        by_owner: bool
+    }
+);
+// CT-126 (0.0.18): the locker of a sold account registered; the escrow of the account is `held`.
+event!(
+    "account_escrow_held",
+    AccountEscrowHeld {
+        grant_id: u64,
+        account_id: AccountId
+    }
+);
+event!(
+    "exit_requested",
+    ExitRequested {
+        account_id: AccountId,
+        epoch: EpochId
+    }
+);
+event!(
+    "stake_withdrawn",
+    StakeWithdrawn {
+        account_id: AccountId,
+        amount: U128
+    }
+);
+event!(
+    "stake_withdraw_failed",
+    StakeWithdrawFailed {
+        account_id: AccountId,
+        amount: U128
+    }
+);
+event!(
+    "member_admitted",
+    MemberAdmitted {
+        account_id: AccountId,
+        status: String
+    }
+);
+event!(
+    "intent_posted",
+    IntentPosted {
+        intent_hash: near_sdk::json_types::Base58CryptoHash,
+        account_id: AccountId,
+        posted_at: U64
+    }
+);
+event!(
+    "intent_removed",
+    IntentRemoved {
+        intent_hash: near_sdk::json_types::Base58CryptoHash,
+        account_id: AccountId
+    }
+);
+event!(
+    "auto_settle_set",
+    AutoSettleSet {
+        account_id: AccountId,
+        enabled: bool
+    }
+);
+event!(
+    "auto_settled",
+    AutoSettled {
+        epoch: EpochId,
+        account_id: AccountId,
+        due: U128,
+        stake: U128,
+        status: String,
+        position_status: String,
+        outstanding_debt: U128
+    }
+);
+event!(
+    "asset_class_set",
+    AssetClassSet {
+        asset_type: String,
+        class: crate::grant::AssetClass
+    }
+);
+event!(
+    "grant_offered",
+    GrantOffered {
+        grant_id: u64,
+        asset_type: String,
+        grantor: AccountId,
+        class: crate::grant::AssetClass,
+        unit: String,
+        unit_price: U128,
+        expires_at: U64
+    }
+);
 event!("grant_activated", GrantActivated { grant_id: u64, grantee: AccountId, delivery_pubkey: Option<near_sdk::PublicKey> });
-event!("grant_revoked", GrantRevoked { grant_id: u64, reason: crate::grant::RevokeReason });
-event!("escrow_held", EscrowHeld { grant_id: u64, nft_contract: AccountId, token_id: String });
-event!("ft_escrow_held", FtEscrowHeld { grant_id: u64, ft_contract: AccountId, amount: U128 });
-event!("mt_escrow_held", MtEscrowHeld { grant_id: u64, mt_contract: AccountId, token_id: String, amount: U128 });
+event!(
+    "grant_revoked",
+    GrantRevoked {
+        grant_id: u64,
+        reason: crate::grant::RevokeReason
+    }
+);
+event!(
+    "escrow_held",
+    EscrowHeld {
+        grant_id: u64,
+        nft_contract: AccountId,
+        token_id: String
+    }
+);
+event!(
+    "ft_escrow_held",
+    FtEscrowHeld {
+        grant_id: u64,
+        ft_contract: AccountId,
+        amount: U128
+    }
+);
+event!(
+    "mt_escrow_held",
+    MtEscrowHeld {
+        grant_id: u64,
+        mt_contract: AccountId,
+        token_id: String,
+        amount: U128
+    }
+);
 event!("freeze_proposed", FreezeProposed { account_id: AccountId, eta: U64, reason_hash: Option<String> });
-event!("member_frozen", MemberFrozen { account_id: AccountId, from_epoch: EpochId });
-event!("freeze_cancelled", FreezeCancelled { account_id: AccountId });
-event!("member_unfrozen", MemberUnfrozen { account_id: AccountId });
+event!(
+    "member_frozen",
+    MemberFrozen {
+        account_id: AccountId,
+        from_epoch: EpochId
+    }
+);
+event!(
+    "freeze_cancelled",
+    FreezeCancelled {
+        account_id: AccountId
+    }
+);
+event!(
+    "member_unfrozen",
+    MemberUnfrozen {
+        account_id: AccountId
+    }
+);
 event!("asset_contracts_set", AssetContractsSet { asset_type: String, contracts: Vec<AccountId> });
-event!("bond_locked", BondLocked { bundle_id: u64, account_id: AccountId, amount: U128 });
-event!("deal_confirmed", DealConfirmed { bundle_id: u64, account_id: AccountId, of: AccountId });
-event!("deal_disputed", DealDisputed { bundle_id: u64, complainant: AccountId, accused: AccountId, evidence_hash: String, disputed_at: U64 });
-event!("deal_ruled", DealRuled { bundle_id: u64, arbiter: AccountId, verdict: crate::deal::Verdict });
-event!("bond_slashed", BondSlashed { bundle_id: u64, from: AccountId, to: AccountId, amount: U128, from_stake: U128, to_stake: U128 });
-event!("bond_released", BondReleased { bundle_id: u64, account_id: AccountId, amount: U128, reason: crate::deal::ReleaseReason });
-event!("escrow_failed", EscrowFailed { grant_id: u64, step: crate::escrow::EscrowStep, epoch: EpochId, payer: AccountId, payee: AccountId, delta: U128, reverted: bool });
+event!(
+    "bond_locked",
+    BondLocked {
+        bundle_id: u64,
+        account_id: AccountId,
+        amount: U128
+    }
+);
+event!(
+    "deal_confirmed",
+    DealConfirmed {
+        bundle_id: u64,
+        account_id: AccountId,
+        of: AccountId
+    }
+);
+event!(
+    "deal_disputed",
+    DealDisputed {
+        bundle_id: u64,
+        complainant: AccountId,
+        accused: AccountId,
+        evidence_hash: String,
+        disputed_at: U64
+    }
+);
+event!(
+    "deal_ruled",
+    DealRuled {
+        bundle_id: u64,
+        arbiter: AccountId,
+        verdict: crate::deal::Verdict
+    }
+);
+event!(
+    "bond_slashed",
+    BondSlashed {
+        bundle_id: u64,
+        from: AccountId,
+        to: AccountId,
+        amount: U128,
+        from_stake: U128,
+        to_stake: U128
+    }
+);
+event!(
+    "bond_released",
+    BondReleased {
+        bundle_id: u64,
+        account_id: AccountId,
+        amount: U128,
+        reason: crate::deal::ReleaseReason
+    }
+);
+event!(
+    "escrow_failed",
+    EscrowFailed {
+        grant_id: u64,
+        step: crate::escrow::EscrowStep,
+        epoch: EpochId,
+        payer: AccountId,
+        payee: AccountId,
+        delta: U128,
+        reverted: bool
+    }
+);
 event!("bundle_committed", BundleCommitted { bundle_id: u64, terms_hash: String, epoch: EpochId, legs: Vec<crate::bundle::BundleLeg>, solver: AccountId });
-event!("upgrade_proposed", UpgradeProposed { code_hash: near_sdk::json_types::Base58CryptoHash, eta: U64 });
-event!("upgrade_applied", UpgradeApplied { code_hash: near_sdk::json_types::Base58CryptoHash, applied_at: U64 });
-event!("solver_fee_claimed", SolverFeeClaimed { account_id: AccountId, amount: U128 });
-event!("solver_fee_claim_failed", SolverFeeClaimFailed { account_id: AccountId, amount: U128 });
-event!("member_reactivated", MemberReactivated { account_id: AccountId, stake: U128, limit: U128, effective_epoch: EpochId });
+event!(
+    "upgrade_proposed",
+    UpgradeProposed {
+        code_hash: near_sdk::json_types::Base58CryptoHash,
+        eta: U64
+    }
+);
+event!(
+    "upgrade_applied",
+    UpgradeApplied {
+        code_hash: near_sdk::json_types::Base58CryptoHash,
+        applied_at: U64
+    }
+);
+event!(
+    "solver_fee_claimed",
+    SolverFeeClaimed {
+        account_id: AccountId,
+        amount: U128
+    }
+);
+event!(
+    "solver_fee_claim_failed",
+    SolverFeeClaimFailed {
+        account_id: AccountId,
+        amount: U128
+    }
+);
+event!(
+    "member_reactivated",
+    MemberReactivated {
+        account_id: AccountId,
+        stake: U128,
+        limit: U128,
+        effective_epoch: EpochId
+    }
+);
 
 /// Logs of one event per chunk of at most `MAX_EVENT_ITEMS` items, in order. An empty list still
 /// gives one event with `chunk` 0 and `chunks` 1 (K-19). `build` repeats the scalar fields in every chunk.
-pub fn chunked_logs<T: Clone, E: X207Event>(items: &[T], build: impl Fn(Vec<T>, u32, u32) -> E) -> Vec<String> {
+pub fn chunked_logs<T: Clone, E: X207Event>(
+    items: &[T],
+    build: impl Fn(Vec<T>, u32, u32) -> E,
+) -> Vec<String> {
     let chunks = items.len().div_ceil(MAX_EVENT_ITEMS).max(1) as u32;
     if items.is_empty() {
         return vec![build(Vec::new(), 0, chunks).to_log()];
     }
-    items.chunks(MAX_EVENT_ITEMS).enumerate().map(|(index, chunk)| build(chunk.to_vec(), index as u32, chunks).to_log()).collect()
+    items
+        .chunks(MAX_EVENT_ITEMS)
+        .enumerate()
+        .map(|(index, chunk)| build(chunk.to_vec(), index as u32, chunks).to_log())
+        .collect()
 }
 
 /// Emits `chunked_logs` in the same receipt.
@@ -404,7 +827,9 @@ pub fn emit_chunked<T: Clone, E: X207Event>(items: &[T], build: impl Fn(Vec<T>, 
 /// `tests/vectors/clearing_hashes.json`.
 pub fn edges_hash(edges: &[ClearingEdge]) -> String {
     let mut kept: Vec<&ClearingEdge> = edges.iter().filter(|edge| edge.cleared.0 > 0).collect();
-    kept.sort_by(|a, b| (a.debtor.as_str(), a.creditor.as_str()).cmp(&(b.debtor.as_str(), b.creditor.as_str())));
+    kept.sort_by(|a, b| {
+        (a.debtor.as_str(), a.creditor.as_str()).cmp(&(b.debtor.as_str(), b.creditor.as_str()))
+    });
     hash_of(&kept)
 }
 
@@ -416,8 +841,12 @@ pub fn positions_hash(positions: &[PositionEntry]) -> String {
 }
 
 fn hash_of<T: Serialize>(items: &[&T]) -> String {
-    let json = near_sdk::serde_json::to_string(items).unwrap_or_else(|_| env::panic_str("ERR_HASH_JSON"));
-    env::sha256(json.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    let json =
+        near_sdk::serde_json::to_string(items).unwrap_or_else(|_| env::panic_str("ERR_HASH_JSON"));
+    env::sha256(json.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Emits `clearing_applied`: the summary and `edges_hash` of the edges that have `cleared > 0` (ADR-31, CT-099).
@@ -430,7 +859,16 @@ pub fn emit_clearing_applied(
     solver_fee: U128,
 ) {
     let edge_count = edges.iter().filter(|edge| edge.cleared.0 > 0).count() as u32;
-    ClearingApplied { epoch, solver, cleared_total, edge_count, edges_hash: edges_hash(edges), clearing_fee, solver_fee }.emit();
+    ClearingApplied {
+        epoch,
+        solver,
+        cleared_total,
+        edge_count,
+        edges_hash: edges_hash(edges),
+        clearing_fee,
+        solver_fee,
+    }
+    .emit();
 }
 
 /// Serializes `event` and returns its `data[0]` object, for unit tests of event emitters.
@@ -438,7 +876,8 @@ pub fn emit_clearing_applied(
 pub fn event_data<E: X207Event>(event: &E) -> near_sdk::serde_json::Value {
     let log = event.to_log();
     let body = log.strip_prefix("EVENT_JSON:").expect("EVENT_JSON prefix");
-    let parsed: near_sdk::serde_json::Value = near_sdk::serde_json::from_str(body).expect("valid JSON");
+    let parsed: near_sdk::serde_json::Value =
+        near_sdk::serde_json::from_str(body).expect("valid JSON");
     parsed["data"][0].clone()
 }
 
@@ -454,10 +893,21 @@ mod tests {
     }
 
     fn edge(n: usize, cleared: u128) -> ClearingEdge {
-        ClearingEdge { debtor: acc(&format!("d{n}.near")), creditor: acc(&format!("c{n}.near")), cleared: U128(cleared) }
+        ClearingEdge {
+            debtor: acc(&format!("d{n}.near")),
+            creditor: acc(&format!("c{n}.near")),
+            cleared: U128(cleared),
+        }
     }
 
-    fn position(account: &str, net: i128, role: &str, status: Option<&str>, amount: u128, debt: u128) -> PositionEntry {
+    fn position(
+        account: &str,
+        net: i128,
+        role: &str,
+        status: Option<&str>,
+        amount: u128,
+        debt: u128,
+    ) -> PositionEntry {
         PositionEntry {
             account_id: acc(account),
             net: I128(net),
@@ -469,7 +919,12 @@ mod tests {
     }
 
     fn change(account: AccountId) -> LimitChange {
-        LimitChange { account_id: account, old_limit: U128(80_000_000), new_limit: U128(83_500_000), status: "active".into() }
+        LimitChange {
+            account_id: account,
+            old_limit: U128(80_000_000),
+            new_limit: U128(83_500_000),
+            status: "active".into(),
+        }
     }
 
     /// One sample log per P0 event, keyed by event name.
@@ -478,56 +933,526 @@ mod tests {
         let a = acc("a.near");
         let b = acc("b.near");
         vec![
-            (MemberJoined::NAME, MemberJoined { account_id: a.clone(), pubkey_voucher: "ed25519:7Yk".into(), terms_hash: "9f".repeat(32), status: "pending".into(), joined_at: t }.to_log()),
-            (StakeAdded::NAME, StakeAdded { account_id: a.clone(), sender_id: b.clone(), amount: U128(1), stake: U128(1), limit: U128(0), status: "active".into() }.to_log()),
-            (VoucherRegistered::NAME, VoucherRegistered { payer: a.clone(), payee: b.clone(), epoch: 42, seq: 137, cumulative_amount: U128(2_740_000), delta: U128(20_000), obligation: U128(2_740_000), outstanding_debt: U128(2_740_000), mode: "cumulative".into() }.to_log()),
-            (EpochCutoff::NAME, EpochCutoff { epoch: 42, closed_at: t, proposal_deadline: t, edge_count: 30, participant_count: 6, total_obligation: U128(5), next_epoch: 43, next_cutoff_at: t }.to_log()),
-            (ClearingSubmitted::NAME, ClearingSubmitted { epoch: 42, solver: a.clone(), cleared_total: U128(5), edge_count: 3, replaced_solver: None, replaced_cleared_total: None }.to_log()),
-            (ClearingApplied::NAME, ClearingApplied { epoch: 42, solver: None, cleared_total: U128(0), edge_count: 1, edges_hash: "ab".repeat(32), clearing_fee: U128(0), solver_fee: U128(0) }.to_log()),
-            (EpochCommitted::NAME, EpochCommitted { epoch: 42, committed_at: t, payment_deadline: t, total_due: U128(35), total_claimable: U128(35), position_count: 1, positions_hash: "cd".repeat(32), positions: vec![position("s.near", -35, "debtor", Some("due"), 35, 35)] }.to_log()),
-            (ResidualPaid::NAME, ResidualPaid { epoch: 42, account_id: a.clone(), sender_id: b.clone(), amount: U128(35), refunded: U128(0), settled_history: U128(35) }.to_log()),
-            (MemberDefaulted::NAME, MemberDefaulted { epoch: 42, account_id: a.clone(), due: U128(35), from_stake: U128(35), from_reserve: U128(0), shortfall: U128(0), stake: U128(65), status: "suspended".into(), position_status: "defaulted".into(), outstanding_debt: U128(0) }.to_log()),
-            (LimitsUpdated::NAME, LimitsUpdated { epoch: 42, changes: vec![change(a.clone())], chunk: 0, chunks: 1 }.to_log()),
-            (EpochFinalized::NAME, EpochFinalized { epoch: 42, finalized_at: t, defaulted_count: 1, total_defaulted: U128(35), pool: U128(35), shortfall: U128(0) }.to_log()),
-            (ResidualClaimed::NAME, ResidualClaimed { epoch: 42, account_id: a.clone(), amount: U128(35), destination: "near".into(), status: "claimed".into() }.to_log()),
-            (IntentsWithdrawn::NAME, IntentsWithdrawn { amount: U128(35) }.to_log()),
-            (ResidualClaimFailed::NAME, ResidualClaimFailed { epoch: 42, account_id: a.clone(), amount: U128(35), destination: "intents".into(), status: "claimable".into() }.to_log()),
-            ("params_updated", ParamsUpdated { old: json!({"epoch_length": 3600}), new: json!({"epoch_length": 7200}), changed: vec!["epoch_length".to_string()], effective_epoch: 43 }.to_log()),
-            (ExitRequested::NAME, ExitRequested { account_id: a.clone(), epoch: 42 }.to_log()),
-            (StakeWithdrawn::NAME, StakeWithdrawn { account_id: a.clone(), amount: U128(0) }.to_log()),
-            (StakeWithdrawFailed::NAME, StakeWithdrawFailed { account_id: a.clone(), amount: U128(1) }.to_log()),
-            (MemberAdmitted::NAME, MemberAdmitted { account_id: a.clone(), status: "pending".into() }.to_log()),
-            (MemberReactivated::NAME, MemberReactivated { account_id: a.clone(), stake: U128(115), limit: U128(92), effective_epoch: 43 }.to_log()),
-            (SolverFeeClaimed::NAME, SolverFeeClaimed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
-            (SolverFeeClaimFailed::NAME, SolverFeeClaimFailed { account_id: a.clone(), amount: U128(375_000) }.to_log()),
-            (UpgradeProposed::NAME, UpgradeProposed { code_hash: [7u8; 32].into(), eta: t }.to_log()),
-            (IntentRemoved::NAME, IntentRemoved { intent_hash: [3u8; 32].into(), account_id: a.clone() }.to_log()),
-            (AutoSettleSet::NAME, AutoSettleSet { account_id: a.clone(), enabled: true }.to_log()),
-            (AutoSettled::NAME, AutoSettled { epoch: 42, account_id: a.clone(), due: U128(35), stake: U128(65), status: "active".into(), position_status: "paid".into(), outstanding_debt: U128(0) }.to_log()),
-            (RelayerFeePaid::NAME, RelayerFeePaid { account_id: a.clone(), relayer: a.clone(), action: "claim".into(), epoch: 42, amount: U128(5) }.to_log()),
-            (RelayerFeeFailed::NAME, RelayerFeeFailed { account_id: a.clone(), relayer: a.clone(), action: "claim".into(), epoch: 42, amount: U128(5) }.to_log()),
-            (IntentPosted::NAME, IntentPosted { intent_hash: [3u8; 32].into(), account_id: a.clone(), posted_at: t }.to_log()),
-            (AssetClassSet::NAME, AssetClassSet { asset_type: "x:y".into(), class: crate::grant::AssetClass::B }.to_log()),
-            (GrantOffered::NAME, GrantOffered { grant_id: 1, asset_type: "x:y".into(), grantor: a.clone(), class: crate::grant::AssetClass::B, unit: "call".into(), unit_price: U128(1), expires_at: t }.to_log()),
-            (GrantActivated::NAME, GrantActivated { grant_id: 1, grantee: b.clone(), delivery_pubkey: None }.to_log()),
-            (GrantRevoked::NAME, GrantRevoked { grant_id: 1, reason: crate::grant::RevokeReason::Grantor }.to_log()),
-            (EscrowHeld::NAME, EscrowHeld { grant_id: 1, nft_contract: b.clone(), token_id: "t1".into() }.to_log()),
-            (FreezeProposed::NAME, FreezeProposed { account_id: a.clone(), eta: t, reason_hash: None }.to_log()),
-            (MemberFrozen::NAME, MemberFrozen { account_id: a.clone(), from_epoch: 42 }.to_log()),
-            (FreezeCancelled::NAME, FreezeCancelled { account_id: a.clone() }.to_log()),
-            (MemberUnfrozen::NAME, MemberUnfrozen { account_id: a.clone() }.to_log()),
-            (AssetContractsSet::NAME, AssetContractsSet { asset_type: "token:nep141".into(), contracts: vec![a.clone()] }.to_log()),
-            (BondLocked::NAME, BondLocked { bundle_id: 1, account_id: a.clone(), amount: U128(20) }.to_log()),
-            (DealConfirmed::NAME, DealConfirmed { bundle_id: 1, account_id: a.clone(), of: b.clone() }.to_log()),
-            (DealDisputed::NAME, DealDisputed { bundle_id: 1, complainant: a.clone(), accused: b.clone(), evidence_hash: "ab".repeat(32), disputed_at: t }.to_log()),
-            (DealRuled::NAME, DealRuled { bundle_id: 1, arbiter: acc("arb.near"), verdict: crate::deal::Verdict::AccusedGuilty }.to_log()),
-            (BondSlashed::NAME, BondSlashed { bundle_id: 1, from: b.clone(), to: a.clone(), amount: U128(20), from_stake: U128(80), to_stake: U128(120) }.to_log()),
-            (BondReleased::NAME, BondReleased { bundle_id: 1, account_id: a.clone(), amount: U128(20), reason: crate::deal::ReleaseReason::Confirmed }.to_log()),
-            (MtEscrowHeld::NAME, MtEscrowHeld { grant_id: 1, mt_contract: b.clone(), token_id: "nep141:x.near".into(), amount: U128(5) }.to_log()),
-            (FtEscrowHeld::NAME, FtEscrowHeld { grant_id: 1, ft_contract: b.clone(), amount: U128(5) }.to_log()),
-            (EscrowFailed::NAME, EscrowFailed { grant_id: 1, step: crate::escrow::EscrowStep::Complete, epoch: 42, payer: a.clone(), payee: b.clone(), delta: U128(5), reverted: true }.to_log()),
-            (BundleCommitted::NAME, BundleCommitted { bundle_id: 1, terms_hash: "ab".repeat(32), epoch: 42, legs: vec![crate::bundle::BundleLeg { payer: a.clone(), payee: b.clone(), max_amount: U128(10) }], solver: b.clone() }.to_log()),
-            (UpgradeApplied::NAME, UpgradeApplied { code_hash: [7u8; 32].into(), applied_at: t }.to_log()),
+            (
+                MemberJoined::NAME,
+                MemberJoined {
+                    account_id: a.clone(),
+                    pubkey_voucher: "ed25519:7Yk".into(),
+                    terms_hash: "9f".repeat(32),
+                    status: "pending".into(),
+                    joined_at: t,
+                }
+                .to_log(),
+            ),
+            (
+                StakeAdded::NAME,
+                StakeAdded {
+                    account_id: a.clone(),
+                    sender_id: b.clone(),
+                    amount: U128(1),
+                    stake: U128(1),
+                    limit: U128(0),
+                    status: "active".into(),
+                }
+                .to_log(),
+            ),
+            (
+                VoucherRegistered::NAME,
+                VoucherRegistered {
+                    payer: a.clone(),
+                    payee: b.clone(),
+                    epoch: 42,
+                    seq: 137,
+                    cumulative_amount: U128(2_740_000),
+                    delta: U128(20_000),
+                    obligation: U128(2_740_000),
+                    outstanding_debt: U128(2_740_000),
+                    mode: "cumulative".into(),
+                }
+                .to_log(),
+            ),
+            (
+                EpochCutoff::NAME,
+                EpochCutoff {
+                    epoch: 42,
+                    closed_at: t,
+                    proposal_deadline: t,
+                    edge_count: 30,
+                    participant_count: 6,
+                    total_obligation: U128(5),
+                    next_epoch: 43,
+                    next_cutoff_at: t,
+                }
+                .to_log(),
+            ),
+            (
+                ClearingSubmitted::NAME,
+                ClearingSubmitted {
+                    epoch: 42,
+                    solver: a.clone(),
+                    cleared_total: U128(5),
+                    edge_count: 3,
+                    replaced_solver: None,
+                    replaced_cleared_total: None,
+                }
+                .to_log(),
+            ),
+            (
+                ClearingApplied::NAME,
+                ClearingApplied {
+                    epoch: 42,
+                    solver: None,
+                    cleared_total: U128(0),
+                    edge_count: 1,
+                    edges_hash: "ab".repeat(32),
+                    clearing_fee: U128(0),
+                    solver_fee: U128(0),
+                }
+                .to_log(),
+            ),
+            (
+                EpochCommitted::NAME,
+                EpochCommitted {
+                    epoch: 42,
+                    committed_at: t,
+                    payment_deadline: t,
+                    total_due: U128(35),
+                    total_claimable: U128(35),
+                    position_count: 1,
+                    positions_hash: "cd".repeat(32),
+                    positions: vec![position("s.near", -35, "debtor", Some("due"), 35, 35)],
+                }
+                .to_log(),
+            ),
+            (
+                ResidualPaid::NAME,
+                ResidualPaid {
+                    epoch: 42,
+                    account_id: a.clone(),
+                    sender_id: b.clone(),
+                    amount: U128(35),
+                    refunded: U128(0),
+                    settled_history: U128(35),
+                }
+                .to_log(),
+            ),
+            (
+                MemberDefaulted::NAME,
+                MemberDefaulted {
+                    epoch: 42,
+                    account_id: a.clone(),
+                    due: U128(35),
+                    from_stake: U128(35),
+                    from_reserve: U128(0),
+                    shortfall: U128(0),
+                    stake: U128(65),
+                    status: "suspended".into(),
+                    position_status: "defaulted".into(),
+                    outstanding_debt: U128(0),
+                }
+                .to_log(),
+            ),
+            (
+                LimitsUpdated::NAME,
+                LimitsUpdated {
+                    epoch: 42,
+                    changes: vec![change(a.clone())],
+                    chunk: 0,
+                    chunks: 1,
+                }
+                .to_log(),
+            ),
+            (
+                EpochFinalized::NAME,
+                EpochFinalized {
+                    epoch: 42,
+                    finalized_at: t,
+                    defaulted_count: 1,
+                    total_defaulted: U128(35),
+                    pool: U128(35),
+                    shortfall: U128(0),
+                }
+                .to_log(),
+            ),
+            (
+                ResidualClaimed::NAME,
+                ResidualClaimed {
+                    epoch: 42,
+                    account_id: a.clone(),
+                    amount: U128(35),
+                    destination: "near".into(),
+                    status: "claimed".into(),
+                }
+                .to_log(),
+            ),
+            (
+                IntentsWithdrawn::NAME,
+                IntentsWithdrawn { amount: U128(35) }.to_log(),
+            ),
+            (
+                ResidualClaimFailed::NAME,
+                ResidualClaimFailed {
+                    epoch: 42,
+                    account_id: a.clone(),
+                    amount: U128(35),
+                    destination: "intents".into(),
+                    status: "claimable".into(),
+                }
+                .to_log(),
+            ),
+            (
+                "params_updated",
+                ParamsUpdated {
+                    old: json!({"epoch_length": 3600}),
+                    new: json!({"epoch_length": 7200}),
+                    changed: vec!["epoch_length".to_string()],
+                    effective_epoch: 43,
+                }
+                .to_log(),
+            ),
+            (
+                ExitRequested::NAME,
+                ExitRequested {
+                    account_id: a.clone(),
+                    epoch: 42,
+                }
+                .to_log(),
+            ),
+            (
+                StakeWithdrawn::NAME,
+                StakeWithdrawn {
+                    account_id: a.clone(),
+                    amount: U128(0),
+                }
+                .to_log(),
+            ),
+            (
+                StakeWithdrawFailed::NAME,
+                StakeWithdrawFailed {
+                    account_id: a.clone(),
+                    amount: U128(1),
+                }
+                .to_log(),
+            ),
+            (
+                MemberAdmitted::NAME,
+                MemberAdmitted {
+                    account_id: a.clone(),
+                    status: "pending".into(),
+                }
+                .to_log(),
+            ),
+            (
+                MemberReactivated::NAME,
+                MemberReactivated {
+                    account_id: a.clone(),
+                    stake: U128(115),
+                    limit: U128(92),
+                    effective_epoch: 43,
+                }
+                .to_log(),
+            ),
+            (
+                SolverFeeClaimed::NAME,
+                SolverFeeClaimed {
+                    account_id: a.clone(),
+                    amount: U128(375_000),
+                }
+                .to_log(),
+            ),
+            (
+                SolverFeeClaimFailed::NAME,
+                SolverFeeClaimFailed {
+                    account_id: a.clone(),
+                    amount: U128(375_000),
+                }
+                .to_log(),
+            ),
+            (
+                UpgradeProposed::NAME,
+                UpgradeProposed {
+                    code_hash: [7u8; 32].into(),
+                    eta: t,
+                }
+                .to_log(),
+            ),
+            (
+                IntentRemoved::NAME,
+                IntentRemoved {
+                    intent_hash: [3u8; 32].into(),
+                    account_id: a.clone(),
+                }
+                .to_log(),
+            ),
+            (
+                AutoSettleSet::NAME,
+                AutoSettleSet {
+                    account_id: a.clone(),
+                    enabled: true,
+                }
+                .to_log(),
+            ),
+            (
+                AutoSettled::NAME,
+                AutoSettled {
+                    epoch: 42,
+                    account_id: a.clone(),
+                    due: U128(35),
+                    stake: U128(65),
+                    status: "active".into(),
+                    position_status: "paid".into(),
+                    outstanding_debt: U128(0),
+                }
+                .to_log(),
+            ),
+            (
+                RelayerFeePaid::NAME,
+                RelayerFeePaid {
+                    account_id: a.clone(),
+                    relayer: a.clone(),
+                    action: "claim".into(),
+                    epoch: 42,
+                    amount: U128(5),
+                }
+                .to_log(),
+            ),
+            (
+                RelayerFeeFailed::NAME,
+                RelayerFeeFailed {
+                    account_id: a.clone(),
+                    relayer: a.clone(),
+                    action: "claim".into(),
+                    epoch: 42,
+                    amount: U128(5),
+                }
+                .to_log(),
+            ),
+            (
+                MemberRemoved::NAME,
+                MemberRemoved {
+                    account_id: a.clone(),
+                    by_owner: true,
+                }
+                .to_log(),
+            ),
+            (
+                AccountEscrowHeld::NAME,
+                AccountEscrowHeld {
+                    grant_id: 7,
+                    account_id: a.clone(),
+                }
+                .to_log(),
+            ),
+            (
+                IntentPosted::NAME,
+                IntentPosted {
+                    intent_hash: [3u8; 32].into(),
+                    account_id: a.clone(),
+                    posted_at: t,
+                }
+                .to_log(),
+            ),
+            (
+                AssetClassSet::NAME,
+                AssetClassSet {
+                    asset_type: "x:y".into(),
+                    class: crate::grant::AssetClass::B,
+                }
+                .to_log(),
+            ),
+            (
+                GrantOffered::NAME,
+                GrantOffered {
+                    grant_id: 1,
+                    asset_type: "x:y".into(),
+                    grantor: a.clone(),
+                    class: crate::grant::AssetClass::B,
+                    unit: "call".into(),
+                    unit_price: U128(1),
+                    expires_at: t,
+                }
+                .to_log(),
+            ),
+            (
+                GrantActivated::NAME,
+                GrantActivated {
+                    grant_id: 1,
+                    grantee: b.clone(),
+                    delivery_pubkey: None,
+                }
+                .to_log(),
+            ),
+            (
+                GrantRevoked::NAME,
+                GrantRevoked {
+                    grant_id: 1,
+                    reason: crate::grant::RevokeReason::Grantor,
+                }
+                .to_log(),
+            ),
+            (
+                EscrowHeld::NAME,
+                EscrowHeld {
+                    grant_id: 1,
+                    nft_contract: b.clone(),
+                    token_id: "t1".into(),
+                }
+                .to_log(),
+            ),
+            (
+                FreezeProposed::NAME,
+                FreezeProposed {
+                    account_id: a.clone(),
+                    eta: t,
+                    reason_hash: None,
+                }
+                .to_log(),
+            ),
+            (
+                MemberFrozen::NAME,
+                MemberFrozen {
+                    account_id: a.clone(),
+                    from_epoch: 42,
+                }
+                .to_log(),
+            ),
+            (
+                FreezeCancelled::NAME,
+                FreezeCancelled {
+                    account_id: a.clone(),
+                }
+                .to_log(),
+            ),
+            (
+                MemberUnfrozen::NAME,
+                MemberUnfrozen {
+                    account_id: a.clone(),
+                }
+                .to_log(),
+            ),
+            (
+                AssetContractsSet::NAME,
+                AssetContractsSet {
+                    asset_type: "token:nep141".into(),
+                    contracts: vec![a.clone()],
+                }
+                .to_log(),
+            ),
+            (
+                BondLocked::NAME,
+                BondLocked {
+                    bundle_id: 1,
+                    account_id: a.clone(),
+                    amount: U128(20),
+                }
+                .to_log(),
+            ),
+            (
+                DealConfirmed::NAME,
+                DealConfirmed {
+                    bundle_id: 1,
+                    account_id: a.clone(),
+                    of: b.clone(),
+                }
+                .to_log(),
+            ),
+            (
+                DealDisputed::NAME,
+                DealDisputed {
+                    bundle_id: 1,
+                    complainant: a.clone(),
+                    accused: b.clone(),
+                    evidence_hash: "ab".repeat(32),
+                    disputed_at: t,
+                }
+                .to_log(),
+            ),
+            (
+                DealRuled::NAME,
+                DealRuled {
+                    bundle_id: 1,
+                    arbiter: acc("arb.near"),
+                    verdict: crate::deal::Verdict::AccusedGuilty,
+                }
+                .to_log(),
+            ),
+            (
+                BondSlashed::NAME,
+                BondSlashed {
+                    bundle_id: 1,
+                    from: b.clone(),
+                    to: a.clone(),
+                    amount: U128(20),
+                    from_stake: U128(80),
+                    to_stake: U128(120),
+                }
+                .to_log(),
+            ),
+            (
+                BondReleased::NAME,
+                BondReleased {
+                    bundle_id: 1,
+                    account_id: a.clone(),
+                    amount: U128(20),
+                    reason: crate::deal::ReleaseReason::Confirmed,
+                }
+                .to_log(),
+            ),
+            (
+                MtEscrowHeld::NAME,
+                MtEscrowHeld {
+                    grant_id: 1,
+                    mt_contract: b.clone(),
+                    token_id: "nep141:x.near".into(),
+                    amount: U128(5),
+                }
+                .to_log(),
+            ),
+            (
+                FtEscrowHeld::NAME,
+                FtEscrowHeld {
+                    grant_id: 1,
+                    ft_contract: b.clone(),
+                    amount: U128(5),
+                }
+                .to_log(),
+            ),
+            (
+                EscrowFailed::NAME,
+                EscrowFailed {
+                    grant_id: 1,
+                    step: crate::escrow::EscrowStep::Complete,
+                    epoch: 42,
+                    payer: a.clone(),
+                    payee: b.clone(),
+                    delta: U128(5),
+                    reverted: true,
+                }
+                .to_log(),
+            ),
+            (
+                BundleCommitted::NAME,
+                BundleCommitted {
+                    bundle_id: 1,
+                    terms_hash: "ab".repeat(32),
+                    epoch: 42,
+                    legs: vec![crate::bundle::BundleLeg {
+                        payer: a.clone(),
+                        payee: b.clone(),
+                        max_amount: U128(10),
+                    }],
+                    solver: b.clone(),
+                }
+                .to_log(),
+            ),
+            (
+                UpgradeApplied::NAME,
+                UpgradeApplied {
+                    code_hash: [7u8; 32].into(),
+                    applied_at: t,
+                }
+                .to_log(),
+            ),
         ]
     }
 
@@ -572,12 +1497,19 @@ mod tests {
     #[test]
     fn data_fields_match_spec_exactly() {
         for (name, log) in samples() {
-            let schema = EVENT_SCHEMAS.iter().find(|s| s.name == name).expect("schema");
+            let schema = EVENT_SCHEMAS
+                .iter()
+                .find(|s| s.name == name)
+                .expect("schema");
             let payload = data(&log);
             assert_eq!(sorted_keys(&payload), sorted(schema.fields), "{name}");
             for list in ["edges", "positions", "changes"] {
                 if let Some(items) = payload.get(list) {
-                    assert_eq!(sorted_keys(&items[0]), sorted(schema.items), "{name}.{list}");
+                    assert_eq!(
+                        sorted_keys(&items[0]),
+                        sorted(schema.items),
+                        "{name}.{list}"
+                    );
                 }
             }
         }
@@ -592,7 +1524,12 @@ mod tests {
         let voucher = by_name("voucher_registered");
         assert!(voucher["epoch"].is_u64());
         assert!(voucher["seq"].is_u64());
-        for field in ["cumulative_amount", "delta", "obligation", "outstanding_debt"] {
+        for field in [
+            "cumulative_amount",
+            "delta",
+            "obligation",
+            "outstanding_debt",
+        ] {
             assert!(voucher[field].is_string(), "{field}");
         }
 
@@ -611,7 +1548,11 @@ mod tests {
     #[test]
     fn voucher_registered_uses_snake_case() {
         let logs = samples();
-        let log = &logs.iter().find(|(n, _)| *n == "voucher_registered").unwrap().1;
+        let log = &logs
+            .iter()
+            .find(|(n, _)| *n == "voucher_registered")
+            .unwrap()
+            .1;
         assert_eq!(data(log)["cumulative_amount"], "2740000");
         assert!(!log.contains("cumulativeAmount"));
     }
@@ -628,8 +1569,22 @@ mod tests {
             position_count: 3,
             positions_hash: "cd".repeat(32),
             positions: vec![
-                position("scraper.near", -35_000_000, "debtor", Some("due"), 35_000_000, 35_000_000),
-                position("gpu.near", 35_000_000, "creditor", Some("claimable"), 35_000_000, 0),
+                position(
+                    "scraper.near",
+                    -35_000_000,
+                    "debtor",
+                    Some("due"),
+                    35_000_000,
+                    35_000_000,
+                ),
+                position(
+                    "gpu.near",
+                    35_000_000,
+                    "creditor",
+                    Some("claimable"),
+                    35_000_000,
+                    0,
+                ),
                 position("translator.near", 0, "none", None, 0, 0),
             ],
         };
@@ -642,7 +1597,13 @@ mod tests {
         assert_eq!(zero["outstanding_debt"], "0");
 
         let logs = samples();
-        let defaulted = data(&logs.iter().find(|(n, _)| *n == "member_defaulted").unwrap().1);
+        let defaulted = data(
+            &logs
+                .iter()
+                .find(|(n, _)| *n == "member_defaulted")
+                .unwrap()
+                .1,
+        );
         assert_eq!(defaulted["outstanding_debt"], "0");
     }
 
@@ -650,7 +1611,14 @@ mod tests {
     #[test]
     fn clearing_applied_drops_zero_edges() {
         testing_env!(VMContextBuilder::new().build());
-        emit_clearing_applied(1, Some(acc("solver.near")), U128(25), &[edge(1, 25), edge(2, 0)], U128(0), U128(0));
+        emit_clearing_applied(
+            1,
+            Some(acc("solver.near")),
+            U128(25),
+            &[edge(1, 25), edge(2, 0)],
+            U128(0),
+            U128(0),
+        );
         let logs = get_logs();
         assert_eq!(logs.len(), 1);
         // CT-099: a summary; the edge with cleared 0 is not counted and not in the hash
@@ -664,7 +1632,12 @@ mod tests {
     }
 
     fn emit_limits(changes: &[LimitChange]) {
-        emit_chunked(changes, |changes, chunk, chunks| LimitsUpdated { epoch: 7, changes, chunk, chunks });
+        emit_chunked(changes, |changes, chunk, chunks| LimitsUpdated {
+            epoch: 7,
+            changes,
+            chunk,
+            chunks,
+        });
     }
 
     // TC-CT-013-07
@@ -675,7 +1648,10 @@ mod tests {
         let logs = get_logs();
         assert_eq!(logs.len(), 1);
         let payload = data(&logs[0]);
-        assert_eq!((payload["chunk"].as_u64(), payload["chunks"].as_u64()), (Some(0), Some(1)));
+        assert_eq!(
+            (payload["chunk"].as_u64(), payload["chunks"].as_u64()),
+            (Some(0), Some(1))
+        );
         assert_eq!(payload["changes"].as_array().unwrap().len(), 50);
 
         testing_env!(VMContextBuilder::new().build());
@@ -700,7 +1676,10 @@ mod tests {
         assert_eq!(logs.len(), 1);
         let payload = data(&logs[0]);
         assert_eq!(payload["changes"], json!([]));
-        assert_eq!((payload["chunk"].as_u64(), payload["chunks"].as_u64()), (Some(0), Some(1)));
+        assert_eq!(
+            (payload["chunk"].as_u64(), payload["chunks"].as_u64()),
+            (Some(0), Some(1))
+        );
     }
 
     // TC-CT-013-08
@@ -712,16 +1691,34 @@ mod tests {
         let max = U128(u128::MAX);
 
         let changes: Vec<LimitChange> = (0..50)
-            .map(|i| LimitChange { account_id: long(i), old_limit: max, new_limit: max, status: "active".into() })
+            .map(|i| LimitChange {
+                account_id: long(i),
+                old_limit: max,
+                new_limit: max,
+                status: "active".into(),
+            })
             .collect();
-        let limits = LimitsUpdated { epoch: u64::MAX, changes, chunk: 0, chunks: 1 }.to_log();
+        let limits = LimitsUpdated {
+            epoch: u64::MAX,
+            changes,
+            chunk: 0,
+            chunks: 1,
+        }
+        .to_log();
         assert!(limits.len() <= LOG_LIMIT, "limits_updated {}", limits.len());
 
         // CT-099: the positions of the epoch in ONE log, up to MAX_MEMBERS, with account names of 64 characters and amounts of 13 digits (`limit_cap` is at most 1e11 and
         // a sum over 64 members is below 1e13). The worst case is a creditor (the longest role and status: `creditor`, `claimable`) with a negative `net` of 13 digits
         // (B8-F4). The whole log of `commit_epoch` must keep a margin of 10 percent under the 16 KiB of a receipt.
-        assert_eq!(crate::params::LIMIT_CAP_MAX.to_string().len(), 12, "limit_cap has at most 12 digits");
-        assert!(64 * crate::params::LIMIT_CAP_MAX < 10u128.pow(13), "a sum over 64 members has at most 13 digits");
+        assert_eq!(
+            crate::params::LIMIT_CAP_MAX.to_string().len(),
+            12,
+            "limit_cap has at most 12 digits"
+        );
+        assert!(
+            64 * crate::params::LIMIT_CAP_MAX < 10u128.pow(13),
+            "a sum over 64 members has at most 13 digits"
+        );
         let bound = U128(9_999_999_999_999);
         let positions: Vec<PositionEntry> = (0..64)
             .map(|i| PositionEntry {
@@ -754,8 +1751,17 @@ mod tests {
             solver_fee: max,
         }
         .to_log();
-        assert!(committed.len() + applied.len() <= LOG_LIMIT / 10 * 9, "commit_epoch logs {} + {}", committed.len(), applied.len());
-        assert!(applied.len() <= LOG_LIMIT, "clearing_applied {}", applied.len());
+        assert!(
+            committed.len() + applied.len() <= LOG_LIMIT / 10 * 9,
+            "commit_epoch logs {} + {}",
+            committed.len(),
+            applied.len()
+        );
+        assert!(
+            applied.len() <= LOG_LIMIT,
+            "clearing_applied {}",
+            applied.len()
+        );
     }
 
     // TC-CT-013-09, TC-CT-068-07
@@ -768,13 +1774,58 @@ mod tests {
         assert_eq!(
             names,
             [
-                "member_joined", "stake_added", "voucher_registered", "epoch_cutoff", "clearing_submitted",
-                "clearing_applied", "epoch_committed", "residual_paid", "member_defaulted", "limits_updated",
-                "epoch_finalized", "residual_claimed", "residual_claim_failed", "params_updated", "exit_requested",
-                "stake_withdrawn", "stake_withdraw_failed", "member_admitted", "member_reactivated", "solver_fee_claimed",
-                "solver_fee_claim_failed", "upgrade_proposed", "upgrade_applied",
-                "intent_posted", "asset_class_set", "grant_offered", "grant_activated", "grant_revoked", "escrow_held", "ft_escrow_held", "freeze_proposed", "member_frozen", "freeze_cancelled", "member_unfrozen", "asset_contracts_set", "bond_locked", "deal_confirmed", "deal_disputed", "deal_ruled", "bond_slashed", "bond_released", "mt_escrow_held", "escrow_failed", "bundle_committed",
-                "intents_withdrawn", "intent_removed", "auto_settle_set", "auto_settled", "relayer_fee_paid", "relayer_fee_failed",
+                "member_joined",
+                "stake_added",
+                "voucher_registered",
+                "epoch_cutoff",
+                "clearing_submitted",
+                "clearing_applied",
+                "epoch_committed",
+                "residual_paid",
+                "member_defaulted",
+                "limits_updated",
+                "epoch_finalized",
+                "residual_claimed",
+                "residual_claim_failed",
+                "params_updated",
+                "exit_requested",
+                "stake_withdrawn",
+                "stake_withdraw_failed",
+                "member_admitted",
+                "member_reactivated",
+                "solver_fee_claimed",
+                "solver_fee_claim_failed",
+                "upgrade_proposed",
+                "upgrade_applied",
+                "intent_posted",
+                "asset_class_set",
+                "grant_offered",
+                "grant_activated",
+                "grant_revoked",
+                "escrow_held",
+                "ft_escrow_held",
+                "freeze_proposed",
+                "member_frozen",
+                "freeze_cancelled",
+                "member_unfrozen",
+                "asset_contracts_set",
+                "bond_locked",
+                "deal_confirmed",
+                "deal_disputed",
+                "deal_ruled",
+                "bond_slashed",
+                "bond_released",
+                "mt_escrow_held",
+                "escrow_failed",
+                "bundle_committed",
+                "intents_withdrawn",
+                "intent_removed",
+                "auto_settle_set",
+                "auto_settled",
+                "relayer_fee_paid",
+                "relayer_fee_failed",
+                "member_removed",
+                "account_escrow_held",
             ]
         );
     }

@@ -17,7 +17,7 @@ const BUILT_ABI: &str = "target/near/x207_circle_abi.json";
 const COMMITTED_ABI: &str = "abi.json";
 
 /// Methods that change state (spec sections 4 and 14: P0, and the P1 methods that joined with a patch bump, K-20).
-const CHANGE_METHODS: [&str; 56] = [
+const CHANGE_METHODS: [&str; 63] = [
     "new",
     "join",
     "ft_on_transfer",
@@ -89,10 +89,23 @@ const CHANGE_METHODS: [&str; 56] = [
     "on_fee_refund_resolved",
     // 0.0.17: CT-118 (relayer fee of request_exit_evm and set_auto_settle_evm)
     "on_action_fee_resolved",
+    // 0.0.18: CT-123 (remove_pending), CT-126 (escrow of an account)
+    "remove_pending",
+    "account_on_lock",
+    "complete_account_escrow",
+    "cancel_expired_account_escrow",
+    "set_locker_code_hashes",
+    "set_pending_gc_delay",
+    // 0.0.18: CT-129 (limit of the escrow time)
+    "set_max_escrow_ttl",
 ];
 
 /// The 19 P0 views of spec section 12, `solver_fee_balance` (CT-052, 0.0.2) and `get_upgrade` (CT-055, 0.0.3).
-const VIEWS: [&str; 39] = [
+const VIEWS: [&str; 43] = [
+    "get_max_escrow_ttl",
+    "get_pending_gc_delay",
+    "get_account_escrow",
+    "get_locker_code_hashes",
     "interface_version",
     "get_circle",
     "get_owner",
@@ -138,13 +151,15 @@ const P1_P2_METHODS: [&str; 0] = [];
 
 /// Final signatures. `string` also stands for `AccountId`, `U128`, `U64`, `PublicKey`, which the ABI
 /// does not tell apart. `[..]` lists the modifiers.
-const SIGNATURES: [&str; 95] = [
+const SIGNATURES: [&str; 106] = [
     "accept_grant(grant_id:integer:uint64,delivery_pubkey:string|null)-> []",
+    "account_on_lock(grant_id:integer:uint64)-> []",
     "admit_member(account_id:string)-> []",
     "apply_freeze(account_id:string)-> []",
     "apply_upgrade()->Promise []",
     "bond_locked(account_id:string)->string []",
     "cancel_escrow(grant_id:integer:uint64)->Promise []",
+    "cancel_expired_account_escrow(grant_id:integer:uint64)->Promise []",
     "cancel_freeze(account_id:string)-> []",
     "claim(epoch:integer:uint64,destination:ClaimDestination)->Promise [payable]",
     "claim_evm(member:string,epoch:integer:uint64,receiver:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->Promise []",
@@ -152,12 +167,14 @@ const SIGNATURES: [&str; 95] = [
     "close_epoch(epoch:integer:uint64)-> []",
     "commit_bundle(bundle:BundleInput,signatures:array<BundleSignature>)->integer:uint64 []",
     "commit_epoch(epoch:integer:uint64)-> []",
+    "complete_account_escrow(grant_id:integer:uint64,voucher:Voucher,signature:string,delivery_pubkey:string)->Promise []",
     "complete_escrow(grant_id:integer:uint64,voucher:Voucher,signature:string)->Promise []",
     "confirm_deal(bundle_id:integer:uint64)-> []",
     "dispute_deal(bundle_id:integer:uint64,evidence_hash:string)-> []",
     "evm_signer(account_id:string)->EvmSignerView|null []",
     "finalize_epoch(epoch:integer:uint64)-> []",
     "ft_on_transfer(sender_id:string,amount:string,msg:string)->PromiseOrValueString []",
+    "get_account_escrow(grant_id:integer:uint64)->AccountEscrowView|null []",
     "get_asset_class(asset_type:string)->AssetClassEntry|null []",
     "get_asset_contracts(asset_type:string)->array<string> []",
     "get_bundle(bundle_id:integer:uint64)->BundleView|null []",
@@ -170,9 +187,12 @@ const SIGNATURES: [&str; 95] = [
     "get_ft_escrow(grant_id:integer:uint64)->FtEscrowView|null []",
     "get_grant(grant_id:integer:uint64)->AccessGrant|null []",
     "get_intent(intent_hash:string)->IntentView|null []",
+    "get_locker_code_hashes()->array<string> []",
+    "get_max_escrow_ttl()->string []",
     "get_mt_escrow(grant_id:integer:uint64)->MtEscrowView|null []",
     "get_owner()->string []",
     "get_params()->Params []",
+    "get_pending_gc_delay()->string []",
     "get_pending_params()->PendingParams|null []",
     "get_pool()->PoolView []",
     "get_proposal(epoch:integer:uint64,from_index:integer:uint32,limit:integer:uint32)->ProposalView|null []",
@@ -217,6 +237,7 @@ const SIGNATURES: [&str; 95] = [
     "register_in_bundle(bundle_id:integer:uint64,voucher:Voucher,signature:string)->string []",
     "register_voucher(voucher:Voucher,signature:string)->string []",
     "remove_intent(intent_hash:string)-> []",
+    "remove_pending(account_id:string)-> []",
     "request_exit()-> [payable]",
     "request_exit_evm(member:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
     "revoke_grant(grant_id:integer:uint64,reason:RevokeReason)-> []",
@@ -225,7 +246,10 @@ const SIGNATURES: [&str; 95] = [
     "set_asset_contracts(asset_type:string,contracts:array<string>)-> []",
     "set_auto_settle(enabled:boolean)-> [payable]",
     "set_auto_settle_evm(member:string,enabled:boolean,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
+    "set_locker_code_hashes(hashes:array<string>)-> []",
+    "set_max_escrow_ttl(ttl_ns:string)-> []",
     "set_params(params:Params)-> []",
+    "set_pending_gc_delay(seconds:string)-> []",
     "settle_deal(bundle_id:integer:uint64)-> []",
     "simulate_clearing(epoch:integer:uint64,edges:array<ClearingEdge>)->SimulationResult []",
     "solver_fee_balance(account_id:string)->string []",
@@ -236,7 +260,7 @@ const SIGNATURES: [&str; 95] = [
     "withdraw_stake_evm(member:string,receiver:string,nonce:integer:uint64,deadline:integer:uint64,max_fee:string,signature:string)->PromiseOrValueBoolean []",
 ];
 
-const EVENTS: [&str; 50] = [
+const EVENTS: [&str; 52] = [
     "member_joined",
     "stake_added",
     "voucher_registered",
@@ -287,6 +311,8 @@ const EVENTS: [&str; 50] = [
     "auto_settled",
     "relayer_fee_paid",
     "relayer_fee_failed",
+    "member_removed",
+    "account_escrow_held",
 ];
 
 fn strip_descriptions(value: &mut Value) {

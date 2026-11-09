@@ -124,7 +124,10 @@ impl Default for Params {
             limit_growth: DEFAULT_LIMIT_GROWTH,
             limit_cap: U128(DEFAULT_LIMIT_CAP),
             limit_decay: DEFAULT_LIMIT_DECAY,
-            fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
+            fees: Fees {
+                clearing_fee_bps: 0,
+                solver_fee_bps: 0,
+            },
             admission: Admission::Open,
             max_search_share_bps: DEFAULT_MAX_SEARCH_SHARE_BPS,
             bond_threshold: U128(DEFAULT_BOND_THRESHOLD),
@@ -147,19 +150,64 @@ fn require_range<T: PartialOrd>(value: T, min: T, max: T, field: &str) {
 /// Panics `ERR_PARAM_OUT_OF_RANGE: <field>` on the first field (struct order) outside its range.
 /// Nested fields are written with a dot, e.g. `fees.clearing_fee_bps` (K-17).
 pub fn validate_params(p: &Params) {
-    require_range(p.epoch_length, EPOCH_LENGTH_MIN, EPOCH_LENGTH_MAX, "epoch_length");
-    require_range(p.payment_window, PAYMENT_WINDOW_MIN, PAYMENT_WINDOW_MAX, "payment_window");
-    require_range(p.proposal_window, PROPOSAL_WINDOW_MIN, PROPOSAL_WINDOW_MAX, "proposal_window");
-    require_range(p.base_limit_ratio, 0, BASE_LIMIT_RATIO_MAX, "base_limit_ratio");
+    require_range(
+        p.epoch_length,
+        EPOCH_LENGTH_MIN,
+        EPOCH_LENGTH_MAX,
+        "epoch_length",
+    );
+    require_range(
+        p.payment_window,
+        PAYMENT_WINDOW_MIN,
+        PAYMENT_WINDOW_MAX,
+        "payment_window",
+    );
+    require_range(
+        p.proposal_window,
+        PROPOSAL_WINDOW_MIN,
+        PROPOSAL_WINDOW_MAX,
+        "proposal_window",
+    );
+    require_range(
+        p.base_limit_ratio,
+        0,
+        BASE_LIMIT_RATIO_MAX,
+        "base_limit_ratio",
+    );
     require_range(p.limit_growth, 0, LIMIT_GROWTH_MAX, "limit_growth");
     require_range(p.limit_cap.0, LIMIT_CAP_MIN, LIMIT_CAP_MAX, "limit_cap");
     require_range(p.limit_decay, 0, LIMIT_DECAY_MAX, "limit_decay");
-    require_range(p.fees.clearing_fee_bps, 0, CLEARING_FEE_BPS_MAX, "fees.clearing_fee_bps");
-    require_range(p.fees.solver_fee_bps, 0, SOLVER_FEE_BPS_MAX, "fees.solver_fee_bps");
-    require_range(p.max_search_share_bps, 0, MAX_SEARCH_SHARE_BPS_MAX, "max_search_share_bps");
-    require_range(p.bond_threshold.0, BOND_THRESHOLD_MIN, BOND_THRESHOLD_MAX, "bond_threshold");
+    require_range(
+        p.fees.clearing_fee_bps,
+        0,
+        CLEARING_FEE_BPS_MAX,
+        "fees.clearing_fee_bps",
+    );
+    require_range(
+        p.fees.solver_fee_bps,
+        0,
+        SOLVER_FEE_BPS_MAX,
+        "fees.solver_fee_bps",
+    );
+    require_range(
+        p.max_search_share_bps,
+        0,
+        MAX_SEARCH_SHARE_BPS_MAX,
+        "max_search_share_bps",
+    );
+    require_range(
+        p.bond_threshold.0,
+        BOND_THRESHOLD_MIN,
+        BOND_THRESHOLD_MAX,
+        "bond_threshold",
+    );
     require_range(p.bond_bps, BOND_BPS_MIN, BOND_BPS_MAX, "bond_bps");
-    require_range(p.prune_delay_epochs, PRUNE_DELAY_EPOCHS_MIN, PRUNE_DELAY_EPOCHS_MAX, "prune_delay_epochs");
+    require_range(
+        p.prune_delay_epochs,
+        PRUNE_DELAY_EPOCHS_MIN,
+        PRUNE_DELAY_EPOCHS_MAX,
+        "prune_delay_epochs",
+    );
     require_range(p.relayer_fee.0, 0, RELAYER_FEE_MAX, "relayer_fee");
 }
 
@@ -172,27 +220,37 @@ const PENDING_RELAYER_FEE_KEY: &[u8] = b"x207_relayer_fee_pending";
 
 /// `relayer_fee` in force now: the stored value, or 0 for a circle that never set it (also a circle upgraded from 0.0.15).
 pub fn current_relayer_fee() -> u128 {
-    env::storage_read(RELAYER_FEE_KEY).map_or(0, |b| near_sdk::borsh::from_slice::<u128>(&b).expect("relayer fee is valid borsh"))
+    env::storage_read(RELAYER_FEE_KEY).map_or(0, |b| {
+        near_sdk::borsh::from_slice::<u128>(&b).expect("relayer fee is valid borsh")
+    })
 }
 
 pub(crate) fn write_relayer_fee(fee: u128) {
     if fee == 0 {
         env::storage_remove(RELAYER_FEE_KEY);
     } else {
-        env::storage_write(RELAYER_FEE_KEY, &near_sdk::borsh::to_vec(&fee).expect("borsh"));
+        env::storage_write(
+            RELAYER_FEE_KEY,
+            &near_sdk::borsh::to_vec(&fee).expect("borsh"),
+        );
     }
 }
 
 /// `prune_delay_epochs` in force now: the stored value, or `DEFAULT_PRUNE_DELAY_EPOCHS` for a circle that never set it (also a circle upgraded from 0.0.12).
 pub fn current_prune_delay() -> u16 {
-    env::storage_read(PRUNE_DELAY_KEY).map_or(DEFAULT_PRUNE_DELAY_EPOCHS, |b| near_sdk::borsh::from_slice::<u16>(&b).expect("prune delay is valid borsh"))
+    env::storage_read(PRUNE_DELAY_KEY).map_or(DEFAULT_PRUNE_DELAY_EPOCHS, |b| {
+        near_sdk::borsh::from_slice::<u16>(&b).expect("prune delay is valid borsh")
+    })
 }
 
 pub(crate) fn write_prune_delay(delay: u16) {
     if delay == DEFAULT_PRUNE_DELAY_EPOCHS {
         env::storage_remove(PRUNE_DELAY_KEY);
     } else {
-        env::storage_write(PRUNE_DELAY_KEY, &near_sdk::borsh::to_vec(&delay).expect("borsh"));
+        env::storage_write(
+            PRUNE_DELAY_KEY,
+            &near_sdk::borsh::to_vec(&delay).expect("borsh"),
+        );
     }
 }
 
@@ -208,7 +266,10 @@ pub(crate) fn write_rules(threshold: u128, bps: u16) {
     if (threshold, bps) == (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS) {
         env::storage_remove(RULES_KEY);
     } else {
-        env::storage_write(RULES_KEY, &near_sdk::borsh::to_vec(&(threshold, bps)).expect("borsh"));
+        env::storage_write(
+            RULES_KEY,
+            &near_sdk::borsh::to_vec(&(threshold, bps)).expect("borsh"),
+        );
     }
 }
 
@@ -234,7 +295,10 @@ fn epoch_rules_key(epoch: u64) -> Vec<u8> {
 pub(crate) fn snapshot_epoch_rules(epoch: u64) {
     let (threshold, bps) = current_rules();
     let value = (threshold, bps, current_prune_delay(), current_relayer_fee());
-    env::storage_write(&epoch_rules_key(epoch), &near_sdk::borsh::to_vec(&value).expect("borsh"));
+    env::storage_write(
+        &epoch_rules_key(epoch),
+        &near_sdk::borsh::to_vec(&value).expect("borsh"),
+    );
 }
 
 /// `p` (the stored params of `epoch`) with the rules that were in force when the epoch opened. No snapshot: the running epoch gets the
@@ -258,21 +322,24 @@ pub(crate) fn with_epoch_rules(mut p: Params, epoch: u64, current_epoch: u64) ->
 /// Called when a pending `Params` becomes the params of the next epoch: the pending bond rules come with it.
 pub(crate) fn apply_pending_rules(effective_epoch: u64) {
     if let Some(bytes) = env::storage_read(PENDING_RULES_KEY) {
-        let (t, bps, epoch): (u128, u16, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending rules are valid borsh");
+        let (t, bps, epoch): (u128, u16, u64) =
+            near_sdk::borsh::from_slice(&bytes).expect("pending rules are valid borsh");
         if epoch == effective_epoch {
             write_rules(t, bps);
         }
         env::storage_remove(PENDING_RULES_KEY);
     }
     if let Some(bytes) = env::storage_read(PENDING_PRUNE_DELAY_KEY) {
-        let (delay, epoch): (u16, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending prune delay is valid borsh");
+        let (delay, epoch): (u16, u64) =
+            near_sdk::borsh::from_slice(&bytes).expect("pending prune delay is valid borsh");
         if epoch == effective_epoch {
             write_prune_delay(delay);
         }
         env::storage_remove(PENDING_PRUNE_DELAY_KEY);
     }
     if let Some(bytes) = env::storage_read(PENDING_RELAYER_FEE_KEY) {
-        let (fee, epoch): (u128, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending relayer fee is valid borsh");
+        let (fee, epoch): (u128, u64) =
+            near_sdk::borsh::from_slice(&bytes).expect("pending relayer fee is valid borsh");
         if epoch == effective_epoch {
             write_relayer_fee(fee);
         }
@@ -285,22 +352,50 @@ impl Params {
     pub fn changed_fields(&self, other: &Params) -> Vec<String> {
         let checks = [
             ("epoch_length", self.epoch_length != other.epoch_length),
-            ("payment_window", self.payment_window != other.payment_window),
-            ("proposal_window", self.proposal_window != other.proposal_window),
-            ("base_limit_ratio", self.base_limit_ratio != other.base_limit_ratio),
+            (
+                "payment_window",
+                self.payment_window != other.payment_window,
+            ),
+            (
+                "proposal_window",
+                self.proposal_window != other.proposal_window,
+            ),
+            (
+                "base_limit_ratio",
+                self.base_limit_ratio != other.base_limit_ratio,
+            ),
             ("limit_growth", self.limit_growth != other.limit_growth),
             ("limit_cap", self.limit_cap != other.limit_cap),
             ("limit_decay", self.limit_decay != other.limit_decay),
-            ("fees.clearing_fee_bps", self.fees.clearing_fee_bps != other.fees.clearing_fee_bps),
-            ("fees.solver_fee_bps", self.fees.solver_fee_bps != other.fees.solver_fee_bps),
+            (
+                "fees.clearing_fee_bps",
+                self.fees.clearing_fee_bps != other.fees.clearing_fee_bps,
+            ),
+            (
+                "fees.solver_fee_bps",
+                self.fees.solver_fee_bps != other.fees.solver_fee_bps,
+            ),
             ("admission", self.admission != other.admission),
-            ("max_search_share_bps", self.max_search_share_bps != other.max_search_share_bps),
-            ("bond_threshold", self.bond_threshold != other.bond_threshold),
+            (
+                "max_search_share_bps",
+                self.max_search_share_bps != other.max_search_share_bps,
+            ),
+            (
+                "bond_threshold",
+                self.bond_threshold != other.bond_threshold,
+            ),
             ("bond_bps", self.bond_bps != other.bond_bps),
-            ("prune_delay_epochs", self.prune_delay_epochs != other.prune_delay_epochs),
+            (
+                "prune_delay_epochs",
+                self.prune_delay_epochs != other.prune_delay_epochs,
+            ),
             ("relayer_fee", self.relayer_fee != other.relayer_fee),
         ];
-        checks.into_iter().filter(|(_, differs)| *differs).map(|(name, _)| name.to_string()).collect()
+        checks
+            .into_iter()
+            .filter(|(_, differs)| *differs)
+            .map(|(name, _)| name.to_string())
+            .collect()
     }
 }
 
@@ -314,18 +409,38 @@ impl X207Circle {
         validate_params(&params);
         let old = with_rules(self.epoch_or_panic(self.current_epoch).params.clone());
         let effective_epoch = self.current_epoch + 1;
-        env::storage_write(PENDING_RULES_KEY, &near_sdk::borsh::to_vec(&(params.bond_threshold.0, params.bond_bps, effective_epoch)).expect("borsh"));
-        env::storage_write(PENDING_PRUNE_DELAY_KEY, &near_sdk::borsh::to_vec(&(params.prune_delay_epochs, effective_epoch)).expect("borsh"));
-        env::storage_write(PENDING_RELAYER_FEE_KEY, &near_sdk::borsh::to_vec(&(params.relayer_fee.0, effective_epoch)).expect("borsh"));
+        env::storage_write(
+            PENDING_RULES_KEY,
+            &near_sdk::borsh::to_vec(&(params.bond_threshold.0, params.bond_bps, effective_epoch))
+                .expect("borsh"),
+        );
+        env::storage_write(
+            PENDING_PRUNE_DELAY_KEY,
+            &near_sdk::borsh::to_vec(&(params.prune_delay_epochs, effective_epoch)).expect("borsh"),
+        );
+        env::storage_write(
+            PENDING_RELAYER_FEE_KEY,
+            &near_sdk::borsh::to_vec(&(params.relayer_fee.0, effective_epoch)).expect("borsh"),
+        );
         let changed = old.changed_fields(&params);
-        self.pending_params = Some(PendingParams { params: params.clone(), effective_epoch });
-        ParamsUpdated { old, new: params, changed, effective_epoch }.emit();
+        self.pending_params = Some(PendingParams {
+            params: params.clone(),
+            effective_epoch,
+        });
+        ParamsUpdated {
+            old,
+            new: params,
+            changed,
+            effective_epoch,
+        }
+        .emit();
     }
 
     pub fn get_pending_params(&self) -> Option<PendingParams> {
         self.pending_params.clone().map(|mut pending| {
             if let Some(bytes) = env::storage_read(PENDING_RULES_KEY) {
-                let (t, bps, _): (u128, u16, u64) = near_sdk::borsh::from_slice(&bytes).expect("pending rules are valid borsh");
+                let (t, bps, _): (u128, u16, u64) =
+                    near_sdk::borsh::from_slice(&bytes).expect("pending rules are valid borsh");
                 pending.params.bond_threshold = U128(t);
                 pending.params.bond_bps = bps;
             } else {
@@ -333,12 +448,21 @@ impl X207Circle {
                 pending.params.bond_threshold = U128(t);
                 pending.params.bond_bps = bps;
             }
-            pending.params.prune_delay_epochs = env::storage_read(PENDING_PRUNE_DELAY_KEY).map_or_else(current_prune_delay, |bytes| {
-                near_sdk::borsh::from_slice::<(u16, u64)>(&bytes).expect("pending prune delay is valid borsh").0
-            });
-            pending.params.relayer_fee = U128(env::storage_read(PENDING_RELAYER_FEE_KEY).map_or_else(current_relayer_fee, |bytes| {
-                near_sdk::borsh::from_slice::<(u128, u64)>(&bytes).expect("pending relayer fee is valid borsh").0
-            }));
+            pending.params.prune_delay_epochs = env::storage_read(PENDING_PRUNE_DELAY_KEY)
+                .map_or_else(current_prune_delay, |bytes| {
+                    near_sdk::borsh::from_slice::<(u16, u64)>(&bytes)
+                        .expect("pending prune delay is valid borsh")
+                        .0
+                });
+            pending.params.relayer_fee =
+                U128(env::storage_read(PENDING_RELAYER_FEE_KEY).map_or_else(
+                    current_relayer_fee,
+                    |bytes| {
+                        near_sdk::borsh::from_slice::<(u128, u64)>(&bytes)
+                            .expect("pending relayer fee is valid borsh")
+                            .0
+                    },
+                ));
             pending
         })
     }
@@ -430,7 +554,10 @@ mod tests {
     #[test]
     fn tc_ct_007_05_payment_window_below_15_minutes() {
         let msg = panic_message(&with(|p| p.payment_window = 899));
-        assert!(msg.contains("ERR_PARAM_OUT_OF_RANGE: payment_window"), "{msg}");
+        assert!(
+            msg.contains("ERR_PARAM_OUT_OF_RANGE: payment_window"),
+            "{msg}"
+        );
     }
 
     // TC-CT-007-06
@@ -442,7 +569,10 @@ mod tests {
             (with(|p| p.limit_cap = U128(999_999)), "limit_cap"),
         ] {
             let msg = panic_message(&p);
-            assert!(msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {field}")), "{msg}");
+            assert!(
+                msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {field}")),
+                "{msg}"
+            );
         }
     }
 
@@ -457,13 +587,19 @@ mod tests {
             (with(|p| p.limit_growth = 10_001), "limit_growth"),
             (with(|p| p.limit_cap = U128(100_000_000_001)), "limit_cap"),
             (with(|p| p.limit_decay = 5_001), "limit_decay"),
-            (with(|p| p.fees.clearing_fee_bps = 101), "fees.clearing_fee_bps"),
+            (
+                with(|p| p.fees.clearing_fee_bps = 101),
+                "fees.clearing_fee_bps",
+            ),
             (with(|p| p.fees.solver_fee_bps = 101), "fees.solver_fee_bps"),
         ];
         assert_eq!(cases.len(), 9);
         for (p, field) in cases {
             let msg = panic_message(&p);
-            assert!(msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {field}")), "{msg}");
+            assert!(
+                msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {field}")),
+                "{msg}"
+            );
         }
     }
 
@@ -474,15 +610,26 @@ mod tests {
             p.epoch_length = 1;
             p.limit_decay = 9_999;
         }));
-        assert!(msg.contains("ERR_PARAM_OUT_OF_RANGE: epoch_length"), "{msg}");
+        assert!(
+            msg.contains("ERR_PARAM_OUT_OF_RANGE: epoch_length"),
+            "{msg}"
+        );
     }
 
     // TC-CT-007-09
     #[test]
     fn tc_ct_007_09_admission_values() {
-        assert_eq!(serde_json::from_str::<Admission>("\"open\"").unwrap(), Admission::Open);
-        assert_eq!(serde_json::from_str::<Admission>("\"dao\"").unwrap(), Admission::Dao);
-        let err = serde_json::from_str::<Admission>("\"closed\"").unwrap_err().to_string();
+        assert_eq!(
+            serde_json::from_str::<Admission>("\"open\"").unwrap(),
+            Admission::Open
+        );
+        assert_eq!(
+            serde_json::from_str::<Admission>("\"dao\"").unwrap(),
+            Admission::Dao
+        );
+        let err = serde_json::from_str::<Admission>("\"closed\"")
+            .unwrap_err()
+            .to_string();
         assert!(!err.contains("ERR_"), "{err}");
     }
 
@@ -525,13 +672,20 @@ mod tests {
         near_sdk::test_utils::get_logs()
             .iter()
             .filter(|l| l.contains("params_updated"))
-            .map(|l| serde_json::from_str::<serde_json::Value>(l.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone())
+            .map(|l| {
+                serde_json::from_str::<serde_json::Value>(l.trim_start_matches("EVENT_JSON:"))
+                    .unwrap()["data"][0]
+                    .clone()
+            })
             .collect()
     }
 
     fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).expect_err("expected a panic");
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     // TC-CT-040-01
@@ -571,7 +725,9 @@ mod tests {
     fn tc_ct_040_03_not_owner() {
         let mut c = circle(Params::default());
         as_caller("translator.near", 2_000);
-        let msg = panic_text(std::panic::AssertUnwindSafe(|| c.set_params(with(|p| p.payment_window = 2_700))));
+        let msg = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.set_params(with(|p| p.payment_window = 2_700))
+        }));
         assert!(msg.contains("ERR_NOT_OWNER"), "{msg}");
         assert!(c.get_pending_params().is_none());
     }
@@ -581,8 +737,13 @@ mod tests {
     fn tc_ct_040_04_out_of_range() {
         let mut c = circle(Params::default());
         as_caller("dao.near", 2_000);
-        let msg = panic_text(std::panic::AssertUnwindSafe(|| c.set_params(with(|p| p.payment_window = 899))));
-        assert!(msg.contains("ERR_PARAM_OUT_OF_RANGE: payment_window"), "{msg}");
+        let msg = panic_text(std::panic::AssertUnwindSafe(|| {
+            c.set_params(with(|p| p.payment_window = 899))
+        }));
+        assert!(
+            msg.contains("ERR_PARAM_OUT_OF_RANGE: payment_window"),
+            "{msg}"
+        );
         assert!(c.get_pending_params().is_none());
     }
 
@@ -610,7 +771,10 @@ mod tests {
             p.epoch_length = 7_200;
             p.limit_cap = U128(2_000_000_000);
         }));
-        assert_eq!(params_events()[0]["changed"], serde_json::json!(["epoch_length", "limit_cap"]));
+        assert_eq!(
+            params_events()[0]["changed"],
+            serde_json::json!(["epoch_length", "limit_cap"])
+        );
     }
 
     #[test]
@@ -652,7 +816,10 @@ mod tests {
     // ---- CT-094: the bond rules ride next to Params, not inside its Borsh ----
 
     fn as_owner() {
-        testing_env!(VMContextBuilder::new().predecessor_account_id("dao.near".parse().unwrap()).block_timestamp(2_000).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id("dao.near".parse().unwrap())
+            .block_timestamp(2_000)
+            .build());
     }
 
     // TC-CT-094-P01
@@ -660,23 +827,46 @@ mod tests {
     fn the_bond_rules_have_defaults_ranges_and_a_json_that_older_clients_may_leave_out() {
         let c = circle(Params::default());
         assert_eq!(current_rules(), (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS));
-        assert_eq!((c.get_params().bond_threshold, c.get_params().bond_bps), (U128(100_000_000), 2_000));
+        assert_eq!(
+            (c.get_params().bond_threshold, c.get_params().bond_bps),
+            (U128(100_000_000), 2_000)
+        );
         // a set_params call that does not know the two fields
         let old_client = r#"{"epoch_length":3600,"payment_window":1800,"proposal_window":600,"base_limit_ratio":8000,"limit_growth":1000,"limit_cap":"1000000000","limit_decay":0,"fees":{"clearing_fee_bps":0,"solver_fee_bps":0},"admission":"open"}"#;
         let parsed: Params = serde_json::from_str(old_client).unwrap();
-        assert_eq!((parsed.bond_threshold, parsed.bond_bps, parsed.max_search_share_bps), (U128(100_000_000), 2_000, 500));
+        assert_eq!(
+            (
+                parsed.bond_threshold,
+                parsed.bond_bps,
+                parsed.max_search_share_bps
+            ),
+            (U128(100_000_000), 2_000, 500)
+        );
         validate_params(&parsed);
         for (name, p) in [
-            ("bond_threshold", with(|p| p.bond_threshold = U128(BOND_THRESHOLD_MIN - 1))),
-            ("bond_threshold", with(|p| p.bond_threshold = U128(BOND_THRESHOLD_MAX + 1))),
+            (
+                "bond_threshold",
+                with(|p| p.bond_threshold = U128(BOND_THRESHOLD_MIN - 1)),
+            ),
+            (
+                "bond_threshold",
+                with(|p| p.bond_threshold = U128(BOND_THRESHOLD_MAX + 1)),
+            ),
             ("bond_bps", with(|p| p.bond_bps = BOND_BPS_MIN - 1)),
             ("bond_bps", with(|p| p.bond_bps = BOND_BPS_MAX + 1)),
         ] {
             let msg = panic_text(std::panic::AssertUnwindSafe(|| validate_params(&p)));
-            assert!(msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {name}")), "{msg}");
+            assert!(
+                msg.contains(&format!("ERR_PARAM_OUT_OF_RANGE: {name}")),
+                "{msg}"
+            );
         }
-        validate_params(&with(|p| (p.bond_threshold, p.bond_bps) = (U128(BOND_THRESHOLD_MIN), BOND_BPS_MIN)));
-        validate_params(&with(|p| (p.bond_threshold, p.bond_bps) = (U128(BOND_THRESHOLD_MAX), BOND_BPS_MAX)));
+        validate_params(&with(|p| {
+            (p.bond_threshold, p.bond_bps) = (U128(BOND_THRESHOLD_MIN), BOND_BPS_MIN)
+        }));
+        validate_params(&with(|p| {
+            (p.bond_threshold, p.bond_bps) = (U128(BOND_THRESHOLD_MAX), BOND_BPS_MAX)
+        }));
     }
 
     // TC-CT-094-P02: pending until the next epoch, then in force; the event says what changed
@@ -686,15 +876,33 @@ mod tests {
         as_owner();
         let new = with(|p| (p.bond_threshold, p.bond_bps) = (U128(50_000_000), 1_000));
         c.set_params(new.clone());
-        assert!(near_sdk::test_utils::get_logs().iter().any(|l| l.contains("params_updated") && l.contains("\"bond_threshold\"") && l.contains("bond_bps")));
-        assert_eq!(current_rules(), (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS), "not in force yet");
+        assert!(near_sdk::test_utils::get_logs()
+            .iter()
+            .any(|l| l.contains("params_updated")
+                && l.contains("\"bond_threshold\"")
+                && l.contains("bond_bps")));
+        assert_eq!(
+            current_rules(),
+            (DEFAULT_BOND_THRESHOLD, DEFAULT_BOND_BPS),
+            "not in force yet"
+        );
         assert_eq!(c.get_params().bond_bps, 2_000);
         let pending = c.get_pending_params().unwrap();
-        assert_eq!((pending.params.bond_threshold, pending.params.bond_bps, pending.effective_epoch), (U128(50_000_000), 1_000, 2));
+        assert_eq!(
+            (
+                pending.params.bond_threshold,
+                pending.params.bond_bps,
+                pending.effective_epoch
+            ),
+            (U128(50_000_000), 1_000, 2)
+        );
         // the epoch turns: the pending params and the rules come in together
         apply_pending_rules(2);
         assert_eq!(current_rules(), (50_000_000, 1_000));
-        assert_eq!((c.get_params().bond_threshold, c.get_params().bond_bps), (U128(50_000_000), 1_000));
+        assert_eq!(
+            (c.get_params().bond_threshold, c.get_params().bond_bps),
+            (U128(50_000_000), 1_000)
+        );
         // back to the defaults removes the key
         c.set_params(Params::default());
         apply_pending_rules(2);
@@ -706,7 +914,10 @@ mod tests {
     #[test]
     fn the_borsh_of_params_does_not_carry_the_bond_rules() {
         let a = near_sdk::borsh::to_vec(&Params::default()).unwrap();
-        let b = near_sdk::borsh::to_vec(&with(|p| (p.bond_threshold, p.bond_bps) = (U128(50_000_000), 1_000))).unwrap();
+        let b = near_sdk::borsh::to_vec(&with(|p| {
+            (p.bond_threshold, p.bond_bps) = (U128(50_000_000), 1_000)
+        }))
+        .unwrap();
         assert_eq!(a, b, "the two fields are skipped");
         let back: Params = near_sdk::borsh::from_slice(&b).unwrap();
         assert_eq!(back.epoch_length, 3_600);

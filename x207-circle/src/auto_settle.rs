@@ -29,7 +29,9 @@ fn on_since(account: &AccountId) -> Option<u64> {
 
 impl X207Circle {
     fn set_auto_settle_for(&mut self, account: AccountId, enabled: bool) {
-        let Some(member) = self.members.get(&account) else { env::panic_str(&format!("ERR_NOT_MEMBER: {account}")) };
+        let Some(member) = self.members.get(&account) else {
+            env::panic_str(&format!("ERR_NOT_MEMBER: {account}"))
+        };
         if member.status == MemberStatus::Exited {
             env::panic_str(&format!("ERR_MEMBER_EXITED: {account}"));
         }
@@ -42,12 +44,21 @@ impl X207Circle {
             map.remove(&account);
         }
         map.flush();
-        AutoSettleSet { account_id: account, enabled }.emit();
+        AutoSettleSet {
+            account_id: account,
+            enabled,
+        }
+        .emit();
     }
 
     /// Called by `finalize_epoch` for a debtor whose `due` is unpaid. `None` leaves the debtor to the default path:
     /// not opted in, not `active`, or a free stake (stake minus a locked bond) below the `due`.
-    pub(crate) fn try_auto_settle(&mut self, epoch: EpochId, account: &AccountId, block: u64) -> Option<AutoSettled> {
+    pub(crate) fn try_auto_settle(
+        &mut self,
+        epoch: EpochId,
+        account: &AccountId,
+        block: u64,
+    ) -> Option<AutoSettled> {
         // opt-in must predate the commit of this epoch: no opting in after the due is known (review M1)
         let since = on_since(account)?;
         if since > self.epoch_or_panic(epoch).committed_at? {
@@ -56,7 +67,12 @@ impl X207Circle {
         let key = (epoch, account.clone());
         let due = self.positions.get(&key)?.amount;
         let member = self.members.get(account)?;
-        if member.status != MemberStatus::Active || member.stake.saturating_sub(crate::deal::bond_locked_of(account)) < due {
+        if member.status != MemberStatus::Active
+            || member
+                .stake
+                .saturating_sub(crate::deal::bond_locked_of(account))
+                < due
+        {
             return None;
         }
         self.d6_stake_to_pool(epoch, due);
@@ -71,9 +87,9 @@ impl X207Circle {
             .transition(PositionStatus::Paid, block)
             .unwrap_or_else(|reason| env::panic_str(&reason));
         let debt = self.outstanding_debt.get(account).copied().unwrap_or(0);
-        let debt = debt
-            .checked_sub(due)
-            .unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: outstanding_debt below the auto-settled due"));
+        let debt = debt.checked_sub(due).unwrap_or_else(|| {
+            env::panic_str("ERR_D2_ACCOUNTING: outstanding_debt below the auto-settled due")
+        });
         self.outstanding_debt.insert(account.clone(), debt);
         Some(AutoSettled {
             epoch,
@@ -110,8 +126,14 @@ impl X207Circle {
         max_fee: U128,
         signature: String,
     ) -> PromiseOrValue<bool> {
-        let action = if enabled { "auto_settle" } else { "auto_settle_off" };
-        crate::evm::authorize(&member, action, 0, "", nonce, deadline, max_fee.0, &signature);
+        let action = if enabled {
+            "auto_settle"
+        } else {
+            "auto_settle_off"
+        };
+        crate::evm::authorize(
+            &member, action, 0, "", nonce, deadline, max_fee.0, &signature,
+        );
         self.set_auto_settle_for(member.clone(), enabled);
         self.charge_action_fee(&member, action, max_fee.0)
     }

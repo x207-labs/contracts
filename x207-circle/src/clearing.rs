@@ -116,7 +116,9 @@ impl Epoch {
         match self.phase {
             EpochPhase::Open if now >= self.cutoff_at => EpochPhaseView::Cutoff,
             EpochPhase::Open => EpochPhaseView::Open,
-            EpochPhase::Clearing if self.proposal_deadline.is_some_and(|d| now >= d) => EpochPhaseView::Commit,
+            EpochPhase::Clearing if self.proposal_deadline.is_some_and(|d| now >= d) => {
+                EpochPhaseView::Commit
+            }
             EpochPhase::Clearing => EpochPhaseView::Clearing,
             EpochPhase::PaymentWindow => EpochPhaseView::PaymentWindow,
             EpochPhase::Finalized => EpochPhaseView::Finalized,
@@ -127,7 +129,10 @@ impl Epoch {
     pub fn require_phase(&self, expected: EpochPhase) {
         require!(
             self.phase == expected,
-            format!("ERR_WRONG_PHASE: epoch {} is {:?}, expected {:?}", self.epoch, self.phase, expected)
+            format!(
+                "ERR_WRONG_PHASE: epoch {} is {:?}, expected {:?}",
+                self.epoch, self.phase, expected
+            )
         );
     }
 
@@ -135,7 +140,10 @@ impl Epoch {
     /// the epoch's own params snapshot.
     pub fn start_clearing(&mut self, now: u64) {
         self.require_phase(EpochPhase::Open);
-        require!(now >= self.cutoff_at, format!("ERR_BEFORE_CUTOFF: cutoff_at {}", self.cutoff_at));
+        require!(
+            now >= self.cutoff_at,
+            format!("ERR_BEFORE_CUTOFF: cutoff_at {}", self.cutoff_at)
+        );
         self.phase = EpochPhase::Clearing;
         self.closed_at = Some(now);
         self.proposal_deadline = Some(now + self.params.proposal_window * NS_PER_SEC);
@@ -144,8 +152,13 @@ impl Epoch {
     /// `clearing -> payment_window` (`commit_epoch`): needs `now >= proposal_deadline`.
     pub fn start_payment_window(&mut self, now: u64) {
         self.require_phase(EpochPhase::Clearing);
-        let deadline = self.proposal_deadline.expect("clearing epoch has proposal_deadline");
-        require!(now >= deadline, format!("ERR_PROPOSAL_WINDOW_OPEN: proposal_deadline {}", deadline));
+        let deadline = self
+            .proposal_deadline
+            .expect("clearing epoch has proposal_deadline");
+        require!(
+            now >= deadline,
+            format!("ERR_PROPOSAL_WINDOW_OPEN: proposal_deadline {}", deadline)
+        );
         self.phase = EpochPhase::PaymentWindow;
         self.committed_at = Some(now);
         self.payment_deadline = Some(now + self.params.payment_window * NS_PER_SEC);
@@ -154,8 +167,13 @@ impl Epoch {
     /// `payment_window -> finalized` (`finalize_epoch`): needs `now >= payment_deadline`.
     pub fn finalize(&mut self, now: u64) {
         self.require_phase(EpochPhase::PaymentWindow);
-        let deadline = self.payment_deadline.expect("payment_window epoch has payment_deadline");
-        require!(now >= deadline, format!("ERR_PAYMENT_WINDOW_OPEN: payment_deadline {}", deadline));
+        let deadline = self
+            .payment_deadline
+            .expect("payment_window epoch has payment_deadline");
+        require!(
+            now >= deadline,
+            format!("ERR_PAYMENT_WINDOW_OPEN: payment_deadline {}", deadline)
+        );
         self.phase = EpochPhase::Finalized;
         self.finalized_at = Some(now);
     }
@@ -207,11 +225,15 @@ pub struct EpochView {
 impl X207Circle {
     /// The epoch record, or panics `ERR_UNKNOWN_EPOCH`.
     pub fn epoch_or_panic(&self, epoch: EpochId) -> &Epoch {
-        self.epochs.get(&epoch).unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch}")))
+        self.epochs
+            .get(&epoch)
+            .unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch}")))
     }
 
     pub fn epoch_mut_or_panic(&mut self, epoch: EpochId) -> &mut Epoch {
-        self.epochs.get_mut(&epoch).unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch}")))
+        self.epochs
+            .get_mut(&epoch)
+            .unwrap_or_else(|| env::panic_str(&format!("ERR_UNKNOWN_EPOCH: {epoch}")))
     }
 }
 
@@ -235,9 +257,15 @@ impl X207Circle {
         let now = env::block_timestamp();
         let closing = self.epoch_mut_or_panic(epoch);
         closing.start_clearing(now);
-        let (closed_at, proposal_deadline) = (closing.closed_at.unwrap(), closing.proposal_deadline.unwrap());
-        let (edge_count, participant_count, total_obligation) =
-            (closing.edge_count, closing.participant_count, closing.total_obligation);
+        let (closed_at, proposal_deadline) = (
+            closing.closed_at.unwrap(),
+            closing.proposal_deadline.unwrap(),
+        );
+        let (edge_count, participant_count, total_obligation) = (
+            closing.edge_count,
+            closing.participant_count,
+            closing.total_obligation,
+        );
         let (prev_cutoff_at, closing_params) = (closing.cutoff_at, closing.params.clone());
 
         let next = epoch + 1;
@@ -252,7 +280,8 @@ impl X207Circle {
             }
         };
         let next_cutoff_at = next_cutoff_at(prev_cutoff_at, now, params.epoch_length);
-        self.epochs.insert(next, Epoch::open(next, now, next_cutoff_at, params));
+        self.epochs
+            .insert(next, Epoch::open(next, now, next_cutoff_at, params));
         crate::params::snapshot_epoch_rules(next);
         self.current_epoch = next;
 
@@ -275,16 +304,26 @@ impl X207Circle {
         let now = env::block_timestamp();
         let e = self.epoch_or_panic(epoch);
         e.require_phase(EpochPhase::Clearing);
-        let deadline = e.proposal_deadline.expect("clearing epoch has proposal_deadline");
-        require!(now < deadline, format!("ERR_PROPOSAL_WINDOW_CLOSED: proposal_deadline {deadline}"));
-        let cleared_total = self.verify_clearing(epoch, &edges).unwrap_or_else(|reason| env::panic_str(&reason));
+        let deadline = e
+            .proposal_deadline
+            .expect("clearing epoch has proposal_deadline");
+        require!(
+            now < deadline,
+            format!("ERR_PROPOSAL_WINDOW_CLOSED: proposal_deadline {deadline}")
+        );
+        let cleared_total = self
+            .verify_clearing(epoch, &edges)
+            .unwrap_or_else(|reason| env::panic_str(&reason));
         let edge_count = edges.len() as u32;
         require!(
             self.beats_stored(epoch, cleared_total, edge_count),
             "ERR_PROPOSAL_NOT_BETTER: stored proposal is at least as good"
         );
         // CT-099 (B8-F3): the hash of the stored edges, in a raw key so that the stored `ClearingProposal` keeps its layout; it is the `edges_hash` that `commit_epoch` will log
-        env::storage_write(&proposal_hash_key(epoch), crate::events::edges_hash(&edges).as_bytes());
+        env::storage_write(
+            &proposal_hash_key(epoch),
+            crate::events::edges_hash(&edges).as_bytes(),
+        );
         let solver = env::predecessor_account_id();
         let replaced = self.proposals.insert(
             epoch,
@@ -313,7 +352,11 @@ impl X207Circle {
 
 /// Raw key of the hash of the proposal of `epoch` (CT-099).
 pub(crate) fn proposal_hash_key(epoch: EpochId) -> Vec<u8> {
-    [b"x207_proposal_hash:".as_slice(), epoch.to_string().as_bytes()].concat()
+    [
+        b"x207_proposal_hash:".as_slice(),
+        epoch.to_string().as_bytes(),
+    ]
+    .concat()
 }
 
 /// D4 proposal (spec 3.6, prefix `q`). `edges` is emptied by `commit_epoch`.
@@ -350,7 +393,10 @@ mod tests {
             limit_growth: 1000,
             limit_cap: U128(1_000_000_000),
             limit_decay: 0,
-            fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
+            fees: Fees {
+                clearing_fee_bps: 0,
+                solver_fee_bps: 0,
+            },
             admission: Admission::Open,
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
@@ -388,7 +434,13 @@ mod tests {
         assert_eq!(v["phase"], json!("open"));
         assert_eq!(v["opened_at"], json!("1000"));
         assert_eq!(v["cutoff_at"], json!((1_000 + 3600 * SEC).to_string()));
-        for f in ["closed_at", "proposal_deadline", "committed_at", "payment_deadline", "finalized_at"] {
+        for f in [
+            "closed_at",
+            "proposal_deadline",
+            "committed_at",
+            "payment_deadline",
+            "finalized_at",
+        ] {
             assert_eq!(v[f], serde_json::Value::Null, "{f}");
         }
         assert_eq!(v["params"]["epoch_length"], json!(3600));
@@ -411,7 +463,10 @@ mod tests {
         epoch1(&mut c).start_clearing(t_cut);
         let t_prop = t_cut + 600 * SEC;
         at(t_prop - 1);
-        assert_eq!(c.get_epoch(Some(1)).unwrap().phase, EpochPhaseView::Clearing);
+        assert_eq!(
+            c.get_epoch(Some(1)).unwrap().phase,
+            EpochPhaseView::Clearing
+        );
         at(t_prop);
         assert_eq!(c.get_epoch(Some(1)).unwrap().phase, EpochPhaseView::Commit);
     }
@@ -421,13 +476,29 @@ mod tests {
         let mut c = circle(0);
         let e = epoch1(&mut c);
         e.start_clearing(3600 * SEC);
-        assert_eq!((e.phase, e.closed_at, e.proposal_deadline), (EpochPhase::Clearing, Some(3600 * SEC), Some(4200 * SEC)));
+        assert_eq!(
+            (e.phase, e.closed_at, e.proposal_deadline),
+            (EpochPhase::Clearing, Some(3600 * SEC), Some(4200 * SEC))
+        );
         e.start_payment_window(4200 * SEC);
-        assert_eq!((e.phase, e.committed_at, e.payment_deadline), (EpochPhase::PaymentWindow, Some(4200 * SEC), Some(6000 * SEC)));
+        assert_eq!(
+            (e.phase, e.committed_at, e.payment_deadline),
+            (
+                EpochPhase::PaymentWindow,
+                Some(4200 * SEC),
+                Some(6000 * SEC)
+            )
+        );
         e.finalize(6000 * SEC);
-        assert_eq!((e.phase, e.finalized_at), (EpochPhase::Finalized, Some(6000 * SEC)));
+        assert_eq!(
+            (e.phase, e.finalized_at),
+            (EpochPhase::Finalized, Some(6000 * SEC))
+        );
         at(6000 * SEC);
-        assert_eq!(c.get_epoch(Some(1)).unwrap().phase, EpochPhaseView::Finalized);
+        assert_eq!(
+            c.get_epoch(Some(1)).unwrap().phase,
+            EpochPhaseView::Finalized
+        );
     }
 
     #[test]
@@ -534,7 +605,10 @@ mod tests {
     fn tc_ct_014_13_next_cutoff_when_late_and_at_boundary() {
         let l = 3600 * SEC;
         let prev = 10 * l;
-        assert_eq!(next_cutoff_at(prev, prev + l + SEC, 3600), prev + l + SEC + l);
+        assert_eq!(
+            next_cutoff_at(prev, prev + l + SEC, 3600),
+            prev + l + SEC + l
+        );
         assert_eq!(next_cutoff_at(prev, prev + l, 3600), prev + l + l);
         assert_eq!(next_cutoff_at(prev, prev + l - 1, 3600), prev + l);
     }
@@ -552,7 +626,8 @@ mod tests {
     #[test]
     fn tc_ct_014_11_overlapping_epochs_keep_own_phase() {
         let mut c = circle(0);
-        c.epochs.insert(2, Epoch::open(2, 3600 * SEC, 7200 * SEC, params()));
+        c.epochs
+            .insert(2, Epoch::open(2, 3600 * SEC, 7200 * SEC, params()));
         c.current_epoch = 2;
         let e1 = epoch1(&mut c);
         e1.start_clearing(3600 * SEC);
@@ -560,7 +635,10 @@ mod tests {
         assert_eq!(c.epochs.get(&2).unwrap().phase, EpochPhase::Open);
         at(4200 * SEC);
         assert_eq!(c.get_epoch(None).unwrap().epoch, 2);
-        assert_eq!(c.get_epoch(Some(1)).unwrap().phase, EpochPhaseView::PaymentWindow);
+        assert_eq!(
+            c.get_epoch(Some(1)).unwrap().phase,
+            EpochPhaseView::PaymentWindow
+        );
     }
 
     fn logs() -> Vec<String> {
@@ -568,8 +646,13 @@ mod tests {
     }
 
     fn event(name: &str) -> serde_json::Value {
-        let line = logs().into_iter().find(|l| l.contains(&format!("\"event\":\"{name}\""))).expect("event logged");
-        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone()
+        let line = logs()
+            .into_iter()
+            .find(|l| l.contains(&format!("\"event\":\"{name}\"")))
+            .expect("event logged");
+        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()
+            ["data"][0]
+            .clone()
     }
 
     #[test]
@@ -585,10 +668,16 @@ mod tests {
         at(t_cut + 5 * SEC);
         c.close_epoch(1);
         let e1 = c.epochs.get(&1).unwrap();
-        assert_eq!((e1.phase, e1.closed_at), (EpochPhase::Clearing, Some(t_cut + 5 * SEC)));
+        assert_eq!(
+            (e1.phase, e1.closed_at),
+            (EpochPhase::Clearing, Some(t_cut + 5 * SEC))
+        );
         assert_eq!(e1.proposal_deadline, Some(t_cut + 5 * SEC + 600 * SEC));
         let e2 = c.epochs.get(&2).unwrap();
-        assert_eq!((e2.phase, e2.opened_at, e2.cutoff_at), (EpochPhase::Open, t_cut + 5 * SEC, t_cut + 3600 * SEC));
+        assert_eq!(
+            (e2.phase, e2.opened_at, e2.cutoff_at),
+            (EpochPhase::Open, t_cut + 5 * SEC, t_cut + 3600 * SEC)
+        );
         assert_eq!(c.current_epoch, 2);
         let ev = event("epoch_cutoff");
         assert_eq!(
@@ -653,7 +742,14 @@ mod tests {
         at(3600 * SEC);
         c.close_epoch(1);
         let ev = event("epoch_cutoff");
-        assert_eq!((&ev["edge_count"], &ev["participant_count"], &ev["total_obligation"]), (&json!(0), &json!(0), &json!("0")));
+        assert_eq!(
+            (
+                &ev["edge_count"],
+                &ev["participant_count"],
+                &ev["total_obligation"]
+            ),
+            (&json!(0), &json!(0), &json!("0"))
+        );
     }
 
     #[test]
@@ -661,7 +757,10 @@ mod tests {
         let mut c = circle(0);
         let mut new = params();
         new.epoch_length = 7200;
-        c.pending_params = Some(crate::state::PendingParams { params: new.clone(), effective_epoch: 2 });
+        c.pending_params = Some(crate::state::PendingParams {
+            params: new.clone(),
+            effective_epoch: 2,
+        });
         at(3600 * SEC);
         c.close_epoch(1);
         assert_eq!(c.get_epoch(Some(1)).unwrap().params, params());
@@ -713,11 +812,18 @@ mod submit_tests {
     }
 
     fn edge(d: &str, c: &str, cleared: u128) -> ClearingEdge {
-        ClearingEdge { debtor: acc(d), creditor: acc(c), cleared: U128(cleared * CREDIT) }
+        ClearingEdge {
+            debtor: acc(d),
+            creditor: acc(c),
+            cleared: U128(cleared * CREDIT),
+        }
     }
 
     fn as_solver(solver: &str, now: u64) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(solver)).block_timestamp(now).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc(solver))
+            .block_timestamp(now)
+            .build());
     }
 
     /// Epoch 1 in `clearing`: 3-cycle x->y->z->x of 10 each, 2-cycle p<->q of 20 each.
@@ -731,7 +837,10 @@ mod submit_tests {
             limit_growth: 1000,
             limit_cap: U128(1_000_000_000),
             limit_decay: 0,
-            fees: Fees { clearing_fee_bps: 0, solver_fee_bps: 0 },
+            fees: Fees {
+                clearing_fee_bps: 0,
+                solver_fee_bps: 0,
+            },
             admission: Admission::Open,
             max_search_share_bps: 500,
             bond_threshold: near_sdk::json_types::U128(100_000_000),
@@ -739,9 +848,29 @@ mod submit_tests {
             prune_delay_epochs: 2,
             relayer_fee: U128(0),
         };
-        let mut c = X207Circle::with_config(acc("dao"), "agents-main".into(), acc("usdt"), acc("intents"), params, 0);
-        for (d, k, v) in [("x", "y", 10), ("y", "z", 10), ("z", "x", 10), ("p", "q", 20), ("q", "p", 20)] {
-            c.pairs.insert((1, acc(d), acc(k)), PairState { cumulative: v * CREDIT, last_seq: 1, cleared: 0 });
+        let mut c = X207Circle::with_config(
+            acc("dao"),
+            "agents-main".into(),
+            acc("usdt"),
+            acc("intents"),
+            params,
+            0,
+        );
+        for (d, k, v) in [
+            ("x", "y", 10),
+            ("y", "z", 10),
+            ("z", "x", 10),
+            ("p", "q", 20),
+            ("q", "p", 20),
+        ] {
+            c.pairs.insert(
+                (1, acc(d), acc(k)),
+                PairState {
+                    cumulative: v * CREDIT,
+                    last_seq: 1,
+                    cleared: 0,
+                },
+            );
             c.epochs.get_mut(&1).unwrap().edges.push((acc(d), acc(k)));
         }
         c.epochs.get_mut(&1).unwrap().start_clearing(T_CLOSE);
@@ -771,8 +900,14 @@ mod submit_tests {
     }
 
     fn event() -> serde_json::Value {
-        let line = get_logs().into_iter().rev().find(|l| l.contains("clearing_submitted")).unwrap();
-        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()["data"][0].clone()
+        let line = get_logs()
+            .into_iter()
+            .rev()
+            .find(|l| l.contains("clearing_submitted"))
+            .unwrap();
+        serde_json::from_str::<serde_json::Value>(line.trim_start_matches("EVENT_JSON:")).unwrap()
+            ["data"][0]
+            .clone()
     }
 
     #[test]
@@ -780,9 +915,15 @@ mod submit_tests {
         let mut c = s2();
         assert_eq!(submit(&mut c, "solver1", p3c()), U128(30 * CREDIT));
         let p = c.proposals.get(&1).unwrap();
-        assert_eq!((&p.solver, p.edge_count, p.committed), (&acc("solver1"), 3, false));
+        assert_eq!(
+            (&p.solver, p.edge_count, p.committed),
+            (&acc("solver1"), 3, false)
+        );
         assert_eq!(p.submitted_at, U64(T_CLOSE + SEC));
-        assert_eq!(c.obligation(1, acc("x"), acc("y")).unwrap().cleared, U128(0));
+        assert_eq!(
+            c.obligation(1, acc("x"), acc("y")).unwrap().cleared,
+            U128(0)
+        );
         assert_eq!(
             event(),
             json!({"epoch":1,"solver":"solver1.near","cleared_total":"30000000","edge_count":3,
@@ -796,9 +937,15 @@ mod submit_tests {
         submit(&mut c, "solver1", p3c());
         assert_eq!(submit(&mut c, "solver2", popt()), U128(40 * CREDIT));
         let p = c.proposals.get(&1).unwrap();
-        assert_eq!((&p.solver, p.cleared_total), (&acc("solver2"), U128(40 * CREDIT)));
+        assert_eq!(
+            (&p.solver, p.cleared_total),
+            (&acc("solver2"), U128(40 * CREDIT))
+        );
         let ev = event();
-        assert_eq!((&ev["replaced_solver"], &ev["replaced_cleared_total"]), (&json!("solver1.near"), &json!("30000000")));
+        assert_eq!(
+            (&ev["replaced_solver"], &ev["replaced_cleared_total"]),
+            (&json!("solver1.near"), &json!("30000000"))
+        );
     }
 
     #[test]
@@ -814,7 +961,9 @@ mod submit_tests {
         let mut c = s2();
         submit(&mut c, "solver1", popt());
         let before = c.proposals.get(&1).unwrap().clone();
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| submit(&mut c, "solver2", p2c())));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            submit(&mut c, "solver2", p2c())
+        }));
         assert!(r.is_err());
         assert_eq!(c.proposals.get(&1).unwrap(), &before);
     }
@@ -840,7 +989,9 @@ mod submit_tests {
     fn tc_ct_027_06_identical_resubmit_rejected() {
         let mut c = s2();
         submit(&mut c, "solver1", p2c());
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| submit(&mut c, "solver2", p2c())));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            submit(&mut c, "solver2", p2c())
+        }));
         assert!(r.is_err());
         assert_eq!(c.proposals.get(&1).unwrap().solver, acc("solver1"));
     }
@@ -849,7 +1000,10 @@ mod submit_tests {
     #[should_panic(expected = "ERR_WRONG_PHASE")]
     fn tc_ct_027_07_before_close() {
         let mut c = s2();
-        c.epochs.insert(1, Epoch::open(1, 0, T_CLOSE, c.epochs.get(&1).unwrap().params.clone()));
+        c.epochs.insert(
+            1,
+            Epoch::open(1, 0, T_CLOSE, c.epochs.get(&1).unwrap().params.clone()),
+        );
         submit(&mut c, "solver1", p3c());
     }
 
@@ -876,20 +1030,44 @@ mod submit_tests {
                 (0..=MAX_EDGES_PER_TX).map(|_| edge("x", "y", 1)).collect(),
                 "ERR_TOO_MANY_EDGES",
             ),
-            (vec![edge("x", "y", 0), edge("y", "z", 10), edge("z", "x", 10)], "ERR_ZERO_CLEARED"),
-            (vec![edge("p", "q", 5), edge("p", "q", 5), edge("q", "p", 10)], "ERR_DUPLICATE_EDGE"),
-            (vec![edge("x", "z", 5), edge("z", "x", 5)], "ERR_EDGE_NOT_IN_SNAPSHOT"),
-            (vec![edge("p", "q", 21), edge("q", "p", 21)], "ERR_CLEARED_EXCEEDS_OBLIGATION"),
-            (vec![edge("p", "q", 10), edge("q", "p", 5)], "ERR_UNBALANCED_MEMBER"),
+            (
+                vec![edge("x", "y", 0), edge("y", "z", 10), edge("z", "x", 10)],
+                "ERR_ZERO_CLEARED",
+            ),
+            (
+                vec![edge("p", "q", 5), edge("p", "q", 5), edge("q", "p", 10)],
+                "ERR_DUPLICATE_EDGE",
+            ),
+            (
+                vec![edge("x", "z", 5), edge("z", "x", 5)],
+                "ERR_EDGE_NOT_IN_SNAPSHOT",
+            ),
+            (
+                vec![edge("p", "q", 21), edge("q", "p", 21)],
+                "ERR_CLEARED_EXCEEDS_OBLIGATION",
+            ),
+            (
+                vec![edge("p", "q", 10), edge("q", "p", 5)],
+                "ERR_UNBALANCED_MEMBER",
+            ),
         ];
         for (edges, code) in cases {
             let mut c = s2();
             as_solver("solver1", T_CLOSE + SEC);
             let sim = c.simulate_clearing(1, edges.clone()).reason.unwrap();
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.submit_clearing(1, edges)));
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                c.submit_clearing(1, edges)
+            }));
             let msg = r.unwrap_err();
-            let msg = msg.downcast_ref::<String>().cloned().or_else(|| msg.downcast_ref::<&str>().map(|s| s.to_string())).unwrap();
-            assert!(msg.contains(code) && sim.starts_with(code), "{code}: {msg} / {sim}");
+            let msg = msg
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| msg.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap();
+            assert!(
+                msg.contains(code) && sim.starts_with(code),
+                "{code}: {msg} / {sim}"
+            );
             assert!(c.proposals.get(&1).is_none());
         }
     }

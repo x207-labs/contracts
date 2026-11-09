@@ -24,7 +24,12 @@ if [ -n "${X207_REPRO_TIMEOUT:-}" ]; then
   else echo "warning: neither timeout nor gtimeout found (brew install coreutils); running without a time limit" >&2; fi
 fi
 ${limit[@]+"${limit[@]}"} docker run --rm --platform linux/amd64 -v "$src:/home/near/code" -w /home/near/code "${image%%:*}@${digest}" \
-  bash -c 'cargo near build non-reproducible-wasm --locked && chmod -R a+rX target/near'
+  bash -c 'cargo near build non-reproducible-wasm --locked && if [ -f locker/Cargo.toml ]; then cargo near build non-reproducible-wasm --locked --manifest-path locker/Cargo.toml; fi && chmod -R a+rX target/near'
 cp "$src/target/near/x207_circle.wasm" "$out/x207_circle.wasm"
 cp "$src/target/near/x207_circle_abi.json" "$out/x207_circle_abi.json" 2>/dev/null || true
 shasum -a 256 "$out/x207_circle.wasm"
+# CT-125 (0.0.18): the locker contract has its own wasm and its own sha256
+if [ -f "$src/target/near/x207_locker/x207_locker.wasm" ]; then
+  cp "$src/target/near/x207_locker/x207_locker.wasm" "$out/x207_locker.wasm"
+  shasum -a 256 "$out/x207_locker.wasm"
+fi

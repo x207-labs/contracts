@@ -42,35 +42,99 @@ fn w128(v: u128) -> [u8; 32] {
 }
 
 fn digest(contract: &str, struct_hash: [u8; 32]) -> [u8; 32] {
-    let network = if contract.ends_with(".testnet") { "testnet" } else { "mainnet" };
+    let network = if contract.ends_with(".testnet") {
+        "testnet"
+    } else {
+        "mainnet"
+    };
     let salt = k(format!("near:{network}:{contract}").as_bytes());
-    let domain = k(&[k(b"EIP712Domain(string name,string version,bytes32 salt)"), ws("x207"), ws("1"), salt].concat());
+    let domain = k(&[
+        k(b"EIP712Domain(string name,string version,bytes32 salt)"),
+        ws("x207"),
+        ws("1"),
+        salt,
+    ]
+    .concat());
     k(&[&[0x19u8, 0x01][..], &domain, &struct_hash].concat())
 }
 
 fn sign(secret: &SecretKey, digest: [u8; 32]) -> String {
-    let (id, compact) = Secp256k1::new().sign_ecdsa_recoverable(&Message::from_slice(&digest).unwrap(), secret).serialize_compact();
+    let (id, compact) = Secp256k1::new()
+        .sign_ecdsa_recoverable(&Message::from_slice(&digest).unwrap(), secret)
+        .serialize_compact();
     let mut bytes = compact.to_vec();
     bytes.push(27 + id.to_i32() as u8);
-    format!("eip712:0x{}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    format!(
+        "eip712:0x{}",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    )
 }
 
 fn address(secret: &SecretKey) -> String {
-    let public = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), secret).serialize_uncompressed();
+    let public =
+        secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), secret).serialize_uncompressed();
     let hash = k(&public[1..]);
-    format!("0x{}", hash[12..].iter().map(|b| format!("{b:02x}")).collect::<String>())
+    format!(
+        "0x{}",
+        hash[12..]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn action_sig(secret: &SecretKey, contract: &str, member: &str, action: &str, epoch: u64, receiver: &str, terms: &str, nonce: u64, deadline: u64, max_fee: u128) -> String {
+fn action_sig(
+    secret: &SecretKey,
+    contract: &str,
+    member: &str,
+    action: &str,
+    epoch: u64,
+    receiver: &str,
+    terms: &str,
+    nonce: u64,
+    deadline: u64,
+    max_fee: u128,
+) -> String {
     let type_hash = ws("Action(string circle,string member,string action,uint64 epoch,string receiver,string termsHash,uint64 nonce,uint64 deadline,uint256 maxFee)");
-    let hash = k(&[type_hash, ws(contract), ws(member), ws(action), w64(epoch), ws(receiver), ws(terms), w64(nonce), w64(deadline), w128(max_fee)].concat());
+    let hash = k(&[
+        type_hash,
+        ws(contract),
+        ws(member),
+        ws(action),
+        w64(epoch),
+        ws(receiver),
+        ws(terms),
+        w64(nonce),
+        w64(deadline),
+        w128(max_fee),
+    ]
+    .concat());
     sign(secret, digest(contract, hash))
 }
 
-fn voucher_sig(secret: &SecretKey, contract: &str, payer: &str, payee: &str, epoch: u64, seq: u64, cumulative: u128) -> String {
+fn voucher_sig(
+    secret: &SecretKey,
+    contract: &str,
+    payer: &str,
+    payee: &str,
+    epoch: u64,
+    seq: u64,
+    cumulative: u128,
+) -> String {
     let type_hash = ws("Voucher(string circle,string payer,string payee,uint64 epoch,uint64 seq,uint256 cumulativeAmount,string unit,string resource)");
-    let hash = k(&[type_hash, ws(contract), ws(payer), ws(payee), w64(epoch), w64(seq), w128(cumulative), ws("credit"), ws("/api/x")].concat());
+    let hash = k(&[
+        type_hash,
+        ws(contract),
+        ws(payer),
+        ws(payee),
+        w64(epoch),
+        w64(seq),
+        w128(cumulative),
+        ws("credit"),
+        ws("/api/x"),
+    ]
+    .concat());
     sign(secret, digest(contract, hash))
 }
 
@@ -99,7 +163,11 @@ impl World {
     async fn finalized_on(exit: bool, intents: bool) -> anyhow::Result<World> {
         let mut params = Funded::params_short();
         params["relayer_fee"] = json!(FEE.to_string());
-        let mut f = if intents { Funded::deploy_with_intents(Some(params)).await? } else { Funded::deploy(Some(params)).await? };
+        let mut f = if intents {
+            Funded::deploy_with_intents(Some(params)).await?
+        } else {
+            Funded::deploy(Some(params)).await?
+        };
         let contract = f.circle.contract.id().to_string();
         let secret = SecretKey::from_slice(&[9u8; 32])?;
         let member = address(&secret);
@@ -109,7 +177,12 @@ impl World {
         let gpu = f.account("gpu").await?;
         assert!(f.join("gpu", Funded::join_deposit()).await?.is_success());
         assert!(f.stake(&gpu, 100 * CREDIT).await?.is_success());
-        let on = gpu.call(f.circle.contract.id(), "set_auto_settle").args_json(json!({"enabled": true})).deposit(NearToken::from_yoctonear(1)).transact().await?;
+        let on = gpu
+            .call(f.circle.contract.id(), "set_auto_settle")
+            .args_json(json!({"enabled": true}))
+            .deposit(NearToken::from_yoctonear(1))
+            .transact()
+            .await?;
         assert!(on.is_success(), "{:?}", failure_text(&on));
 
         let terms = "a".repeat(64);
@@ -121,13 +194,40 @@ impl World {
             .transact()
             .await?;
         assert!(join.is_success(), "join_evm: {:?}", failure_text(&join));
-        let stake = f.transfer_call(&f.usdt, &relayer, 100 * CREDIT, &json!({"action": "stake", "member_id": member}).to_string()).await?;
+        let stake = f
+            .transfer_call(
+                &f.usdt,
+                &relayer,
+                100 * CREDIT,
+                &json!({"action": "stake", "member_id": member}).to_string(),
+            )
+            .await?;
         assert!(stake.is_success(), "stake: {:?}", failure_text(&stake));
 
-        let mut w = World { f, secret, member, contract, deadline, relayer, recv, next_nonce: 0 };
+        let mut w = World {
+            f,
+            secret,
+            member,
+            contract,
+            deadline,
+            relayer,
+            recv,
+            next_nonce: 0,
+        };
         if exit {
             let nonce = w.take_nonce();
-            let sig = action_sig(&w.secret, &w.contract, &w.member, "request_exit", 0, "", "", nonce, w.deadline, 0);
+            let sig = action_sig(
+                &w.secret,
+                &w.contract,
+                &w.member,
+                "request_exit",
+                0,
+                "",
+                "",
+                nonce,
+                w.deadline,
+                0,
+            );
             let r = w
                 .relayer
                 .call(w.f.circle.contract.id(), "request_exit_evm")
@@ -141,19 +241,44 @@ impl World {
         // gpu owes the EVM member 20 credit and pays from its stake in finalize
         let amount = 20 * CREDIT;
         let voucher = json!({"circle": w.contract, "payer": common::circle::account_of("gpu"), "payee": w.member, "epoch": 1, "seq": 1, "cumulativeAmount": amount.to_string(), "unit": "credit", "resource": "https://example.test/api"});
-        let hash = common::circle::signing_hash(&w.contract, &common::circle::account_of("gpu"), &w.member, 1, 1, &amount.to_string(), "https://example.test/api");
+        let hash = common::circle::signing_hash(
+            &w.contract,
+            &common::circle::account_of("gpu"),
+            &w.member,
+            1,
+            1,
+            &amount.to_string(),
+            "https://example.test/api",
+        );
         let signature = {
             use ed25519_dalek::Signer;
-            format!("ed25519:{}", near_sdk::bs58::encode(w.f.circle.keys["gpu"].sign(&hash).to_bytes()).into_string())
+            format!(
+                "ed25519:{}",
+                near_sdk::bs58::encode(w.f.circle.keys["gpu"].sign(&hash).to_bytes()).into_string()
+            )
         };
-        let reg = w.relayer.call(w.f.circle.contract.id(), "register_cumulative").args_json(json!({"voucher": voucher, "signature": signature})).gas(Gas::from_tgas(100)).transact().await?;
-        assert!(reg.is_success(), "register_cumulative: {:?}", failure_text(&reg));
+        let reg = w
+            .relayer
+            .call(w.f.circle.contract.id(), "register_cumulative")
+            .args_json(json!({"voucher": voucher, "signature": signature}))
+            .gas(Gas::from_tgas(100))
+            .transact()
+            .await?;
+        assert!(
+            reg.is_success(),
+            "register_cumulative: {:?}",
+            failure_text(&reg)
+        );
         let _ = voucher_sig; // kept for symmetry with ct108
 
         let c = &w.f.circle;
         c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
-        assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
-        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?).await?;
+        assert!(c
+            .call_keeper("close_epoch", json!({"epoch": 1}))
+            .await?
+            .is_success());
+        c.advance_to(c.epoch_ts(1, "proposal_deadline").await?)
+            .await?;
         let commit = c.call_keeper("commit_epoch", json!({"epoch": 1})).await?;
         assert!(commit.is_success(), "commit: {:?}", failure_text(&commit));
         let fin = finalize(&w.f.circle).await?;
@@ -167,14 +292,29 @@ impl World {
         n
     }
 
-    async fn claim_evm(&mut self, max_fee: u128, deadline: Option<u64>) -> anyhow::Result<ExecutionFinalResult> {
+    async fn claim_evm(
+        &mut self,
+        max_fee: u128,
+        deadline: Option<u64>,
+    ) -> anyhow::Result<ExecutionFinalResult> {
         let nonce = self.take_nonce();
         let deadline = deadline.unwrap_or(self.deadline);
         let recv = match &self.f.intents {
             Some(i) => i.id().to_string(),
             None => self.recv.id().to_string(),
         };
-        let sig = action_sig(&self.secret, &self.contract, &self.member, "claim", 1, &recv, "", nonce, deadline, max_fee);
+        let sig = action_sig(
+            &self.secret,
+            &self.contract,
+            &self.member,
+            "claim",
+            1,
+            &recv,
+            "",
+            nonce,
+            deadline,
+            max_fee,
+        );
         Ok(self
             .relayer
             .call(self.f.circle.contract.id(), "claim_evm")
@@ -185,28 +325,70 @@ impl World {
     }
 
     /// CT-118 (0.0.17): `request_exit_evm` (`action` = "request_exit") or `set_auto_settle_evm` ("auto_settle" / "auto_settle_off") with a fee ceiling.
-    async fn small_action_evm(&mut self, action: &str, max_fee: u128) -> anyhow::Result<ExecutionFinalResult> {
+    async fn small_action_evm(
+        &mut self,
+        action: &str,
+        max_fee: u128,
+    ) -> anyhow::Result<ExecutionFinalResult> {
         let nonce = self.take_nonce();
-        let sig = action_sig(&self.secret, &self.contract, &self.member, action, 0, "", "", nonce, self.deadline, max_fee);
+        let sig = action_sig(
+            &self.secret,
+            &self.contract,
+            &self.member,
+            action,
+            0,
+            "",
+            "",
+            nonce,
+            self.deadline,
+            max_fee,
+        );
         let (method, args) = if action == "request_exit" {
-            ("request_exit_evm", json!({"member": self.member, "nonce": nonce, "deadline": self.deadline, "max_fee": max_fee.to_string(), "signature": sig}))
+            (
+                "request_exit_evm",
+                json!({"member": self.member, "nonce": nonce, "deadline": self.deadline, "max_fee": max_fee.to_string(), "signature": sig}),
+            )
         } else {
             (
                 "set_auto_settle_evm",
                 json!({"member": self.member, "enabled": action == "auto_settle", "nonce": nonce, "deadline": self.deadline, "max_fee": max_fee.to_string(), "signature": sig}),
             )
         };
-        Ok(self.relayer.call(self.f.circle.contract.id(), method).args_json(args).gas(Gas::from_tgas(100)).transact().await?)
+        Ok(self
+            .relayer
+            .call(self.f.circle.contract.id(), method)
+            .args_json(args)
+            .gas(Gas::from_tgas(100))
+            .transact()
+            .await?)
     }
 
     async fn member_stake(&self) -> anyhow::Result<String> {
-        Ok(self.f.circle.view("member", json!({"account_id": self.member})).await?["stake"].as_str().unwrap_or_default().to_string())
+        Ok(self
+            .f
+            .circle
+            .view("member", json!({"account_id": self.member}))
+            .await?["stake"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
     }
 
     async fn withdraw_evm(&mut self, max_fee: u128) -> anyhow::Result<ExecutionFinalResult> {
         let nonce = self.take_nonce();
         let recv = self.recv.id().to_string();
-        let sig = action_sig(&self.secret, &self.contract, &self.member, "withdraw_stake", 0, &recv, "", nonce, self.deadline, max_fee);
+        let sig = action_sig(
+            &self.secret,
+            &self.contract,
+            &self.member,
+            "withdraw_stake",
+            0,
+            &recv,
+            "",
+            nonce,
+            self.deadline,
+            max_fee,
+        );
         Ok(self
             .relayer
             .call(self.f.circle.contract.id(), "withdraw_stake_evm")
@@ -222,13 +404,25 @@ impl World {
 
     /// The relayer leaves the token (NEP-145 `storage_unregister`): it can no longer receive a transfer.
     async fn unregister_relayer(&self) -> anyhow::Result<()> {
-        let r = self.relayer.call(self.f.usdt.id(), "storage_unregister").args_json(json!({"force": true})).deposit(NearToken::from_yoctonear(1)).transact().await?;
+        let r = self
+            .relayer
+            .call(self.f.usdt.id(), "storage_unregister")
+            .args_json(json!({"force": true}))
+            .deposit(NearToken::from_yoctonear(1))
+            .transact()
+            .await?;
         assert!(r.is_success());
         Ok(())
     }
 
     async fn position(&self) -> anyhow::Result<Value> {
-        self.f.circle.view("net_position", json!({"epoch": 1, "account_id": self.member})).await
+        self.f
+            .circle
+            .view(
+                "net_position",
+                json!({"epoch": 1, "account_id": self.member}),
+            )
+            .await
     }
 }
 
@@ -243,10 +437,17 @@ async fn claim_evm_pays_the_registered_relayer() -> anyhow::Result<()> {
     let (relayer_before, recv_before) = (w.usdt(&w.relayer).await?, w.usdt(&w.recv).await?);
     let r = w.claim_evm(FEE, None).await?;
     assert!(r.is_success(), "claim_evm: {:?}", failure_text(&r));
-    println!("GAS claim_evm with fee (registered relayer): {:.1} Tgas", tgas(&r));
+    println!(
+        "GAS claim_evm with fee (registered relayer): {:.1} Tgas",
+        tgas(&r)
+    );
     assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE);
     assert_eq!(w.usdt(&w.recv).await? - recv_before, 20 * CREDIT - FEE);
-    assert!(has_event(&r, "relayer_fee_paid") && !has_event(&r, "relayer_fee_failed"), "{:?}", r.logs());
+    assert!(
+        has_event(&r, "relayer_fee_paid") && !has_event(&r, "relayer_fee_failed"),
+        "{:?}",
+        r.logs()
+    );
     assert_eq!(w.position().await?["status"], "claimed");
     w.f.assert_d6().await?;
     Ok(())
@@ -260,14 +461,30 @@ async fn unregistered_relayer_does_not_block_the_payout() -> anyhow::Result<()> 
     let recv_before = w.usdt(&w.recv).await?;
     let r = w.claim_evm(FEE, None).await?;
     assert!(r.is_success(), "claim_evm: {:?}", failure_text(&r));
-    assert_eq!(w.usdt(&w.recv).await? - recv_before, 20 * CREDIT - FEE, "payout lands");
-    assert!(has_event(&r, "relayer_fee_failed") && !has_event(&r, "relayer_fee_paid"), "{:?}", r.logs());
+    assert_eq!(
+        w.usdt(&w.recv).await? - recv_before,
+        20 * CREDIT - FEE,
+        "payout lands"
+    );
+    assert!(
+        has_event(&r, "relayer_fee_failed") && !has_event(&r, "relayer_fee_paid"),
+        "{:?}",
+        r.logs()
+    );
     let p = w.position().await?;
-    assert_eq!((p["status"].as_str(), p["amount"].as_str()), (Some("claimable"), Some(FEE.to_string().as_str())), "{p}");
+    assert_eq!(
+        (p["status"].as_str(), p["amount"].as_str()),
+        (Some("claimable"), Some(FEE.to_string().as_str())),
+        "{p}"
+    );
     w.f.assert_d6().await?;
     // a later claim (no fee) collects the rest
     let again = w.claim_evm(0, None).await?;
-    assert!(again.is_success(), "second claim: {:?}", failure_text(&again));
+    assert!(
+        again.is_success(),
+        "second claim: {:?}",
+        failure_text(&again)
+    );
     assert_eq!(w.usdt(&w.recv).await? - recv_before, 20 * CREDIT);
     w.f.assert_d6().await?;
     Ok(())
@@ -300,7 +517,12 @@ async fn withdraw_stake_evm_pays_the_relayer() -> anyhow::Result<()> {
     assert_eq!(w.usdt(&w.relayer).await? - relayer_before, 100_000);
     assert_eq!(w.usdt(&w.recv).await? - recv_before, 100 * CREDIT - 100_000);
     assert!(has_event(&r, "relayer_fee_paid"), "{:?}", r.logs());
-    assert_eq!(w.f.circle.view("member", json!({"account_id": w.member})).await?["status"], "exited");
+    assert_eq!(
+        w.f.circle
+            .view("member", json!({"account_id": w.member}))
+            .await?["status"],
+        "exited"
+    );
     w.f.assert_d6().await?;
     Ok(())
 }
@@ -315,9 +537,18 @@ async fn withdraw_with_unregistered_relayer_sends_the_fee_to_the_receiver() -> a
     let recv_before = w.usdt(&w.recv).await?;
     let r = w.withdraw_evm(FEE).await?;
     assert!(r.is_success(), "withdraw_stake_evm: {:?}", failure_text(&r));
-    assert_eq!(w.usdt(&w.recv).await? - recv_before, 100 * CREDIT, "payout and the failed fee both reach the receiver");
+    assert_eq!(
+        w.usdt(&w.recv).await? - recv_before,
+        100 * CREDIT,
+        "payout and the failed fee both reach the receiver"
+    );
     assert!(has_event(&r, "relayer_fee_failed"), "{:?}", r.logs());
-    assert_eq!(w.f.circle.view("member", json!({"account_id": w.member})).await?["status"], "exited");
+    assert_eq!(
+        w.f.circle
+            .view("member", json!({"account_id": w.member}))
+            .await?["status"],
+        "exited"
+    );
     w.f.assert_d6().await?;
     Ok(())
 }
@@ -328,7 +559,14 @@ async fn deadline_more_than_24_hours_ahead_is_refused() -> anyhow::Result<()> {
     let mut w = World::finalized(false).await?;
     let now_ms = w.f.circle.now_ns().await? / 1_000_000;
     let r = w.claim_evm(FEE, Some(now_ms + 25 * 3_600_000)).await?;
-    assert!(r.is_failure() && failure_text(&r).unwrap_or_default().contains("ERR_EVM_DEADLINE_TOO_FAR"), "{:?}", failure_text(&r));
+    assert!(
+        r.is_failure()
+            && failure_text(&r)
+                .unwrap_or_default()
+                .contains("ERR_EVM_DEADLINE_TOO_FAR"),
+        "{:?}",
+        failure_text(&r)
+    );
     Ok(())
 }
 
@@ -337,7 +575,11 @@ async fn deadline_more_than_24_hours_ahead_is_refused() -> anyhow::Result<()> {
 async fn relayer_fee_above_the_cap_is_refused() -> anyhow::Result<()> {
     let mut params = Funded::params_short();
     params["relayer_fee"] = json!("1000001");
-    let err = Funded::deploy(Some(params)).await.err().map(|e| format!("{e:?}")).unwrap_or_default();
+    let err = Funded::deploy(Some(params))
+        .await
+        .err()
+        .map(|e| format!("{e:?}"))
+        .unwrap_or_default();
     assert!(err.contains("relayer_fee"), "{err}");
     let mut ok = Funded::params_short();
     ok["relayer_fee"] = json!("1000000");
@@ -350,15 +592,32 @@ async fn relayer_fee_above_the_cap_is_refused() -> anyhow::Result<()> {
 async fn intents_partial_refund_with_fee() -> anyhow::Result<()> {
     let mut w = World::finalized_on(false, true).await?;
     let intents = w.f.intents.clone().unwrap();
-    intents.call("set_mode").args_json(json!({"mode": "refund", "refund": (5 * CREDIT).to_string()})).transact().await?.into_result()?;
+    intents
+        .call("set_mode")
+        .args_json(json!({"mode": "refund", "refund": (5 * CREDIT).to_string()}))
+        .transact()
+        .await?
+        .into_result()?;
     let relayer_before = w.usdt(&w.relayer).await?;
     let r = w.claim_evm(FEE, None).await?;
     assert!(r.is_success(), "claim_evm: {:?}", failure_text(&r));
     assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE, "fee paid");
-    assert_eq!(w.f.balance(&w.f.usdt, intents.id()).await?, 20 * CREDIT - FEE - 5 * CREDIT, "Intents keeps payout minus refund");
+    assert_eq!(
+        w.f.balance(&w.f.usdt, intents.id()).await?,
+        20 * CREDIT - FEE - 5 * CREDIT,
+        "Intents keeps payout minus refund"
+    );
     let p = w.position().await?;
-    assert_eq!((p["status"].as_str(), p["amount"].as_str()), (Some("claimable"), Some((5 * CREDIT).to_string().as_str())), "{p}");
-    assert!(has_event(&r, "relayer_fee_paid") && has_event(&r, "residual_claim_failed"), "{:?}", r.logs());
+    assert_eq!(
+        (p["status"].as_str(), p["amount"].as_str()),
+        (Some("claimable"), Some((5 * CREDIT).to_string().as_str())),
+        "{p}"
+    );
+    assert!(
+        has_event(&r, "relayer_fee_paid") && has_event(&r, "residual_claim_failed"),
+        "{:?}",
+        r.logs()
+    );
     w.f.assert_d6().await?;
     Ok(())
 }
@@ -367,23 +626,51 @@ async fn intents_partial_refund_with_fee() -> anyhow::Result<()> {
 #[tokio::test]
 async fn owner_set_params_changes_relayer_fee_from_the_next_epoch() -> anyhow::Result<()> {
     let mut f = Funded::deploy(Some(Funded::params_short())).await?;
-    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "0");
+    assert_eq!(
+        f.circle.view("get_params", json!({})).await?["relayer_fee"],
+        "0"
+    );
     let dao = f.account("dao").await?;
     let mut params = Funded::params_short();
     params["relayer_fee"] = json!("1000001");
-    let r = f.circle.call_as(&dao, "set_params", json!({"params": params.clone()})).await?;
-    assert!(failure_text(&r).unwrap_or_default().contains("ERR_PARAM_OUT_OF_RANGE"), "{:?}", failure_text(&r));
+    let r = f
+        .circle
+        .call_as(&dao, "set_params", json!({"params": params.clone()}))
+        .await?;
+    assert!(
+        failure_text(&r)
+            .unwrap_or_default()
+            .contains("ERR_PARAM_OUT_OF_RANGE"),
+        "{:?}",
+        failure_text(&r)
+    );
     params["relayer_fee"] = json!("500000");
-    let r = f.circle.call_as(&dao, "set_params", json!({"params": params})).await?;
+    let r = f
+        .circle
+        .call_as(&dao, "set_params", json!({"params": params}))
+        .await?;
     assert!(r.is_success(), "{:?}", failure_text(&r));
-    assert_eq!(f.circle.view("get_pending_params", json!({})).await?["params"]["relayer_fee"], "500000");
-    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "0", "not in force yet");
+    assert_eq!(
+        f.circle.view("get_pending_params", json!({})).await?["params"]["relayer_fee"],
+        "500000"
+    );
+    assert_eq!(
+        f.circle.view("get_params", json!({})).await?["relayer_fee"],
+        "0",
+        "not in force yet"
+    );
     let c = &f.circle;
     c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
     let close = c.call_keeper("close_epoch", json!({"epoch": 1})).await?;
     assert!(close.is_success(), "{:?}", failure_text(&close));
-    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "500000");
-    assert_eq!(f.circle.view("get_pending_params", json!({})).await?, Value::Null);
+    assert_eq!(
+        f.circle.view("get_params", json!({})).await?["relayer_fee"],
+        "500000"
+    );
+    assert_eq!(
+        f.circle.view("get_pending_params", json!({})).await?,
+        Value::Null
+    );
     Ok(())
 }
 
@@ -396,7 +683,13 @@ async fn request_exit_evm_pays_the_relayer_from_free_stake() -> anyhow::Result<(
     let r = w.small_action_evm("request_exit", FEE).await?;
     assert!(r.is_success(), "request_exit_evm: {:?}", failure_text(&r));
     println!("GAS request_exit_evm with fee: {:.1} Tgas", tgas(&r));
-    assert!(has_event(&r, "exit_requested") && has_event(&r, "relayer_fee_paid") && !has_event(&r, "relayer_fee_failed"), "{:?}", r.logs());
+    assert!(
+        has_event(&r, "exit_requested")
+            && has_event(&r, "relayer_fee_paid")
+            && !has_event(&r, "relayer_fee_failed"),
+        "{:?}",
+        r.logs()
+    );
     assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE);
     assert_eq!(w.member_stake().await?.parse::<u128>()?, stake_before - FEE);
     w.f.assert_d6().await?;
@@ -411,7 +704,13 @@ async fn request_exit_evm_fee_failure_returns_to_the_stake() -> anyhow::Result<(
     w.unregister_relayer().await?;
     let r = w.small_action_evm("request_exit", FEE).await?;
     assert!(r.is_success(), "request_exit_evm: {:?}", failure_text(&r));
-    assert!(has_event(&r, "exit_requested") && has_event(&r, "relayer_fee_failed") && !has_event(&r, "relayer_fee_paid"), "{:?}", r.logs());
+    assert!(
+        has_event(&r, "exit_requested")
+            && has_event(&r, "relayer_fee_failed")
+            && !has_event(&r, "relayer_fee_paid"),
+        "{:?}",
+        r.logs()
+    );
     assert_eq!(w.member_stake().await?, stake_before, "the fee came back");
     w.f.assert_d6().await?;
     Ok(())
@@ -433,7 +732,12 @@ async fn set_auto_settle_evm_fee_and_max_fee_zero() -> anyhow::Result<()> {
     assert!(has_event(&r, "relayer_fee_paid"));
     assert_eq!(w.usdt(&w.relayer).await? - relayer_before, FEE);
     assert_eq!(w.member_stake().await?.parse::<u128>()?, stake_before - FEE);
-    assert_eq!(w.f.circle.view("is_auto_settle", json!({"account_id": w.member})).await?, json!(false));
+    assert_eq!(
+        w.f.circle
+            .view("is_auto_settle", json!({"account_id": w.member}))
+            .await?,
+        json!(false)
+    );
     w.f.assert_d6().await?;
     Ok(())
 }
@@ -455,7 +759,13 @@ async fn join_evm_refuses_a_fee_ceiling() -> anyhow::Result<()> {
         .gas(Gas::from_tgas(100))
         .transact()
         .await?;
-    assert!(failure_text(&join).unwrap_or_default().contains("ERR_EVM_FEE_NOT_ALLOWED"), "{:?}", failure_text(&join));
+    assert!(
+        failure_text(&join)
+            .unwrap_or_default()
+            .contains("ERR_EVM_FEE_NOT_ALLOWED"),
+        "{:?}",
+        failure_text(&join)
+    );
     Ok(())
 }
 
@@ -466,12 +776,28 @@ async fn get_epoch_params_show_the_rules_of_each_epoch() -> anyhow::Result<()> {
     let dao = f.account("dao").await?;
     let mut params = Funded::params_short();
     params["relayer_fee"] = json!("500000");
-    assert!(f.circle.call_as(&dao, "set_params", json!({"params": params})).await?.is_success());
+    assert!(f
+        .circle
+        .call_as(&dao, "set_params", json!({"params": params}))
+        .await?
+        .is_success());
     let c = &f.circle;
     c.advance_to(c.epoch_ts(1, "cutoff_at").await?).await?;
-    assert!(c.call_keeper("close_epoch", json!({"epoch": 1})).await?.is_success());
-    assert_eq!(f.circle.view("get_epoch", json!({"epoch": 1})).await?["params"]["relayer_fee"], "0");
-    assert_eq!(f.circle.view("get_epoch", json!({"epoch": 2})).await?["params"]["relayer_fee"], "500000");
-    assert_eq!(f.circle.view("get_params", json!({})).await?["relayer_fee"], "500000");
+    assert!(c
+        .call_keeper("close_epoch", json!({"epoch": 1}))
+        .await?
+        .is_success());
+    assert_eq!(
+        f.circle.view("get_epoch", json!({"epoch": 1})).await?["params"]["relayer_fee"],
+        "0"
+    );
+    assert_eq!(
+        f.circle.view("get_epoch", json!({"epoch": 2})).await?["params"]["relayer_fee"],
+        "500000"
+    );
+    assert_eq!(
+        f.circle.view("get_params", json!({})).await?["relayer_fee"],
+        "500000"
+    );
     Ok(())
 }

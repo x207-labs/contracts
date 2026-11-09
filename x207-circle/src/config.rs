@@ -12,7 +12,9 @@ pub const CREDIT_DECIMALS: u8 = 6;
 /// `circleId` of the x402 network `x207:<circleId>`: `[-_a-zA-Z0-9]{1,32}` (CAIP-2 reference).
 pub fn is_valid_circle_id(circle_id: &str) -> bool {
     (1..=32).contains(&circle_id.len())
-        && circle_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && circle_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// `get_circle` result (spec section 5).
@@ -71,7 +73,14 @@ impl X207Circle {
         }
         let params = params.unwrap_or_default();
         validate_params(&params);
-        Self::with_config(owner_id, circle_id, usdt_token_id, intents_id, params, env::block_timestamp())
+        Self::with_config(
+            owner_id,
+            circle_id,
+            usdt_token_id,
+            intents_id,
+            params,
+            env::block_timestamp(),
+        )
     }
 
     pub fn get_owner(&self) -> AccountId {
@@ -104,12 +113,21 @@ mod tests {
     }
 
     fn init(circle_id: &str, params: Option<Params>) -> X207Circle {
-        X207Circle::new(acc("dao.near"), circle_id.to_string(), acc("usdt.near"), acc("intents.near"), params)
+        X207Circle::new(
+            acc("dao.near"),
+            circle_id.to_string(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            params,
+        )
     }
 
     fn panic_message(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).unwrap_err();
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     // TC-CT-008-01 (value part; the sandbox test asserts the same through the views)
@@ -128,7 +146,10 @@ mod tests {
             })
         );
         let epoch = c.get_epoch(None).unwrap();
-        assert_eq!((epoch.epoch, epoch.cutoff_at.0), (1, 5_000_000_000 + 3600 * 1_000_000_000));
+        assert_eq!(
+            (epoch.epoch, epoch.cutoff_at.0),
+            (1, 5_000_000_000 + 3600 * 1_000_000_000)
+        );
         assert_eq!(c.epochs.get(&1).unwrap().phase, EpochPhase::Open);
         assert_eq!(c.get_params(), Params::default());
         assert_eq!(c.get_pool().accounted.0, 0);
@@ -138,10 +159,16 @@ mod tests {
     #[test]
     fn init_accepts_explicit_params() {
         context("deployer.near");
-        let params = Params { epoch_length: 900, ..Params::default() };
+        let params = Params {
+            epoch_length: 900,
+            ..Params::default()
+        };
         let c = init("agents-main", Some(params.clone()));
         assert_eq!(c.get_params(), params);
-        assert_eq!(c.get_epoch(None).unwrap().cutoff_at.0, 5_000_000_000 + 900 * 1_000_000_000);
+        assert_eq!(
+            c.get_epoch(None).unwrap().cutoff_at.0,
+            5_000_000_000 + 900 * 1_000_000_000
+        );
     }
 
     // TC-CT-008-04
@@ -181,8 +208,12 @@ mod tests {
     #[test]
     fn out_of_range_params_stop_init() {
         context("deployer.near");
-        let params = Params { epoch_length: 100, ..Params::default() };
-        assert!(panic_message(|| drop(init("agents-main", Some(params)))).contains("ERR_PARAM_OUT_OF_RANGE: epoch_length"));
+        let params = Params {
+            epoch_length: 100,
+            ..Params::default()
+        };
+        assert!(panic_message(|| drop(init("agents-main", Some(params))))
+            .contains("ERR_PARAM_OUT_OF_RANGE: epoch_length"));
     }
 
     // TC-CT-008-07
@@ -193,7 +224,10 @@ mod tests {
         context("dao.near");
         c.assert_owner();
         context("outsider.near");
-        assert!(panic_message(std::panic::AssertUnwindSafe(|| c.assert_owner())).contains("ERR_NOT_OWNER"));
+        assert!(
+            panic_message(std::panic::AssertUnwindSafe(|| c.assert_owner()))
+                .contains("ERR_NOT_OWNER")
+        );
     }
 
     #[test]

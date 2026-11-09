@@ -6,7 +6,9 @@
 use near_sdk::json_types::U128;
 use near_sdk::serde_json::json;
 use near_sdk::store::{LookupMap, LookupSet};
-use near_sdk::{assert_one_yocto, env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue};
+use near_sdk::{
+    assert_one_yocto, env, near, require, AccountId, Gas, NearToken, PanicOnDefault, PromiseOrValue,
+};
 
 const RESOLVE_GAS: Gas = Gas::from_tgas(10);
 /// Kept back for the call itself and `ft_resolve_transfer`; the rest goes to the receiver, like the
@@ -35,10 +37,23 @@ impl MockRwa {
     fn move_amount(&mut self, from: &AccountId, to: &AccountId, amount: u128) {
         require!(amount > 0, "The amount should be a positive number");
         let from_balance = self.balance(from);
-        require!(from_balance >= amount, "The account doesn't have enough balance");
-        require!(!self.unregistered.contains(to), "The account is not registered");
-        require!(!self.frozen.contains(from) && !self.frozen.contains(to), "ERR_FROZEN: the account is frozen");
-        require!(!self.whitelist_on || (self.whitelisted.contains(from) && self.whitelisted.contains(to)), "ERR_NOT_WHITELISTED: both sides must be whitelisted");
+        require!(
+            from_balance >= amount,
+            "The account doesn't have enough balance"
+        );
+        require!(
+            !self.unregistered.contains(to),
+            "The account is not registered"
+        );
+        require!(
+            !self.frozen.contains(from) && !self.frozen.contains(to),
+            "ERR_FROZEN: the account is frozen"
+        );
+        require!(
+            !self.whitelist_on
+                || (self.whitelisted.contains(from) && self.whitelisted.contains(to)),
+            "ERR_NOT_WHITELISTED: both sides must be whitelisted"
+        );
         let received = amount.saturating_sub(self.fee);
         self.balances.insert(from.clone(), from_balance - amount);
         let to_balance = self.balance(to);
@@ -51,7 +66,15 @@ impl MockRwa {
 impl MockRwa {
     #[init]
     pub fn new() -> Self {
-        Self { balances: LookupMap::new(b"b"), total_supply: 0, unregistered: LookupSet::new(b"u"), whitelist_on: false, whitelisted: LookupSet::new(b"w"), frozen: LookupSet::new(b"z"), fee: 0 }
+        Self {
+            balances: LookupMap::new(b"b"),
+            total_supply: 0,
+            unregistered: LookupSet::new(b"u"),
+            whitelist_on: false,
+            whitelisted: LookupSet::new(b"w"),
+            frozen: LookupSet::new(b"z"),
+            fee: 0,
+        }
     }
 
     pub fn set_whitelist_on(&mut self, on: bool) {
@@ -59,11 +82,19 @@ impl MockRwa {
     }
 
     pub fn set_whitelisted(&mut self, account_id: AccountId, whitelisted: bool) {
-        if whitelisted { self.whitelisted.insert(account_id); } else { self.whitelisted.remove(&account_id); }
+        if whitelisted {
+            self.whitelisted.insert(account_id);
+        } else {
+            self.whitelisted.remove(&account_id);
+        }
     }
 
     pub fn set_frozen(&mut self, account_id: AccountId, frozen: bool) {
-        if frozen { self.frozen.insert(account_id); } else { self.frozen.remove(&account_id); }
+        if frozen {
+            self.frozen.insert(account_id);
+        } else {
+            self.frozen.remove(&account_id);
+        }
     }
 
     pub fn set_fee(&mut self, fee: U128) {
@@ -85,9 +116,14 @@ impl MockRwa {
     }
 
     #[payable]
-    pub fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>) -> near_sdk::serde_json::Value {
+    pub fn storage_deposit(
+        &mut self,
+        account_id: Option<AccountId>,
+        registration_only: Option<bool>,
+    ) -> near_sdk::serde_json::Value {
         let _ = registration_only;
-        self.unregistered.remove(&account_id.unwrap_or_else(env::predecessor_account_id));
+        self.unregistered
+            .remove(&account_id.unwrap_or_else(env::predecessor_account_id));
         json!({"total": "1250000000000000000000", "available": "0"})
     }
 
@@ -115,7 +151,13 @@ impl MockRwa {
     }
 
     #[payable]
-    pub fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String) -> PromiseOrValue<U128> {
+    pub fn ft_transfer_call(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        msg: String,
+    ) -> PromiseOrValue<U128> {
         assert_one_yocto();
         let _ = memo;
         let sender_id = env::predecessor_account_id();
@@ -124,20 +166,31 @@ impl MockRwa {
         self.move_amount(&sender_id, &receiver_id, amount.0);
         let call = near_sdk::Promise::new(receiver_id.clone()).function_call(
             "ft_on_transfer".to_string(),
-            json!({"sender_id": sender_id, "amount": amount, "msg": msg}).to_string().into_bytes(),
+            json!({"sender_id": sender_id, "amount": amount, "msg": msg})
+                .to_string()
+                .into_bytes(),
             NearToken::from_yoctonear(0),
             receiver_gas,
         );
-        let resolve = Self::ext(env::current_account_id()).with_static_gas(RESOLVE_GAS).ft_resolve_transfer(sender_id, receiver_id, amount);
+        let resolve = Self::ext(env::current_account_id())
+            .with_static_gas(RESOLVE_GAS)
+            .ft_resolve_transfer(sender_id, receiver_id, amount);
         PromiseOrValue::Promise(call.then(resolve))
     }
 
     /// Standard NEP-141 resolve: the receiver returns the unused amount; a failed receiver means
     /// everything is unused. Returns the amount that was used.
     #[private]
-    pub fn ft_resolve_transfer(&mut self, sender_id: AccountId, receiver_id: AccountId, amount: U128) -> U128 {
+    pub fn ft_resolve_transfer(
+        &mut self,
+        sender_id: AccountId,
+        receiver_id: AccountId,
+        amount: U128,
+    ) -> U128 {
         let unused = match env::promise_result_checked(0, 64) {
-            Ok(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes).map(|v| v.0.min(amount.0)).unwrap_or(amount.0),
+            Ok(bytes) => near_sdk::serde_json::from_slice::<U128>(&bytes)
+                .map(|v| v.0.min(amount.0))
+                .unwrap_or(amount.0),
             Err(_) => amount.0,
         };
         let refund = unused.min(self.balance(&receiver_id));

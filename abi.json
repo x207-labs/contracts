@@ -29,6 +29,23 @@
       },
       {
         "kind": "call",
+        "name": "account_on_lock",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "admit_member",
         "params": {
           "args": [
@@ -91,6 +108,29 @@
       {
         "kind": "call",
         "name": "cancel_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "kind": "call",
+        "name": "cancel_expired_account_escrow",
         "params": {
           "args": [
             {
@@ -302,6 +342,47 @@
       },
       {
         "kind": "call",
+        "name": "complete_account_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            },
+            {
+              "name": "voucher",
+              "type_schema": {
+                "$ref": "#/definitions/Voucher"
+              }
+            },
+            {
+              "name": "signature",
+              "type_schema": {
+                "type": "string"
+              }
+            },
+            {
+              "name": "delivery_pubkey",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "$ref": "#/definitions/Promise"
+          }
+        }
+      },
+      {
+        "kind": "call",
         "name": "complete_escrow",
         "params": {
           "args": [
@@ -450,6 +531,36 @@
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/PromiseOrValueString"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_account_escrow",
+        "params": {
+          "args": [
+            {
+              "name": "grant_id",
+              "type_schema": {
+                "format": "uint64",
+                "minimum": 0.0,
+                "type": "integer"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        },
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/AccountEscrowView"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -786,6 +897,29 @@
       },
       {
         "kind": "view",
+        "name": "get_locker_code_hashes",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_max_escrow_ttl",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
+          }
+        }
+      },
+      {
+        "kind": "view",
         "name": "get_mt_escrow",
         "params": {
           "args": [
@@ -831,6 +965,16 @@
           "serialization_type": "json",
           "type_schema": {
             "$ref": "#/definitions/Params"
+          }
+        }
+      },
+      {
+        "kind": "view",
+        "name": "get_pending_gc_delay",
+        "result": {
+          "serialization_type": "json",
+          "type_schema": {
+            "type": "string"
           }
         }
       },
@@ -2175,6 +2319,21 @@
       },
       {
         "kind": "call",
+        "name": "remove_pending",
+        "params": {
+          "args": [
+            {
+              "name": "account_id",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "modifiers": [
           "payable"
         ],
@@ -2395,6 +2554,39 @@
       },
       {
         "kind": "call",
+        "name": "set_locker_code_hashes",
+        "params": {
+          "args": [
+            {
+              "name": "hashes",
+              "type_schema": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "set_max_escrow_ttl",
+        "params": {
+          "args": [
+            {
+              "name": "ttl_ns",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
         "name": "set_params",
         "params": {
           "args": [
@@ -2402,6 +2594,21 @@
               "name": "params",
               "type_schema": {
                 "$ref": "#/definitions/Params"
+              }
+            }
+          ],
+          "serialization_type": "json"
+        }
+      },
+      {
+        "kind": "call",
+        "name": "set_pending_gc_delay",
+        "params": {
+          "args": [
+            {
+              "name": "seconds",
+              "type_schema": {
+                "type": "string"
               }
             }
           ],
@@ -2675,6 +2882,45 @@
             "status",
             "unit",
             "unit_price"
+          ],
+          "type": "object"
+        },
+        "AccountEscrowView": {
+          "properties": {
+            "account_id": {
+              "type": "string"
+            },
+            "buyer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "delivery_pubkey": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "grant_id": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "locked_epoch": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "state": {
+              "$ref": "#/definitions/EscrowState"
+            }
+          },
+          "required": [
+            "account_id",
+            "grant_id",
+            "locked_epoch",
+            "state"
           ],
           "type": "object"
         },
@@ -4454,12 +4700,26 @@
         "amount"
       ],
       "name": "relayer_fee_failed"
+    },
+    {
+      "fields": [
+        "account_id",
+        "by_owner"
+      ],
+      "name": "member_removed"
+    },
+    {
+      "fields": [
+        "grant_id",
+        "account_id"
+      ],
+      "name": "account_escrow_held"
     }
   ],
-  "interface_version": "0.0.17",
+  "interface_version": "0.0.18",
   "metadata": {
     "name": "x207-circle",
-    "version": "0.0.17"
+    "version": "0.0.18"
   },
   "schema_version": "0.4.0"
 }

@@ -13,7 +13,10 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::LookupMap;
 use near_sdk::{env, near, require, AccountId};
 
-use crate::events::{BondLocked, BondReleased, BondSlashed, DealConfirmed, DealDisputed, DealRuled, LimitChange, LimitsUpdated, X207Event};
+use crate::events::{
+    BondLocked, BondReleased, BondSlashed, DealConfirmed, DealDisputed, DealRuled, LimitChange,
+    LimitsUpdated, X207Event,
+};
 use crate::state::{StorageKey, X207Circle, X207CircleExt};
 
 pub const MAX_OPEN_DEALS_PER_MEMBER: u32 = 8;
@@ -124,7 +127,8 @@ pub fn bond_locked_of(account: &AccountId) -> u128 {
 }
 
 fn deal_count_of(account: &AccountId) -> u32 {
-    env::storage_read(&count_key(account)).map_or(0, |b| u32::from_le_bytes(b.try_into().expect("4 bytes")))
+    env::storage_read(&count_key(account))
+        .map_or(0, |b| u32::from_le_bytes(b.try_into().expect("4 bytes")))
 }
 
 fn set_deal_count(account: &AccountId, n: u32) {
@@ -143,11 +147,16 @@ pub fn bound_limit(limit: u128, stake: u128, account: &AccountId) -> u128 {
 /// `ERR_BOND_LOCKED` while any bond of `account` is locked (leaving the circle with the stake waits for the end of the deals).
 pub fn assert_no_bond(account: &AccountId) {
     let locked = bond_locked_of(account);
-    require!(locked == 0, format!("ERR_BOND_LOCKED: {account} has {locked} locked as a bond"));
+    require!(
+        locked == 0,
+        format!("ERR_BOND_LOCKED: {account} has {locked} locked as a bond")
+    );
 }
 
 fn is_hash(h: &str) -> bool {
-    h.len() == 64 && h.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    h.len() == 64
+        && h.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn index_of(deal: &Deal, who: &AccountId) -> Option<usize> {
@@ -157,21 +166,41 @@ fn index_of(deal: &Deal, who: &AccountId) -> Option<usize> {
 impl X207Circle {
     /// Called by `commit_bundle` for a swap that names an arbiter. The caller checked the shape of the terms; this checks the stake, the window and the limits, then locks
     /// the bonds. Nothing is written before every check passed.
-    pub(crate) fn open_deal(&mut self, bundle_id: u64, parties: [AccountId; 2], arbiter: AccountId, agreement_hash: Option<String>, confirm_by: u64, bond_each: u128) {
+    pub(crate) fn open_deal(
+        &mut self,
+        bundle_id: u64,
+        parties: [AccountId; 2],
+        arbiter: AccountId,
+        agreement_hash: Option<String>,
+        confirm_by: u64,
+        bond_each: u128,
+    ) {
         let now = env::block_timestamp();
-        require!(arbiter != self.owner_id && arbiter != env::current_account_id(), "ERR_ARBITER_INVALID: the arbiter cannot be the owner of the circle or the circle");
-        require!(!parties.contains(&arbiter), "ERR_ARBITER_INVALID: the arbiter cannot be a party of the deal");
+        require!(
+            arbiter != self.owner_id && arbiter != env::current_account_id(),
+            "ERR_ARBITER_INVALID: the arbiter cannot be the owner of the circle or the circle"
+        );
+        require!(
+            !parties.contains(&arbiter),
+            "ERR_ARBITER_INVALID: the arbiter cannot be a party of the deal"
+        );
         require!(
             confirm_by >= now + MIN_CONFIRM_WINDOW_NS && confirm_by <= now + MAX_CONFIRM_WINDOW_NS,
             format!("ERR_DEAL_WINDOW: confirm_by must be between 1 hour and 14 days after the commit, got {confirm_by} at {now}")
         );
         if let Some(h) = &agreement_hash {
-            require!(is_hash(h), "ERR_BAD_BUNDLE: agreement_hash is 64 lowercase hex");
+            require!(
+                is_hash(h),
+                "ERR_BAD_BUNDLE: agreement_hash is 64 lowercase hex"
+            );
         }
         for who in &parties {
             let member = self.members.get(who).expect("participants are members");
             let locked = bond_locked_of(who);
-            let slack = member.stake.saturating_sub(member.limit).saturating_sub(locked);
+            let slack = member
+                .stake
+                .saturating_sub(member.limit)
+                .saturating_sub(locked);
             require!(bond_each <= slack, format!("ERR_BOND_INSUFFICIENT_STAKE: {who} needs {bond_each} above its limit, has {slack}"));
             require!(deal_count_of(who) < MAX_OPEN_DEALS_PER_MEMBER, format!("ERR_DEAL_LIMIT: {who} has {} open deals, the limit is {MAX_OPEN_DEALS_PER_MEMBER}", deal_count_of(who)));
         }
@@ -182,12 +211,25 @@ impl X207Circle {
         save(
             bundle_id,
             &Deal {
-                parties: parties.clone(), arbiter, agreement_hash, confirm_by, bond_each, locked: [true, true], state: DealState::Open, complainant: None, disputed_at: 0,
+                parties: parties.clone(),
+                arbiter,
+                agreement_hash,
+                confirm_by,
+                bond_each,
+                locked: [true, true],
+                state: DealState::Open,
+                complainant: None,
+                disputed_at: 0,
                 evidence_hash: None,
             },
         );
         for who in parties {
-            BondLocked { bundle_id, account_id: who, amount: U128(bond_each) }.emit();
+            BondLocked {
+                bundle_id,
+                account_id: who,
+                amount: U128(bond_each),
+            }
+            .emit();
         }
     }
 
@@ -197,17 +239,39 @@ impl X207Circle {
         }
         deal.locked[index] = false;
         let who = deal.parties[index].clone();
-        write_u128(&locked_key(&who), bond_locked_of(&who).saturating_sub(deal.bond_each));
-        BondReleased { bundle_id, account_id: who, amount: U128(deal.bond_each), reason }.emit();
+        write_u128(
+            &locked_key(&who),
+            bond_locked_of(&who).saturating_sub(deal.bond_each),
+        );
+        BondReleased {
+            bundle_id,
+            account_id: who,
+            amount: U128(deal.bond_each),
+            reason,
+        }
+        .emit();
     }
 
     /// Moves `amount` of the bond of `from` to the stake of the other party. The lock itself is lifted by the caller.
-    fn slash_bond(&mut self, bundle_id: u64, from_account: &AccountId, to_account: &AccountId, amount: u128) {
+    fn slash_bond(
+        &mut self,
+        bundle_id: u64,
+        from_account: &AccountId,
+        to_account: &AccountId,
+        amount: u128,
+    ) {
         // review C-7: never panics; what the stake cannot cover (a default took it) is not moved
-        let from_stake_before = self.members.get(from_account).expect("party is a member").stake;
+        let from_stake_before = self
+            .members
+            .get(from_account)
+            .expect("party is a member")
+            .stake;
         let amount = amount.min(from_stake_before);
         let from_stake = {
-            let f = self.members.get_mut(from_account).expect("party is a member");
+            let f = self
+                .members
+                .get_mut(from_account)
+                .expect("party is a member");
             f.stake -= amount;
             f.stake
         };
@@ -216,7 +280,15 @@ impl X207Circle {
             t.stake = t.stake.checked_add(amount).expect("stake overflow");
             t.stake
         };
-        BondSlashed { bundle_id, from: from_account.clone(), to: to_account.clone(), amount: U128(amount), from_stake: U128(from_stake), to_stake: U128(to_stake) }.emit();
+        BondSlashed {
+            bundle_id,
+            from: from_account.clone(),
+            to: to_account.clone(),
+            amount: U128(amount),
+            from_stake: U128(from_stake),
+            to_stake: U128(to_stake),
+        }
+        .emit();
     }
 
     /// After a bond left the stake of `who`, the limit must still be at most `stake - bond_locked`.
@@ -238,7 +310,11 @@ impl X207Circle {
 
     fn party_index(&self, deal: &Deal, bundle_id: u64) -> usize {
         let caller = env::predecessor_account_id();
-        index_of(deal, &caller).unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_NOT_PARTY: {caller} is not a party of deal {bundle_id}")))
+        index_of(deal, &caller).unwrap_or_else(|| {
+            env::panic_str(&format!(
+                "ERR_DEAL_NOT_PARTY: {caller} is not a party of deal {bundle_id}"
+            ))
+        })
     }
 }
 
@@ -247,12 +323,27 @@ impl X207Circle {
     /// A party says that the other party delivered: the bond of the other party is released. `ERR_DEAL_UNKNOWN`, `ERR_DEAL_NOT_PARTY`, `ERR_DEAL_ALREADY_DISPUTED`,
     /// `ERR_DEAL_CLOSED` (the bond of the other party is released already).
     pub fn confirm_deal(&mut self, bundle_id: u64) {
-        let mut deal = load_deal(bundle_id).unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
+        let mut deal = load_deal(bundle_id)
+            .unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
         let me = self.party_index(&deal, bundle_id);
-        require!(deal.state == DealState::Open, format!("ERR_DEAL_ALREADY_DISPUTED: deal {bundle_id} has a dispute, the arbiter rules"));
+        require!(
+            deal.state == DealState::Open,
+            format!("ERR_DEAL_ALREADY_DISPUTED: deal {bundle_id} has a dispute, the arbiter rules")
+        );
         let other = 1 - me;
-        require!(deal.locked[other], format!("ERR_DEAL_CLOSED: the bond of {} is released already", deal.parties[other]));
-        DealConfirmed { bundle_id, account_id: deal.parties[me].clone(), of: deal.parties[other].clone() }.emit();
+        require!(
+            deal.locked[other],
+            format!(
+                "ERR_DEAL_CLOSED: the bond of {} is released already",
+                deal.parties[other]
+            )
+        );
+        DealConfirmed {
+            bundle_id,
+            account_id: deal.parties[me].clone(),
+            of: deal.parties[other].clone(),
+        }
+        .emit();
         self.release_bond(bundle_id, &mut deal, other, ReleaseReason::Confirmed);
         if deal.locked == [false, false] {
             self.close_deal(bundle_id, &deal);
@@ -264,35 +355,82 @@ impl X207Circle {
     /// A party says that the other party did not deliver, before `confirm_by`, while the bond of the other party is still locked. One dispute per deal.
     /// `ERR_DEAL_UNKNOWN`, `ERR_DEAL_NOT_PARTY`, `ERR_DEAL_ALREADY_DISPUTED`, `ERR_DEAL_WINDOW_OVER`, `ERR_DEAL_CLOSED`, `ERR_DEAL_NO_STAKE_AT_RISK`, `ERR_BAD_HASH`.
     pub fn dispute_deal(&mut self, bundle_id: u64, evidence_hash: String) {
-        let mut deal = load_deal(bundle_id).unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
+        let mut deal = load_deal(bundle_id)
+            .unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
         let me = self.party_index(&deal, bundle_id);
-        require!(deal.state == DealState::Open, format!("ERR_DEAL_ALREADY_DISPUTED: deal {bundle_id}"));
+        require!(
+            deal.state == DealState::Open,
+            format!("ERR_DEAL_ALREADY_DISPUTED: deal {bundle_id}")
+        );
         let now = env::block_timestamp();
         // `<`, not `<=`: at `confirm_by` the deal is due for `settle_deal` (`>=`), so the two never overlap (review C-10)
-        require!(now < deal.confirm_by, format!("ERR_DEAL_WINDOW_OVER: confirm_by {} now {now}", deal.confirm_by));
-        require!(deal.locked[1 - me], format!("ERR_DEAL_CLOSED: {} has nothing locked any more, there is nothing to dispute", deal.parties[1 - me]));
+        require!(
+            now < deal.confirm_by,
+            format!(
+                "ERR_DEAL_WINDOW_OVER: confirm_by {} now {now}",
+                deal.confirm_by
+            )
+        );
+        require!(
+            deal.locked[1 - me],
+            format!(
+                "ERR_DEAL_CLOSED: {} has nothing locked any more, there is nothing to dispute",
+                deal.parties[1 - me]
+            )
+        );
         // review C-8: a complainant whose own bond was released (it confirmed) risks nothing by accusing
         require!(deal.locked[me], format!("ERR_DEAL_NO_STAKE_AT_RISK: the bond of {} is released, so {} cannot accuse the other party", deal.parties[me], deal.parties[me]));
-        require!(is_hash(&evidence_hash), "ERR_BAD_HASH: evidence_hash is 64 lowercase hex");
+        require!(
+            is_hash(&evidence_hash),
+            "ERR_BAD_HASH: evidence_hash is 64 lowercase hex"
+        );
         deal.state = DealState::Disputed;
         deal.complainant = Some(me as u8);
         deal.disputed_at = now;
         deal.evidence_hash = Some(evidence_hash.clone());
         save(bundle_id, &deal);
-        DealDisputed { bundle_id, complainant: deal.parties[me].clone(), accused: deal.parties[1 - me].clone(), evidence_hash, disputed_at: U64(now) }.emit();
+        DealDisputed {
+            bundle_id,
+            complainant: deal.parties[me].clone(),
+            accused: deal.parties[1 - me].clone(),
+            evidence_hash,
+            disputed_at: U64(now),
+        }
+        .emit();
     }
 
     /// The arbiter alone, on a disputed deal, within `RULING_WINDOW_NS` of the dispute. `ERR_DEAL_UNKNOWN`, `ERR_NOT_ARBITER`, `ERR_DEAL_NOT_DISPUTED`, `ERR_RULING_WINDOW`.
     pub fn rule_deal(&mut self, bundle_id: u64, verdict: Verdict) {
-        let mut deal = load_deal(bundle_id).unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
+        let mut deal = load_deal(bundle_id)
+            .unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
         let caller = env::predecessor_account_id();
-        require!(caller == deal.arbiter, format!("ERR_NOT_ARBITER: only {} rules deal {bundle_id}", deal.arbiter));
-        require!(deal.state == DealState::Disputed, format!("ERR_DEAL_NOT_DISPUTED: deal {bundle_id}"));
+        require!(
+            caller == deal.arbiter,
+            format!(
+                "ERR_NOT_ARBITER: only {} rules deal {bundle_id}",
+                deal.arbiter
+            )
+        );
+        require!(
+            deal.state == DealState::Disputed,
+            format!("ERR_DEAL_NOT_DISPUTED: deal {bundle_id}")
+        );
         let now = env::block_timestamp();
-        require!(now < deal.disputed_at + RULING_WINDOW_NS, format!("ERR_RULING_WINDOW: the dispute is from {}, the window of the arbiter is over", deal.disputed_at));
+        require!(
+            now < deal.disputed_at + RULING_WINDOW_NS,
+            format!(
+                "ERR_RULING_WINDOW: the dispute is from {}, the window of the arbiter is over",
+                deal.disputed_at
+            )
+        );
         let c = deal.complainant.expect("a disputed deal has a complainant") as usize;
         let a = 1 - c;
-        DealRuled { bundle_id, arbiter: caller, verdict }.emit();
+        DealRuled {
+            bundle_id,
+            arbiter: caller,
+            verdict,
+        }
+        .emit();
         match verdict {
             Verdict::AccusedGuilty => {
                 // the bond of the accused goes to the complainant; the rest of the locks are released
@@ -320,12 +458,23 @@ impl X207Circle {
             self.bound_member_limit(&who);
             if let Some(m) = self.members.get(&who) {
                 if m.limit != old {
-                    changes.push(LimitChange { account_id: who.clone(), old_limit: U128(old), new_limit: U128(m.limit), status: "active".into() });
+                    changes.push(LimitChange {
+                        account_id: who.clone(),
+                        old_limit: U128(old),
+                        new_limit: U128(m.limit),
+                        status: "active".into(),
+                    });
                 }
             }
         }
         if !changes.is_empty() {
-            LimitsUpdated { epoch: self.current_epoch, changes, chunk: 0, chunks: 1 }.emit();
+            LimitsUpdated {
+                epoch: self.current_epoch,
+                changes,
+                chunk: 0,
+                chunks: 1,
+            }
+            .emit();
         }
         self.close_deal(bundle_id, &deal);
     }
@@ -333,12 +482,18 @@ impl X207Circle {
     /// Anybody, once the deal is due: open and past `confirm_by` (the bonds still locked are released), or disputed and past the window of the arbiter, who was silent
     /// (both bonds are released). `ERR_DEAL_UNKNOWN`, `ERR_DEAL_NOT_DUE`.
     pub fn settle_deal(&mut self, bundle_id: u64) {
-        let mut deal = load_deal(bundle_id).unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
+        let mut deal = load_deal(bundle_id)
+            .unwrap_or_else(|| env::panic_str(&format!("ERR_DEAL_UNKNOWN: {bundle_id}")));
         let now = env::block_timestamp();
         let reason = match deal.state {
             DealState::Open if now >= deal.confirm_by => ReleaseReason::Elapsed,
-            DealState::Disputed if now >= deal.disputed_at + RULING_WINDOW_NS => ReleaseReason::ArbiterSilent,
-            _ => env::panic_str(&format!("ERR_DEAL_NOT_DUE: deal {bundle_id}, state {:?}, confirm_by {}, now {now}", deal.state, deal.confirm_by)),
+            DealState::Disputed if now >= deal.disputed_at + RULING_WINDOW_NS => {
+                ReleaseReason::ArbiterSilent
+            }
+            _ => env::panic_str(&format!(
+                "ERR_DEAL_NOT_DUE: deal {bundle_id}, state {:?}, confirm_by {}, now {now}",
+                deal.state, deal.confirm_by
+            )),
         };
         for index in 0..2 {
             self.release_bond(bundle_id, &mut deal, index, reason);
@@ -376,9 +531,18 @@ impl X207Circle {
         // the whole bond leaves the lock: `amount` went to the other stake, the remainder is released
         let who = deal.parties[index].clone();
         deal.locked[index] = false;
-        write_u128(&locked_key(&who), bond_locked_of(&who).saturating_sub(deal.bond_each));
+        write_u128(
+            &locked_key(&who),
+            bond_locked_of(&who).saturating_sub(deal.bond_each),
+        );
         if deal.bond_each > amount {
-            BondReleased { bundle_id, account_id: who, amount: U128(deal.bond_each - amount), reason: ReleaseReason::Ruling }.emit();
+            BondReleased {
+                bundle_id,
+                account_id: who,
+                amount: U128(deal.bond_each - amount),
+                reason: ReleaseReason::Ruling,
+            }
+            .emit();
         }
     }
 }
@@ -403,21 +567,36 @@ mod tests {
     }
 
     fn at(caller: &str, ts: u64) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(caller)).block_timestamp(ts).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc(caller))
+            .block_timestamp(ts)
+            .build());
     }
 
     fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).expect_err("expected a panic");
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     fn circle() -> X207Circle {
         testing_env!(VMContextBuilder::new().block_timestamp(T0).build());
-        let mut c = X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), T0);
+        let mut c = X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".into(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            T0,
+        );
         for id in ["alice.near", "bob.near"] {
             let member = Member {
                 account_id: acc(id),
-                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse::<PublicKey>().unwrap(),
+                pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                    .parse::<PublicKey>()
+                    .unwrap(),
                 terms_hash: "a".repeat(64),
                 stake: STAKE,
                 limit: LIMIT,
@@ -443,15 +622,34 @@ mod tests {
     /// Deal `id` between alice and bob, bond 100 each, window of one day, arbiter `arb.near`.
     fn open(c: &mut X207Circle, id: u64) {
         at("solver.near", T0);
-        c.open_deal(id, [acc("alice.near"), acc("bob.near")], acc("arb.near"), Some(H.into()), T0 + 24 * 3600 * 1_000_000_000, BOND);
+        c.open_deal(
+            id,
+            [acc("alice.near"), acc("bob.near")],
+            acc("arb.near"),
+            Some(H.into()),
+            T0 + 24 * 3600 * 1_000_000_000,
+            BOND,
+        );
     }
 
     fn stakes(c: &X207Circle) -> (u128, u128) {
-        (c.members.get(&acc("alice.near")).unwrap().stake, c.members.get(&acc("bob.near")).unwrap().stake)
+        (
+            c.members.get(&acc("alice.near")).unwrap().stake,
+            c.members.get(&acc("bob.near")).unwrap().stake,
+        )
     }
 
     fn events() -> Vec<String> {
-        get_logs().iter().filter_map(|l| l.strip_prefix("EVENT_JSON:")).map(|b| near_sdk::serde_json::from_str::<near_sdk::serde_json::Value>(b).unwrap()["event"].as_str().unwrap().to_string()).collect()
+        get_logs()
+            .iter()
+            .filter_map(|l| l.strip_prefix("EVENT_JSON:"))
+            .map(|b| {
+                near_sdk::serde_json::from_str::<near_sdk::serde_json::Value>(b).unwrap()["event"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
     }
 
     // TC-CT-094-U01
@@ -459,18 +657,40 @@ mod tests {
     fn opening_a_deal_locks_the_bond_of_both_sides_inside_the_slack_between_stake_and_limit() {
         let mut c = circle();
         open(&mut c, 1);
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (BOND, BOND));
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (BOND, BOND)
+        );
         assert_eq!(deal_count_of(&acc("alice.near")), 1);
         assert_eq!(events(), vec!["bond_locked", "bond_locked"]);
         let view = c.get_deal(1).unwrap();
-        assert_eq!((view.state, view.locked, view.bond_each, view.arbiter), (DealState::Open, vec![true, true], U128(BOND), acc("arb.near")));
+        assert_eq!(
+            (view.state, view.locked, view.bond_each, view.arbiter),
+            (
+                DealState::Open,
+                vec![true, true],
+                U128(BOND),
+                acc("arb.near")
+            )
+        );
         // the slack was 200 (stake 1000, limit 800): a second deal of 100 fits, a third does not
         open(&mut c, 2);
         assert_eq!(bond_locked_of(&acc("alice.near")), 2 * BOND);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| open(&mut c, 3))).contains("ERR_BOND_INSUFFICIENT_STAKE"));
-        assert_eq!(bond_locked_of(&acc("bob.near")), 2 * BOND, "a refused deal locks nothing");
+        assert!(panic_text(std::panic::AssertUnwindSafe(|| open(&mut c, 3)))
+            .contains("ERR_BOND_INSUFFICIENT_STAKE"));
+        assert_eq!(
+            bond_locked_of(&acc("bob.near")),
+            2 * BOND,
+            "a refused deal locks nothing"
+        );
         // the limit can no longer grow into the locked part
-        assert_eq!(bound_limit(950, STAKE, &acc("alice.near")), STAKE - 2 * BOND);
+        assert_eq!(
+            bound_limit(950, STAKE, &acc("alice.near")),
+            STAKE - 2 * BOND
+        );
         assert_eq!(bound_limit(700, STAKE, &acc("alice.near")), 700);
     }
 
@@ -480,19 +700,61 @@ mod tests {
         let mut c = circle();
         at("solver.near", T0);
         let day = 24 * 3600 * 1_000_000_000;
-        let open_with = |c: &mut X207Circle, arbiter: &str, confirm_by: u64, hash: Option<String>| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.open_deal(9, [acc("alice.near"), acc("bob.near")], acc(arbiter), hash, confirm_by, 10)))
+        let open_with =
+            |c: &mut X207Circle, arbiter: &str, confirm_by: u64, hash: Option<String>| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    c.open_deal(
+                        9,
+                        [acc("alice.near"), acc("bob.near")],
+                        acc(arbiter),
+                        hash,
+                        confirm_by,
+                        10,
+                    )
+                }))
+            };
+        let text = |r: Result<(), Box<dyn std::any::Any + Send>>| {
+            r.expect_err("refused")
+                .downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_default()
         };
-        let text = |r: Result<(), Box<dyn std::any::Any + Send>>| r.expect_err("refused").downcast_ref::<String>().cloned().unwrap_or_default();
-        assert!(text(open_with(&mut c, "dao.near", T0 + day, None)).contains("ERR_ARBITER_INVALID"), "the owner is not an arbiter");
-        assert!(text(open_with(&mut c, "alice.near", T0 + day, None)).contains("ERR_ARBITER_INVALID"), "a party is not the arbiter");
-        assert!(text(open_with(&mut c, "arb.near", T0 + 3599 * 1_000_000_000, None)).contains("ERR_DEAL_WINDOW"));
-        assert!(text(open_with(&mut c, "arb.near", T0 + 15 * day, None)).contains("ERR_DEAL_WINDOW"));
-        assert!(text(open_with(&mut c, "arb.near", T0 + day, Some("XYZ".into()))).contains("agreement_hash"));
-        assert!(load_deal(9).is_none() && bond_locked_of(&acc("alice.near")) == 0, "a refusal leaves nothing");
+        assert!(
+            text(open_with(&mut c, "dao.near", T0 + day, None)).contains("ERR_ARBITER_INVALID"),
+            "the owner is not an arbiter"
+        );
+        assert!(
+            text(open_with(&mut c, "alice.near", T0 + day, None)).contains("ERR_ARBITER_INVALID"),
+            "a party is not the arbiter"
+        );
+        assert!(text(open_with(
+            &mut c,
+            "arb.near",
+            T0 + 3599 * 1_000_000_000,
+            None
+        ))
+        .contains("ERR_DEAL_WINDOW"));
+        assert!(
+            text(open_with(&mut c, "arb.near", T0 + 15 * day, None)).contains("ERR_DEAL_WINDOW")
+        );
+        assert!(
+            text(open_with(&mut c, "arb.near", T0 + day, Some("XYZ".into())))
+                .contains("agreement_hash")
+        );
+        assert!(
+            load_deal(9).is_none() && bond_locked_of(&acc("alice.near")) == 0,
+            "a refusal leaves nothing"
+        );
         for i in 0..MAX_OPEN_DEALS_PER_MEMBER as u64 {
             at("solver.near", T0);
-            c.open_deal(100 + i, [acc("alice.near"), acc("bob.near")], acc("arb.near"), None, T0 + day, 1);
+            c.open_deal(
+                100 + i,
+                [acc("alice.near"), acc("bob.near")],
+                acc("arb.near"),
+                None,
+                T0 + day,
+                1,
+            );
         }
         assert!(text(open_with(&mut c, "arb.near", T0 + day, None)).contains("ERR_DEAL_LIMIT"));
     }
@@ -503,18 +765,47 @@ mod tests {
         let mut c = circle();
         open(&mut c, 1);
         at("mallory.near", T0 + 5);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(1))).contains("ERR_DEAL_NOT_PARTY"));
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(99))).contains("ERR_DEAL_UNKNOWN"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(1)))
+                .contains("ERR_DEAL_NOT_PARTY")
+        );
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(99)))
+                .contains("ERR_DEAL_UNKNOWN")
+        );
         at("alice.near", T0 + 5);
         c.confirm_deal(1);
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (BOND, 0), "alice said bob delivered: bob's bond is free, hers is not");
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (BOND, 0),
+            "alice said bob delivered: bob's bond is free, hers is not"
+        );
         assert_eq!(c.get_deal(1).unwrap().locked, vec![true, false]);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(1))).contains("ERR_DEAL_CLOSED"), "twice");
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(1)))
+                .contains("ERR_DEAL_CLOSED"),
+            "twice"
+        );
         at("bob.near", T0 + 6);
         c.confirm_deal(1);
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (0, 0));
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (0, 0)
+        );
         assert!(c.get_deal(1).is_none());
-        assert_eq!((deal_count_of(&acc("alice.near")), deal_count_of(&acc("bob.near"))), (0, 0));
+        assert_eq!(
+            (
+                deal_count_of(&acc("alice.near")),
+                deal_count_of(&acc("bob.near"))
+            ),
+            (0, 0)
+        );
         assert!(events().iter().filter(|e| *e == "bond_released").count() >= 1);
         assert_eq!(stakes(&c), (STAKE, STAKE), "a confirmation moves nothing");
     }
@@ -526,25 +817,56 @@ mod tests {
         open(&mut c, 1);
         let confirm_by = c.get_deal(1).unwrap().confirm_by.0;
         at("alice.near", confirm_by + 1);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into()))).contains("ERR_DEAL_WINDOW_OVER"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into())))
+                .contains("ERR_DEAL_WINDOW_OVER")
+        );
         at("alice.near", T0 + 10);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, "nothex".into()))).contains("ERR_BAD_HASH"));
+        assert!(panic_text(std::panic::AssertUnwindSafe(
+            || c.dispute_deal(1, "nothex".into())
+        ))
+        .contains("ERR_BAD_HASH"));
         at("mallory.near", T0 + 10);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into()))).contains("ERR_DEAL_NOT_PARTY"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into())))
+                .contains("ERR_DEAL_NOT_PARTY")
+        );
         at("alice.near", T0 + 10);
         c.dispute_deal(1, H.into());
         let view = c.get_deal(1).unwrap();
-        assert_eq!((view.state, view.complainant, view.accused, view.disputed_at), (DealState::Disputed, Some(acc("alice.near")), Some(acc("bob.near")), Some(U64(T0 + 10))));
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into()))).contains("ERR_DEAL_ALREADY_DISPUTED"));
+        assert_eq!(
+            (view.state, view.complainant, view.accused, view.disputed_at),
+            (
+                DealState::Disputed,
+                Some(acc("alice.near")),
+                Some(acc("bob.near")),
+                Some(U64(T0 + 10))
+            )
+        );
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into())))
+                .contains("ERR_DEAL_ALREADY_DISPUTED")
+        );
         at("bob.near", T0 + 11);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into()))).contains("ERR_DEAL_ALREADY_DISPUTED"), "one dispute per deal");
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(1))).contains("ERR_DEAL_ALREADY_DISPUTED"), "no confirmation after a dispute");
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.dispute_deal(1, H.into())))
+                .contains("ERR_DEAL_ALREADY_DISPUTED"),
+            "one dispute per deal"
+        );
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.confirm_deal(1)))
+                .contains("ERR_DEAL_ALREADY_DISPUTED"),
+            "no confirmation after a dispute"
+        );
         // a party that confirmed cannot dispute afterwards
         let mut d = circle();
         open(&mut d, 1);
         at("alice.near", T0 + 5);
         d.confirm_deal(1);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| d.dispute_deal(1, H.into()))).contains("ERR_DEAL_CLOSED"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| d.dispute_deal(1, H.into())))
+                .contains("ERR_DEAL_CLOSED")
+        );
     }
 
     fn disputed(c: &mut X207Circle, complainant: &str) {
@@ -561,12 +883,29 @@ mod tests {
         let total = stakes(&c).0 + stakes(&c).1;
         at("arb.near", T0 + 20);
         c.rule_deal(1, Verdict::AccusedGuilty);
-        assert_eq!(stakes(&c), (STAKE + BOND, STAKE - BOND), "bob's bond moved to alice");
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (0, 0));
+        assert_eq!(
+            stakes(&c),
+            (STAKE + BOND, STAKE - BOND),
+            "bob's bond moved to alice"
+        );
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (0, 0)
+        );
         assert!(c.get_deal(1).is_none() && deal_count_of(&acc("alice.near")) == 0);
-        assert_eq!(stakes(&c).0 + stakes(&c).1, total, "the stakes of the circle did not change in sum");
+        assert_eq!(
+            stakes(&c).0 + stakes(&c).1,
+            total,
+            "the stakes of the circle did not change in sum"
+        );
         let e = events();
-        assert!(e.contains(&"deal_ruled".to_string()) && e.contains(&"bond_slashed".to_string()), "{e:?}");
+        assert!(
+            e.contains(&"deal_ruled".to_string()) && e.contains(&"bond_slashed".to_string()),
+            "{e:?}"
+        );
         // bob's limit was 800 and his stake is 900 now: still inside, so unchanged; the invariant holds
         let bob = c.members.get(&acc("bob.near")).unwrap();
         assert!(bob.limit <= bob.stake - bond_locked_of(&acc("bob.near")));
@@ -580,9 +919,22 @@ mod tests {
         at("arb.near", T0 + 20);
         c.rule_deal(1, Verdict::ComplaintFalse);
         assert_eq!(stakes(&c), (STAKE - BOND / 2, STAKE + BOND / 2));
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (0, 0));
-        let released: Vec<_> = get_logs().iter().filter(|l| l.contains("bond_released")).cloned().collect();
-        assert!(released.iter().any(|l| l.contains("\"amount\":\"50\"")), "the other half of her bond is released: {released:?}");
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (0, 0)
+        );
+        let released: Vec<_> = get_logs()
+            .iter()
+            .filter(|l| l.contains("bond_released"))
+            .cloned()
+            .collect();
+        assert!(
+            released.iter().any(|l| l.contains("\"amount\":\"50\"")),
+            "the other half of her bond is released: {released:?}"
+        );
     }
 
     // TC-CT-094-U07
@@ -593,19 +945,37 @@ mod tests {
         at("arb.near", T0 + 20);
         c.rule_deal(1, Verdict::NoFault);
         assert_eq!(stakes(&c), (STAKE, STAKE));
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (0, 0));
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (0, 0)
+        );
         // alice at the edge: limit 950 on a stake of 1000, a deal with a bond of 50 would not fit; with a lower limit it does and a ruling keeps the invariant
         let mut d = circle();
         d.members.get_mut(&acc("alice.near")).unwrap().limit = 900;
         at("solver.near", T0);
-        d.open_deal(1, [acc("alice.near"), acc("bob.near")], acc("arb.near"), None, T0 + 24 * 3600 * 1_000_000_000, 100);
+        d.open_deal(
+            1,
+            [acc("alice.near"), acc("bob.near")],
+            acc("arb.near"),
+            None,
+            T0 + 24 * 3600 * 1_000_000_000,
+            100,
+        );
         at("bob.near", T0 + 10);
         d.dispute_deal(1, H.into());
         at("arb.near", T0 + 20);
         d.rule_deal(1, Verdict::ComplaintFalse); // bob complained and lost half of his bond (50) to alice
         let bob = d.members.get(&acc("bob.near")).unwrap();
         assert_eq!(bob.stake, STAKE - 50);
-        assert!(bob.limit <= bob.stake, "limit {} stake {}", bob.limit, bob.stake);
+        assert!(
+            bob.limit <= bob.stake,
+            "limit {} stake {}",
+            bob.limit,
+            bob.stake
+        );
     }
 
     // TC-CT-094-U12 (review C-8, C-10): a party whose own bond is released cannot accuse; `confirm_by` belongs to `settle_deal`, not to `dispute_deal`
@@ -622,7 +992,11 @@ mod tests {
         open(&mut d, 1);
         let confirm_by = d.get_deal(1).unwrap().confirm_by.0;
         at("alice.near", confirm_by);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| d.dispute_deal(1, H.into()))).contains("ERR_DEAL_WINDOW_OVER"), "at confirm_by the window is over");
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| d.dispute_deal(1, H.into())))
+                .contains("ERR_DEAL_WINDOW_OVER"),
+            "at confirm_by the window is over"
+        );
         at("anybody.near", confirm_by);
         d.settle_deal(1);
     }
@@ -660,16 +1034,31 @@ mod tests {
         let mut c = circle();
         open(&mut c, 1);
         at("arb.near", T0 + 20);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.rule_deal(1, Verdict::NoFault))).contains("ERR_DEAL_NOT_DISPUTED"));
+        assert!(panic_text(std::panic::AssertUnwindSafe(
+            || c.rule_deal(1, Verdict::NoFault)
+        ))
+        .contains("ERR_DEAL_NOT_DISPUTED"));
         at("alice.near", T0 + 10);
         c.dispute_deal(1, H.into());
         for who in ["alice.near", "bob.near", "dao.near", "mallory.near"] {
             at(who, T0 + 20);
-            assert!(panic_text(std::panic::AssertUnwindSafe(|| c.rule_deal(1, Verdict::AccusedGuilty))).contains("ERR_NOT_ARBITER"), "{who}");
+            assert!(
+                panic_text(std::panic::AssertUnwindSafe(
+                    || c.rule_deal(1, Verdict::AccusedGuilty)
+                ))
+                .contains("ERR_NOT_ARBITER"),
+                "{who}"
+            );
         }
         at("arb.near", T0 + 10 + RULING_WINDOW_NS);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.rule_deal(1, Verdict::AccusedGuilty))).contains("ERR_RULING_WINDOW"));
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.rule_deal(99, Verdict::NoFault))).contains("ERR_DEAL_UNKNOWN"));
+        assert!(panic_text(std::panic::AssertUnwindSafe(
+            || c.rule_deal(1, Verdict::AccusedGuilty)
+        ))
+        .contains("ERR_RULING_WINDOW"));
+        assert!(panic_text(std::panic::AssertUnwindSafe(
+            || c.rule_deal(99, Verdict::NoFault)
+        ))
+        .contains("ERR_DEAL_UNKNOWN"));
         assert_eq!(stakes(&c), (STAKE, STAKE), "nothing moved");
     }
 
@@ -679,23 +1068,43 @@ mod tests {
         let mut c = circle();
         open(&mut c, 1);
         at("anybody.near", T0 + 100);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.settle_deal(1))).contains("ERR_DEAL_NOT_DUE"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.settle_deal(1)))
+                .contains("ERR_DEAL_NOT_DUE")
+        );
         let confirm_by = c.get_deal(1).unwrap().confirm_by.0;
         at("anybody.near", confirm_by);
         c.settle_deal(1);
-        assert_eq!((bond_locked_of(&acc("alice.near")), bond_locked_of(&acc("bob.near"))), (0, 0));
+        assert_eq!(
+            (
+                bond_locked_of(&acc("alice.near")),
+                bond_locked_of(&acc("bob.near"))
+            ),
+            (0, 0)
+        );
         assert!(c.get_deal(1).is_none());
-        assert!(get_logs().iter().any(|l| l.contains("\"reason\":\"elapsed\"")));
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("\"reason\":\"elapsed\"")));
         assert_eq!(stakes(&c), (STAKE, STAKE));
         // a dispute and a silent arbiter
         let mut d = circle();
         disputed(&mut d, "alice.near");
         at("anybody.near", T0 + 10 + RULING_WINDOW_NS - 1);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| d.settle_deal(1))).contains("ERR_DEAL_NOT_DUE"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| d.settle_deal(1)))
+                .contains("ERR_DEAL_NOT_DUE")
+        );
         at("anybody.near", T0 + 10 + RULING_WINDOW_NS);
         d.settle_deal(1);
-        assert_eq!(stakes(&d), (STAKE, STAKE), "a silent arbiter punishes nobody");
-        assert!(get_logs().iter().any(|l| l.contains("\"reason\":\"arbiter_silent\"")));
+        assert_eq!(
+            stakes(&d),
+            (STAKE, STAKE),
+            "a silent arbiter punishes nobody"
+        );
+        assert!(get_logs()
+            .iter()
+            .any(|l| l.contains("\"reason\":\"arbiter_silent\"")));
         assert!(d.get_deal(1).is_none());
     }
 

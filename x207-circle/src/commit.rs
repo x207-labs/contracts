@@ -7,23 +7,31 @@
 //! Event logs: near caps the total log length of one call at 16 KiB, so a commit with more than
 //! about 60 edges at 64-character accounts does not fit the chunked events; see the CT-004 note.
 
-use near_sdk::json_types::{I128, U128, U64};
 use near_sdk::json_types::U128 as WireU128;
+use near_sdk::json_types::{I128, U128, U64};
 use near_sdk::serde_json::json;
 use near_sdk::{assert_one_yocto, env, near, AccountId, NearToken, Promise};
 
-use crate::events::{emit_clearing_applied, positions_hash, EpochCommitted, PositionEntry, SolverFeeClaimFailed, SolverFeeClaimed, X207Event};
+use crate::events::{
+    emit_clearing_applied, positions_hash, EpochCommitted, PositionEntry, SolverFeeClaimFailed,
+    SolverFeeClaimed, X207Event,
+};
 use crate::settlement::{Position, PositionRole, PositionStatus};
 use crate::state::{X207Circle, X207CircleExt};
 use crate::types::{ClearingEdge, EpochId};
 
 fn checked_signed(value: u128) -> i128 {
-    i128::try_from(value).unwrap_or_else(|_| env::panic_str("ERR_D2_ACCOUNTING: amount exceeds i128"))
+    i128::try_from(value)
+        .unwrap_or_else(|_| env::panic_str("ERR_D2_ACCOUNTING: amount exceeds i128"))
 }
 
 /// Splits `fee_total` over the debtors of `edges` pro rata to their cleared amount: floor shares, then the
 /// leftover units one by one in account order. Returns `(account, share)` for every debtor with a share.
-pub fn pro_rata_fee(edges: &[ClearingEdge], cleared_total: u128, fee_total: u128) -> Vec<(AccountId, u128)> {
+pub fn pro_rata_fee(
+    edges: &[ClearingEdge],
+    cleared_total: u128,
+    fee_total: u128,
+) -> Vec<(AccountId, u128)> {
     if fee_total == 0 || cleared_total == 0 {
         return vec![];
     }
@@ -34,7 +42,9 @@ pub fn pro_rata_fee(edges: &[ClearingEdge], cleared_total: u128, fee_total: u128
     let mut shares: Vec<(AccountId, u128)> = out
         .into_iter()
         .map(|(account, cleared)| {
-            let product = fee_total.checked_mul(cleared).unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: fee share overflows u128"));
+            let product = fee_total
+                .checked_mul(cleared)
+                .unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: fee share overflows u128"));
             let share = product / cleared_total;
             (account, share)
         })
@@ -54,9 +64,18 @@ pub fn pro_rata_fee(edges: &[ClearingEdge], cleared_total: u128, fee_total: u128
 impl X207Circle {
     /// Charges the P1 fees of `epoch` from the stake of the debtors (what a stake cannot cover is not charged) and
     /// credits the reserve and `solver`. Returns `(clearing_fee, solver_fee)` actually collected.
-    fn charge_fees(&mut self, epoch: EpochId, solver: &Option<AccountId>, cleared_total: u128, edges: &[ClearingEdge]) -> (u128, u128) {
+    fn charge_fees(
+        &mut self,
+        epoch: EpochId,
+        solver: &Option<AccountId>,
+        cleared_total: u128,
+        edges: &[ClearingEdge],
+    ) -> (u128, u128) {
         let fees = self.epoch_or_panic(epoch).params.fees.clone();
-        let (clearing_bps, solver_bps) = (u128::from(fees.clearing_fee_bps), u128::from(fees.solver_fee_bps));
+        let (clearing_bps, solver_bps) = (
+            u128::from(fees.clearing_fee_bps),
+            u128::from(fees.solver_fee_bps),
+        );
         let Some(solver) = solver else { return (0, 0) };
         if cleared_total == 0 || (clearing_bps == 0 && solver_bps == 0) {
             return (0, 0);
@@ -65,7 +84,10 @@ impl X207Circle {
         let solver_fee = cleared_total.saturating_mul(solver_bps) / 10_000;
         let mut charged = 0u128;
         for (account, share) in pro_rata_fee(edges, cleared_total, clearing_fee + solver_fee) {
-            let member = self.members.get_mut(&account).expect("a debtor of a cleared edge is a member");
+            let member = self
+                .members
+                .get_mut(&account)
+                .expect("a debtor of a cleared edge is a member");
             let take = share.min(member.stake);
             member.stake -= take;
             member.limit = crate::deal::bound_limit(member.limit, member.stake, &account); // review C-6: the bond is not available as a limit
@@ -84,13 +106,18 @@ impl X207Circle {
     /// Applies the stored proposal of `epoch` to the pair map and marks it committed with its
     /// edges dropped. Returns the solver, `cleared_total`, and the edges that were applied.
     fn apply_proposal(&mut self, epoch: EpochId) -> (Option<AccountId>, u128, Vec<ClearingEdge>) {
-        let Some(proposal) = self.proposals.get_mut(&epoch) else { return (None, 0, vec![]) };
+        let Some(proposal) = self.proposals.get_mut(&epoch) else {
+            return (None, 0, vec![]);
+        };
         let edges = std::mem::take(&mut proposal.edges);
         proposal.committed = true;
         let (solver, cleared_total) = (proposal.solver.clone(), proposal.cleared_total.0);
         for edge in &edges {
             let key = (epoch, edge.debtor.clone(), edge.creditor.clone());
-            let pair = self.pairs.get_mut(&key).unwrap_or_else(|| env::panic_str("ERR_EDGE_NOT_IN_SNAPSHOT"));
+            let pair = self
+                .pairs
+                .get_mut(&key)
+                .unwrap_or_else(|| env::panic_str("ERR_EDGE_NOT_IN_SNAPSHOT"));
             pair.cleared += edge.cleared.0;
         }
         (Some(solver), cleared_total, edges)
@@ -116,7 +143,12 @@ pub struct ProposalView {
 impl X207Circle {
     /// CT-099: the stored proposal of `epoch`, a page of its edges, for a reader that wants the edges before `commit_epoch` (the log of the commit carries only `edge_count` and
     /// `edges_hash`). After the commit the edges are gone from the proposal; `list_obligations` gives `cleared` per pair. `None` when there is no proposal.
-    pub fn get_proposal(&self, epoch: EpochId, from_index: u32, limit: u32) -> Option<ProposalView> {
+    pub fn get_proposal(
+        &self,
+        epoch: EpochId,
+        from_index: u32,
+        limit: u32,
+    ) -> Option<ProposalView> {
         let proposal = self.proposals.get(&epoch)?;
         Some(ProposalView {
             epoch,
@@ -127,8 +159,20 @@ impl X207Circle {
             // a proposal stored by 0.0.12 has no raw key: its hash is computed from the edges while they are still there
             proposal_hash: env::storage_read(&crate::clearing::proposal_hash_key(epoch))
                 .map(|b| String::from_utf8(b).expect("hash is ascii"))
-                .unwrap_or_else(|| if proposal.edges.is_empty() { String::new() } else { crate::events::edges_hash(&proposal.edges) }),
-            edges: proposal.edges.iter().skip(from_index as usize).take(limit.min(300) as usize).cloned().collect(),
+                .unwrap_or_else(|| {
+                    if proposal.edges.is_empty() {
+                        String::new()
+                    } else {
+                        crate::events::edges_hash(&proposal.edges)
+                    }
+                }),
+            edges: proposal
+                .edges
+                .iter()
+                .skip(from_index as usize)
+                .take(limit.min(300) as usize)
+                .cloned()
+                .collect(),
         })
     }
 
@@ -143,7 +187,10 @@ impl X207Circle {
     pub fn claim_solver_fee(&mut self) -> Promise {
         assert_one_yocto();
         if env::prepaid_gas() < crate::settlement::CLAIM_MIN_GAS {
-            env::panic_str(&format!("ERR_GAS_TOO_LOW: need {} TGas", crate::settlement::CLAIM_MIN_GAS.as_tgas()));
+            env::panic_str(&format!(
+                "ERR_GAS_TOO_LOW: need {} TGas",
+                crate::settlement::CLAIM_MIN_GAS.as_tgas()
+            ));
         }
         let account = env::predecessor_account_id();
         let amount = self.solver_fees.get(&account).copied().unwrap_or(0);
@@ -155,11 +202,17 @@ impl X207Circle {
         Promise::new(self.usdt_token_id.clone())
             .function_call(
                 "ft_transfer".to_string(),
-                json!({"receiver_id": account, "amount": WireU128(amount), "memo": null}).to_string().into_bytes(),
+                json!({"receiver_id": account, "amount": WireU128(amount), "memo": null})
+                    .to_string()
+                    .into_bytes(),
                 NearToken::from_yoctonear(1),
                 crate::settlement::FT_TRANSFER_GAS,
             )
-            .then(Self::ext(env::current_account_id()).with_static_gas(crate::settlement::CLAIM_CALLBACK_GAS).on_solver_fee_resolved(account, WireU128(amount)))
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(crate::settlement::CLAIM_CALLBACK_GAS)
+                    .on_solver_fee_resolved(account, WireU128(amount)),
+            )
     }
 
     /// Callback of the solver fee transfer. Never panics. Returns the amount that arrived.
@@ -188,27 +241,36 @@ impl X207Circle {
         let (solver, cleared_total, edges) = self.apply_proposal(epoch);
         let (clearing_fee, solver_fee) = self.charge_fees(epoch, &solver, cleared_total, &edges);
         let e = self.epoch_or_panic(epoch);
-        let payment_deadline = e.payment_deadline.expect("payment_window epoch has payment_deadline");
+        let payment_deadline = e
+            .payment_deadline
+            .expect("payment_window epoch has payment_deadline");
         let committed_at = e.committed_at.expect("committed epoch has committed_at");
         let participants: Vec<AccountId> = e.participants.iter().cloned().collect();
 
         let (mut total_due, mut total_claimable) = (0u128, 0u128);
         let mut entries = Vec::with_capacity(participants.len());
         for account in participants {
-            let totals = self.totals.get(&(epoch, account.clone())).cloned().expect("participant has totals");
+            let totals = self
+                .totals
+                .get(&(epoch, account.clone()))
+                .cloned()
+                .expect("participant has totals");
             let net = checked_signed(totals.owed_in) - checked_signed(totals.owed_out);
             let (role, status, amount) = match net {
                 n if n < 0 => (PositionRole::Debtor, PositionStatus::Due, n.unsigned_abs()),
-                n if n > 0 => (PositionRole::Creditor, PositionStatus::Claimable, n.unsigned_abs()),
+                n if n > 0 => (
+                    PositionRole::Creditor,
+                    PositionStatus::Claimable,
+                    n.unsigned_abs(),
+                ),
                 _ => (PositionRole::Debtor, PositionStatus::Due, 0),
             };
             let due = if net < 0 { amount } else { 0 };
             // Gross obligations of this epoch leave the debt, only the residual stays (spec 4.4, step 3).
             let debt = self.outstanding_debt.get(&account).copied().unwrap_or(0);
-            let debt = debt
-                .checked_sub(totals.owed_out)
-                .unwrap_or_else(|| env::panic_str("ERR_D2_ACCOUNTING: outstanding_debt below epoch obligations"))
-                + due;
+            let debt = debt.checked_sub(totals.owed_out).unwrap_or_else(|| {
+                env::panic_str("ERR_D2_ACCOUNTING: outstanding_debt below epoch obligations")
+            }) + due;
             self.outstanding_debt.insert(account.clone(), debt);
 
             if net == 0 {
@@ -242,13 +304,31 @@ impl X207Circle {
             self.put_position(
                 epoch,
                 account,
-                Position { net, role, status, amount, recovered: 0, payment_deadline, updated_at_block: block },
+                Position {
+                    net,
+                    role,
+                    status,
+                    amount,
+                    recovered: 0,
+                    payment_deadline,
+                    updated_at_block: block,
+                },
             );
         }
-        assert_eq!(total_due, total_claimable, "I-09: sum of due must equal sum of claimable");
+        assert_eq!(
+            total_due, total_claimable,
+            "I-09: sum of due must equal sum of claimable"
+        );
         self.epoch_mut_or_panic(epoch).total_cleared = cleared_total;
 
-        emit_clearing_applied(epoch, solver, U128(cleared_total), &edges, U128(clearing_fee), U128(solver_fee));
+        emit_clearing_applied(
+            epoch,
+            solver,
+            U128(cleared_total),
+            &edges,
+            U128(clearing_fee),
+            U128(solver_fee),
+        );
         EpochCommitted {
             epoch,
             committed_at: U64(committed_at),
@@ -284,22 +364,41 @@ mod tests {
     }
 
     fn at(ns: u64, predecessor: &str) {
-        testing_env!(VMContextBuilder::new().predecessor_account_id(acc(predecessor)).block_timestamp(ns).block_height(500).build());
+        testing_env!(VMContextBuilder::new()
+            .predecessor_account_id(acc(predecessor))
+            .block_timestamp(ns)
+            .block_height(500)
+            .build());
     }
 
     fn edge(d: &str, c: &str, cleared: u128) -> ClearingEdge {
-        ClearingEdge { debtor: acc(d), creditor: acc(c), cleared: U128(cleared) }
+        ClearingEdge {
+            debtor: acc(d),
+            creditor: acc(c),
+            cleared: U128(cleared),
+        }
     }
 
     /// Stands in for `register_cumulative`: the same D2 bookkeeping without signatures.
     fn register(c: &mut X207Circle, epoch: EpochId, payer: &str, payee: &str, amount: u128) {
-        c.pairs.insert((epoch, acc(payer), acc(payee)), PairState { cumulative: amount, last_seq: 1, cleared: 0 });
+        c.pairs.insert(
+            (epoch, acc(payer), acc(payee)),
+            PairState {
+                cumulative: amount,
+                last_seq: 1,
+                cleared: 0,
+            },
+        );
         let debt = c.outstanding_debt.get(&acc(payer)).copied().unwrap_or(0);
         c.outstanding_debt.insert(acc(payer), debt + amount);
         for (account, out, inn) in [(payer, amount, 0), (payee, 0, amount)] {
             let key = (epoch, acc(account));
             let is_new = c.totals.get(&key).is_none();
-            let mut totals = c.totals.get(&key).cloned().unwrap_or_else(ParticipantTotals::default);
+            let mut totals = c
+                .totals
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(ParticipantTotals::default);
             totals.owed_out += out;
             totals.owed_in += inn;
             c.totals.insert(key, totals);
@@ -317,7 +416,14 @@ mod tests {
 
     fn circle() -> X207Circle {
         at(T0, "deployer.near");
-        X207Circle::with_config(acc("dao.near"), "agents-main".into(), acc("usdt.near"), acc("intents.near"), Params::default(), T0)
+        X207Circle::with_config(
+            acc("dao.near"),
+            "agents-main".into(),
+            acc("usdt.near"),
+            acc("intents.near"),
+            Params::default(),
+            T0,
+        )
     }
 
     /// S1 of the test case file, registered but not yet closed.
@@ -350,12 +456,18 @@ mod tests {
     }
 
     fn net(c: &X207Circle, epoch: EpochId, account: &str) -> i128 {
-        let t = c.totals.get(&(epoch, acc(account))).cloned().unwrap_or_default();
+        let t = c
+            .totals
+            .get(&(epoch, acc(account)))
+            .cloned()
+            .unwrap_or_default();
         t.owed_in as i128 - t.owed_out as i128
     }
 
     fn position(c: &X207Circle, account: &str) -> Option<crate::settlement::PositionView> {
-        c.list_positions(1, 0, 100).into_iter().find(|p| p.account_id == acc(account))
+        c.list_positions(1, 0, 100)
+            .into_iter()
+            .find(|p| p.account_id == acc(account))
     }
 
     fn log_events() -> Vec<Value> {
@@ -368,7 +480,10 @@ mod tests {
 
     fn panic_text(f: impl FnOnce() + std::panic::UnwindSafe) -> String {
         let err = std::panic::catch_unwind(f).unwrap_err();
-        err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 
     // TC-CT-028-01
@@ -385,12 +500,35 @@ mod tests {
 
         let proposal = c.get_clearing_proposal(1).unwrap();
         assert!(proposal.committed && proposal.edges.is_empty());
-        assert_eq!((proposal.edge_count, proposal.cleared_total.0), (3, 75 * CREDIT));
+        assert_eq!(
+            (proposal.edge_count, proposal.cleared_total.0),
+            (3, 75 * CREDIT)
+        );
 
         let scraper = position(&c, "scraper.near").unwrap();
-        assert_eq!((scraper.role, scraper.status, scraper.amount.0, scraper.net.0), (PositionRole::Debtor, PositionStatus::Due, 35 * CREDIT, -35 * CREDIT as i128));
+        assert_eq!(
+            (
+                scraper.role,
+                scraper.status,
+                scraper.amount.0,
+                scraper.net.0
+            ),
+            (
+                PositionRole::Debtor,
+                PositionStatus::Due,
+                35 * CREDIT,
+                -35 * CREDIT as i128
+            )
+        );
         let gpu = position(&c, "gpu.near").unwrap();
-        assert_eq!((gpu.role, gpu.status, gpu.amount.0), (PositionRole::Creditor, PositionStatus::Claimable, 35 * CREDIT));
+        assert_eq!(
+            (gpu.role, gpu.status, gpu.amount.0),
+            (
+                PositionRole::Creditor,
+                PositionStatus::Claimable,
+                35 * CREDIT
+            )
+        );
         assert!(position(&c, "translator.near").is_none());
 
         let e = c.get_epoch(Some(1)).unwrap();
@@ -413,7 +551,13 @@ mod tests {
         let _ = get_logs();
         c.commit_epoch(1);
         let events = log_events();
-        assert_eq!(events.iter().map(|e| e["event"].as_str().unwrap()).collect::<Vec<_>>(), ["clearing_applied", "epoch_committed"]);
+        assert_eq!(
+            events
+                .iter()
+                .map(|e| e["event"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["clearing_applied", "epoch_committed"]
+        );
 
         let applied = &events[0]["data"][0];
         assert_eq!(applied["solver"], "solver1.near");
@@ -422,32 +566,61 @@ mod tests {
         assert_eq!(applied["edge_count"], 3);
         assert_eq!(applied["edges_hash"].as_str().map(str::len), Some(64));
         assert!(applied.get("edges").is_none() && applied.get("chunk").is_none());
-        assert_eq!((applied["clearing_fee"].as_str(), applied["solver_fee"].as_str()), (Some("0"), Some("0")));
+        assert_eq!(
+            (
+                applied["clearing_fee"].as_str(),
+                applied["solver_fee"].as_str()
+            ),
+            (Some("0"), Some("0"))
+        );
 
         let committed = &events[1]["data"][0];
         assert_eq!(committed["total_due"], "35000000");
         assert_eq!(committed["total_claimable"], "35000000");
         assert_eq!(committed["committed_at"], T_PROP.to_string());
-        assert_eq!(committed["payment_deadline"], (T_PROP + 1800 * SEC).to_string());
+        assert_eq!(
+            committed["payment_deadline"],
+            (T_PROP + 1800 * SEC).to_string()
+        );
         assert!(committed.get("chunk").is_none() && committed.get("chunks").is_none());
         assert_eq!(committed["position_count"], 3);
         assert_eq!(committed["positions_hash"].as_str().map(str::len), Some(64));
         let positions = committed["positions"].as_array().unwrap();
         assert_eq!(positions.len(), 3);
         let by = |name: &str| positions.iter().find(|p| p["account_id"] == name).unwrap();
-        assert_eq!((by("scraper.near")["role"].as_str(), by("scraper.near")["status"].as_str(), by("scraper.near")["outstanding_debt"].as_str()), (Some("debtor"), Some("due"), Some("35000000")));
-        assert_eq!((by("gpu.near")["role"].as_str(), by("gpu.near")["status"].as_str(), by("gpu.near")["amount"].as_str()), (Some("creditor"), Some("claimable"), Some("35000000")));
+        assert_eq!(
+            (
+                by("scraper.near")["role"].as_str(),
+                by("scraper.near")["status"].as_str(),
+                by("scraper.near")["outstanding_debt"].as_str()
+            ),
+            (Some("debtor"), Some("due"), Some("35000000"))
+        );
+        assert_eq!(
+            (
+                by("gpu.near")["role"].as_str(),
+                by("gpu.near")["status"].as_str(),
+                by("gpu.near")["amount"].as_str()
+            ),
+            (Some("creditor"), Some("claimable"), Some("35000000"))
+        );
         let zero = by("translator.near");
         assert_eq!(zero["role"], "none");
         assert!(zero["status"].is_null());
-        assert_eq!((zero["amount"].as_str(), zero["outstanding_debt"].as_str()), (Some("0"), Some("0")));
+        assert_eq!(
+            (zero["amount"].as_str(), zero["outstanding_debt"].as_str()),
+            (Some("0"), Some("0"))
+        );
     }
 
     // TC-CT-028-03
     #[test]
     fn net_positions_are_unchanged_by_clearing() {
         let c0 = s1();
-        let before: Vec<i128> = ["scraper.near", "gpu.near", "translator.near"].iter().map(|a| net(&c0, 1, a)).collect();
+        let before: Vec<i128> = ["scraper.near", "gpu.near", "translator.near"]
+            .iter()
+            .map(|a| net(&c0, 1, a))
+            .collect();
         let mut c = closed(c0, Some(p_s1()));
         c.commit_epoch(1);
         // D2 after the commit: net from the remaining obligations of the pair map.
@@ -455,10 +628,18 @@ mod tests {
             .iter()
             .map(|a| {
                 let mut n = 0i128;
-                for (d, cr) in [("scraper.near", "gpu.near"), ("gpu.near", "translator.near"), ("translator.near", "scraper.near")] {
+                for (d, cr) in [
+                    ("scraper.near", "gpu.near"),
+                    ("gpu.near", "translator.near"),
+                    ("translator.near", "scraper.near"),
+                ] {
                     let o = c.obligation(1, acc(d), acc(cr)).unwrap().obligation.0 as i128;
-                    if cr == *a { n += o }
-                    if d == *a { n -= o }
+                    if cr == *a {
+                        n += o
+                    }
+                    if d == *a {
+                        n -= o
+                    }
                 }
                 n
             })
@@ -484,11 +665,25 @@ mod tests {
         let mut c = closed(c, Some(p_opt));
         c.commit_epoch(1);
         let all = c.list_positions(1, 0, 100);
-        let due: u128 = all.iter().filter(|p| p.status == PositionStatus::Due).map(|p| p.amount.0).sum();
-        let claimable: u128 = all.iter().filter(|p| p.status == PositionStatus::Claimable).map(|p| p.amount.0).sum();
+        let due: u128 = all
+            .iter()
+            .filter(|p| p.status == PositionStatus::Due)
+            .map(|p| p.amount.0)
+            .sum();
+        let claimable: u128 = all
+            .iter()
+            .filter(|p| p.status == PositionStatus::Claimable)
+            .map(|p| p.amount.0)
+            .sum();
         assert_eq!((due, claimable), (10 * CREDIT, 10 * CREDIT));
-        assert_eq!(position(&c, "analyst.near").unwrap().status, PositionStatus::Due);
-        assert_eq!(position(&c, "summarizer.near").unwrap().status, PositionStatus::Claimable);
+        assert_eq!(
+            position(&c, "analyst.near").unwrap().status,
+            PositionStatus::Due
+        );
+        assert_eq!(
+            position(&c, "summarizer.near").unwrap().status,
+            PositionStatus::Claimable
+        );
         assert!(position(&c, "coder.near").is_none());
     }
 
@@ -497,7 +692,10 @@ mod tests {
     fn commit_needs_the_proposal_window_to_end() {
         let mut c = closed(s1(), Some(p_s1()));
         at(T_PROP - 1, "keeper.near");
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(1))).contains("ERR_PROPOSAL_WINDOW_OPEN"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(1)))
+                .contains("ERR_PROPOSAL_WINDOW_OPEN")
+        );
         at(T_PROP, "keeper.near");
         c.commit_epoch(1);
         assert!(position(&c, "scraper.near").is_some());
@@ -507,17 +705,28 @@ mod tests {
     #[test]
     fn commit_in_the_wrong_phase() {
         let mut c = s1();
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(1))).contains("ERR_WRONG_PHASE"), "open epoch");
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(1)))
+                .contains("ERR_WRONG_PHASE"),
+            "open epoch"
+        );
         let mut c = closed(s1(), Some(p_s1()));
         c.commit_epoch(1);
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(1))).contains("ERR_WRONG_PHASE"), "second commit");
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(1)))
+                .contains("ERR_WRONG_PHASE"),
+            "second commit"
+        );
     }
 
     // TC-CT-028-07
     #[test]
     fn commit_unknown_epoch() {
         let mut c = s1();
-        assert!(panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(99))).contains("ERR_UNKNOWN_EPOCH"));
+        assert!(
+            panic_text(std::panic::AssertUnwindSafe(|| c.commit_epoch(99)))
+                .contains("ERR_UNKNOWN_EPOCH")
+        );
     }
 
     // TC-CT-028-08
@@ -532,10 +741,19 @@ mod tests {
         assert_eq!(applied["cleared_total"], "0");
         assert_eq!(applied["edge_count"], 0);
         // the hash of an empty list of edges: sha256 of `[]`
-        assert_eq!(applied["edges_hash"], "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945");
-        assert_eq!(position(&c, "scraper.near").unwrap().status, PositionStatus::Due);
+        assert_eq!(
+            applied["edges_hash"],
+            "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        );
+        assert_eq!(
+            position(&c, "scraper.near").unwrap().status,
+            PositionStatus::Due
+        );
         assert_eq!(position(&c, "scraper.near").unwrap().amount.0, 35 * CREDIT);
-        assert_eq!(position(&c, "gpu.near").unwrap().status, PositionStatus::Claimable);
+        assert_eq!(
+            position(&c, "gpu.near").unwrap().status,
+            PositionStatus::Claimable
+        );
         assert_eq!(c.outstanding_debt(acc("scraper.near")).0, 35 * CREDIT);
         assert_eq!(c.get_clearing_proposal(1), None);
     }
@@ -553,7 +771,10 @@ mod tests {
         at(T_PROP, "keeper.near");
         c.commit_epoch(1);
         assert_eq!(c.outstanding_debt(acc("scraper.near")).0, 45 * CREDIT);
-        assert_eq!(c.outstanding_debt(acc("gpu.near")).0, 25 * CREDIT - 25 * CREDIT);
+        assert_eq!(
+            c.outstanding_debt(acc("gpu.near")).0,
+            25 * CREDIT - 25 * CREDIT
+        );
     }
 
     // TC-CT-028-10
@@ -562,14 +783,23 @@ mod tests {
         let mut c = circle();
         register(&mut c, 1, "translator.near", "gpu.near", 50 * CREDIT);
         register(&mut c, 1, "gpu.near", "translator.near", 50 * CREDIT);
-        let edges = vec![edge("translator.near", "gpu.near", 50 * CREDIT), edge("gpu.near", "translator.near", 50 * CREDIT)];
+        let edges = vec![
+            edge("translator.near", "gpu.near", 50 * CREDIT),
+            edge("gpu.near", "translator.near", 50 * CREDIT),
+        ];
         let mut c = closed(c, Some(edges));
         let _ = get_logs();
         c.commit_epoch(1);
         assert!(c.list_positions(1, 0, 100).is_empty());
-        let committed = log_events().into_iter().find(|e| e["event"] == "epoch_committed").unwrap();
+        let committed = log_events()
+            .into_iter()
+            .find(|e| e["event"] == "epoch_committed")
+            .unwrap();
         let data = &committed["data"][0];
-        assert_eq!((data["total_due"].as_str(), data["total_claimable"].as_str()), (Some("0"), Some("0")));
+        assert_eq!(
+            (data["total_due"].as_str(), data["total_claimable"].as_str()),
+            (Some("0"), Some("0"))
+        );
         assert_eq!(c.outstanding_debt(acc("translator.near")).0, 0);
     }
 
@@ -578,16 +808,31 @@ mod tests {
     fn positions_event_is_one_log_with_a_count_and_a_hash() {
         let mut c = circle();
         for i in 0..32 {
-            register(&mut c, 1, &format!("d{i:02}.near"), &format!("c{i:02}.near"), 10 * CREDIT);
+            register(
+                &mut c,
+                1,
+                &format!("d{i:02}.near"),
+                &format!("c{i:02}.near"),
+                10 * CREDIT,
+            );
         }
         let mut c = closed(c, None);
         let _ = get_logs();
         c.commit_epoch(1);
-        let logs: Vec<Value> = log_events().into_iter().filter(|e| e["event"] == "epoch_committed").collect();
+        let logs: Vec<Value> = log_events()
+            .into_iter()
+            .filter(|e| e["event"] == "epoch_committed")
+            .collect();
         assert_eq!(logs.len(), 1);
         let data = &logs[0]["data"][0];
         assert_eq!(data["total_due"], "320000000");
-        assert_eq!((data["position_count"].as_u64(), data["positions"].as_array().unwrap().len()), (Some(64), 64));
+        assert_eq!(
+            (
+                data["position_count"].as_u64(),
+                data["positions"].as_array().unwrap().len()
+            ),
+            (Some(64), 64)
+        );
         assert!(data.get("chunk").is_none() && data.get("chunks").is_none());
         assert_eq!(data["positions_hash"].as_str().map(str::len), Some(64));
     }
@@ -597,7 +842,15 @@ mod tests {
     fn get_proposal_pages_the_edges_until_the_commit() {
         let mut c = closed(s1(), Some(p_s1()));
         let view = c.get_proposal(1, 0, 2).expect("a proposal");
-        assert_eq!((view.edge_count, view.edges.len(), view.committed, view.cleared_total.0), (3, 2, false, 75 * CREDIT));
+        assert_eq!(
+            (
+                view.edge_count,
+                view.edges.len(),
+                view.committed,
+                view.cleared_total.0
+            ),
+            (3, 2, false, 75 * CREDIT)
+        );
         assert_eq!(c.get_proposal(1, 2, 10).unwrap().edges.len(), 1);
         assert_eq!(c.get_proposal(1, 3, 10).unwrap().edges.len(), 0);
         assert!(c.get_proposal(2, 0, 10).is_none());
@@ -609,9 +862,15 @@ mod tests {
         c.commit_epoch(1);
         let after = c.get_proposal(1, 0, 10).unwrap();
         // B8-F2: `edge_count` is the stored count, not the length of the (now empty) list
-        assert_eq!((after.committed, after.edges.len(), after.edge_count), (true, 0, 3));
+        assert_eq!(
+            (after.committed, after.edges.len(), after.edge_count),
+            (true, 0, 3)
+        );
         assert_eq!(after.proposal_hash, hash, "the hash stays after the commit");
-        let applied = log_events().into_iter().find(|e| e["event"] == "clearing_applied").unwrap();
+        let applied = log_events()
+            .into_iter()
+            .find(|e| e["event"] == "clearing_applied")
+            .unwrap();
         assert_eq!(applied["data"][0]["edges_hash"], hash);
     }
 
@@ -619,15 +878,21 @@ mod tests {
     #[test]
     fn settled_history_is_untouched() {
         let mut c = closed(s1(), Some(p_s1()));
-        c.members.insert(acc("scraper.near"), member("scraper.near"));
+        c.members
+            .insert(acc("scraper.near"), member("scraper.near"));
         c.commit_epoch(1);
-        assert_eq!(c.members.get(&acc("scraper.near")).unwrap().settled_history, 0);
+        assert_eq!(
+            c.members.get(&acc("scraper.near")).unwrap().settled_history,
+            0
+        );
     }
 
     fn member(id: &str) -> crate::member::Member {
         crate::member::Member {
             account_id: acc(id),
-            pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap(),
+            pubkey_voucher: "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp"
+                .parse()
+                .unwrap(),
             terms_hash: "a".repeat(64),
             stake: 100 * CREDIT,
             limit: 80 * CREDIT,
@@ -646,7 +911,11 @@ mod tests {
     // `scripts/fee_charges.py`); an indexer repeats the same rule because the log of `commit_epoch` has no event per member for it
     #[test]
     fn fee_charges_match_the_golden_vector() {
-        let vector: Value = serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/vectors/fee_charges.json"))).unwrap();
+        let vector: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/vectors/fee_charges.json"
+        )))
+        .unwrap();
         let cases = vector["cases"].as_array().unwrap();
         assert!(cases.len() >= 6);
         let num = |v: &Value| -> u128 { v.as_str().unwrap().parse().unwrap() };
@@ -672,21 +941,50 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|e| ClearingEdge { debtor: acc(e["debtor"].as_str().unwrap()), creditor: acc(e["creditor"].as_str().unwrap()), cleared: U128(num(&e["cleared"])) })
+                .map(|e| ClearingEdge {
+                    debtor: acc(e["debtor"].as_str().unwrap()),
+                    creditor: acc(e["creditor"].as_str().unwrap()),
+                    cleared: U128(num(&e["cleared"])),
+                })
                 .collect();
             let expected = &case["expected"];
             let cleared_total: u128 = edges.iter().map(|e| e.cleared.0).sum();
             assert_eq!(cleared_total, num(&expected["cleared_total"]), "{name}");
             let solver = case["solver"].as_str().map(acc);
             let (to_reserve, to_solver) = c.charge_fees(1, &solver, cleared_total, &edges);
-            assert_eq!((to_reserve, to_solver), (num(&expected["clearing_fee_charged"]), num(&expected["solver_fee_charged"])), "{name}");
+            assert_eq!(
+                (to_reserve, to_solver),
+                (
+                    num(&expected["clearing_fee_charged"]),
+                    num(&expected["solver_fee_charged"])
+                ),
+                "{name}"
+            );
             for charge in expected["charges"].as_array().unwrap() {
                 let id = acc(charge["account"].as_str().unwrap());
                 let after = c.members.get(&id).unwrap();
-                let was = case["members"].as_array().unwrap().iter().find(|m| m["account"] == charge["account"]).map(|m| num(&m["stake"])).unwrap();
-                assert_eq!((was - after.stake, after.stake, after.limit), (num(&charge["stake_cut"]), num(&charge["stake_after"]), num(&charge["limit_after"])), "{name}: {id}");
+                let was = case["members"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|m| m["account"] == charge["account"])
+                    .map(|m| num(&m["stake"]))
+                    .unwrap();
+                assert_eq!(
+                    (was - after.stake, after.stake, after.limit),
+                    (
+                        num(&charge["stake_cut"]),
+                        num(&charge["stake_after"]),
+                        num(&charge["limit_after"])
+                    ),
+                    "{name}: {id}"
+                );
             }
-            assert_eq!(c.total_stake, total - to_reserve - to_solver, "{name}: total_stake");
+            assert_eq!(
+                c.total_stake,
+                total - to_reserve - to_solver,
+                "{name}: total_stake"
+            );
         }
     }
 
@@ -703,10 +1001,19 @@ mod tests {
     fn params_snapshot_of_the_epoch_sets_the_deadline() {
         // The epoch keeps its own params snapshot; a different `payment_window` in force now must not matter.
         let mut c = s1();
-        c.pending_params = Some(crate::state::PendingParams { params: Params { payment_window: 2700, ..Params::default() }, effective_epoch: 2 });
+        c.pending_params = Some(crate::state::PendingParams {
+            params: Params {
+                payment_window: 2700,
+                ..Params::default()
+            },
+            effective_epoch: 2,
+        });
         let mut c = closed(c, Some(p_s1()));
         c.commit_epoch(1);
-        assert_eq!(c.get_epoch(Some(1)).unwrap().payment_deadline.unwrap().0, T_PROP + 1800 * SEC);
+        assert_eq!(
+            c.get_epoch(Some(1)).unwrap().payment_deadline.unwrap().0,
+            T_PROP + 1800 * SEC
+        );
     }
 
     fn s1_with_fees(clearing_bps: u16, solver_bps: u16, stake: u128) -> X207Circle {
@@ -735,14 +1042,34 @@ mod tests {
         c.commit_epoch(1);
         // cleared_total 75: clearing 0.75, solver 0.375, three debtors of 25 each pay a third of 1.125
         assert_eq!((c.reserve, c.solver_fees_total), (750_000, 375_000));
-        assert_eq!(c.solver_fees.get(&acc("solver1.near")).copied(), Some(375_000));
+        assert_eq!(
+            c.solver_fees.get(&acc("solver1.near")).copied(),
+            Some(375_000)
+        );
         for name in ["scraper.near", "gpu.near", "translator.near"] {
-            assert_eq!(c.members.get(&acc(name)).unwrap().stake, 100 * CREDIT - 375_000, "{name}");
+            assert_eq!(
+                c.members.get(&acc(name)).unwrap().stake,
+                100 * CREDIT - 375_000,
+                "{name}"
+            );
         }
         assert_eq!(c.total_stake, 3 * (100 * CREDIT - 375_000));
-        assert_eq!(c.accounted(), before, "I-04: stake plus reserve plus solver fees is unchanged");
-        let applied = log_events().into_iter().find(|e| e["event"] == "clearing_applied").unwrap();
-        assert_eq!((applied["data"][0]["clearing_fee"].as_str(), applied["data"][0]["solver_fee"].as_str()), (Some("750000"), Some("375000")));
+        assert_eq!(
+            c.accounted(),
+            before,
+            "I-04: stake plus reserve plus solver fees is unchanged"
+        );
+        let applied = log_events()
+            .into_iter()
+            .find(|e| e["event"] == "clearing_applied")
+            .unwrap();
+        assert_eq!(
+            (
+                applied["data"][0]["clearing_fee"].as_str(),
+                applied["data"][0]["solver_fee"].as_str()
+            ),
+            (Some("750000"), Some("375000"))
+        );
     }
 
     // CT-051: default fees 0 charge nothing
@@ -750,7 +1077,10 @@ mod tests {
     fn ct_051_default_fees_charge_nothing() {
         let mut c = s1_with_fees(0, 0, 100 * CREDIT);
         c.commit_epoch(1);
-        assert_eq!((c.reserve, c.solver_fees_total, c.total_stake), (0, 0, 300 * CREDIT));
+        assert_eq!(
+            (c.reserve, c.solver_fees_total, c.total_stake),
+            (0, 0, 300 * CREDIT)
+        );
         assert_eq!(c.solver_fees.get(&acc("solver1.near")), None);
     }
 
@@ -763,7 +1093,12 @@ mod tests {
         c.commit_epoch(1);
         let m = c.members.get(&acc("scraper.near")).unwrap();
         assert_eq!(m.stake, 100 * CREDIT - 375_000);
-        assert!(m.limit <= m.stake - bond, "limit {} stake {} bond {bond}", m.limit, m.stake);
+        assert!(
+            m.limit <= m.stake - bond,
+            "limit {} stake {} bond {bond}",
+            m.limit,
+            m.stake
+        );
         assert_eq!(m.limit, m.stake - bond);
     }
 
@@ -784,13 +1119,24 @@ mod tests {
 
     #[test]
     fn ct_051_pro_rata_fee_hands_out_every_unit() {
-        let edges = vec![edge("a.near", "b.near", 10), edge("b.near", "c.near", 10), edge("c.near", "a.near", 10)];
+        let edges = vec![
+            edge("a.near", "b.near", 10),
+            edge("b.near", "c.near", 10),
+            edge("c.near", "a.near", 10),
+        ];
         let shares = pro_rata_fee(&edges, 30, 10);
         assert_eq!(shares.iter().map(|(_, s)| s).sum::<u128>(), 10);
-        assert_eq!(shares.iter().map(|(_, s)| *s).collect::<Vec<_>>(), vec![4, 3, 3]);
+        assert_eq!(
+            shares.iter().map(|(_, s)| *s).collect::<Vec<_>>(),
+            vec![4, 3, 3]
+        );
         assert!(pro_rata_fee(&edges, 30, 0).is_empty());
         let skew = vec![edge("a.near", "b.near", 90), edge("b.near", "a.near", 10)];
-        assert_eq!(pro_rata_fee(&skew, 100, 7), vec![(acc("a.near"), 7)], "floor shares 6 and 0, the leftover unit goes to the first account");
+        assert_eq!(
+            pro_rata_fee(&skew, 100, 7),
+            vec![(acc("a.near"), 7)],
+            "floor shares 6 and 0, the leftover unit goes to the first account"
+        );
     }
 
     fn as_solver(who: &str) {
@@ -818,7 +1164,11 @@ mod tests {
         let mut c = s1_with_fees(0, 100, 100 * CREDIT);
         let before = c.accounted();
         c.commit_epoch(1);
-        assert_eq!(c.solver_fee_balance(acc("solver1.near")).0, 750_000, "75 cleared at 100 bps");
+        assert_eq!(
+            c.solver_fee_balance(acc("solver1.near")).0,
+            750_000,
+            "75 cleared at 100 bps"
+        );
         as_solver("solver1.near");
         drop(c.claim_solver_fee());
         assert_eq!(c.solver_fee_balance(acc("solver1.near")).0, 0);
