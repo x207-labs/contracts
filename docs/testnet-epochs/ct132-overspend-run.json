@@ -1,0 +1,49 @@
+{
+  "circle": "x207-v018.testnet",
+  "accounts": {
+    "alice": "alice.x207-v18-own.testnet",
+    "bob": "bob.x207-v18-own.testnet",
+    "dan3": "dan3.x207-v18-own.testnet"
+  },
+  "steps": [
+    {
+      "label": "register_voucher bob -> alice (first, accepted)",
+      "ok": true,
+      "tx": "GuQjUumDLVu86PqX5TqHDri1BrszuHgi7uxbH3PQfiRQ",
+      "failure": null
+    },
+    {
+      "label": "register_voucher bob -> dan3 (second, must be refused: ERR_INSUFFICIENT_CREDIT)",
+      "ok": true,
+      "tx": "Dq9zmg4dTeK7M17f24wcwcGGEgtiefakrrn9A66aQXev",
+      "failure": "Smart contract panicked: ERR_INSUFFICIENT_CREDIT: delta 75000000 headroom 50000000"
+    }
+  ],
+  "checks": {
+    "codeHash": "5nBeeNaeWbVH7Q1c3mfG1NPThENb9PA8BvVgjauf6Aib",
+    "headroomAfter": "50000000"
+  },
+  "epoch": 183,
+  "headroomBefore": "125000000",
+  "amountEach": "75000000",
+  "middleware": {
+    "register-first, seller alice (voucher accepted by the chain)": {
+      "status": 200,
+      "served": true
+    },
+    "register-first, seller dan3 (voucher refused by the chain)": {
+      "status": 402,
+      "served": false
+    },
+    "default verify-first, seller dan3 (same voucher, the chain refuses it)": {
+      "status": 200,
+      "served": true
+    }
+  },
+  "notCovered": [
+    "the facilitators are mocks that always say valid; no real facilitator process was run",
+    "the middleware replays the chain answers recorded in this run instead of sending a third register_voucher",
+    "the 2 s latency of the chain call in a live seller",
+    "a buyer with more than one open voucher per seller, bundle vouchers, alsoAccept entries"
+  ]
+}
