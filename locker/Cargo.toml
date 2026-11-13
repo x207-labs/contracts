@@ -5,7 +5,7 @@ name = "x207-locker"
 version = "0.0.18"
 edition = "2021"
 license = "Apache-2.0"
-description = "x207 account locker: holds a NEAR account for sale and hands its keys to the buyer or back to the seller"
+description = "x207 account locker for the barter of a NEAR account: holds the account for sale and hands its keys to the buyer or back to the seller"
 publish = false
 
 [package.metadata.near.reproducible_build]

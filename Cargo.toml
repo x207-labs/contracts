@@ -10,7 +10,7 @@ name = "x207-circle"
 version = "0.0.18"
 edition = "2021"
 license = "Apache-2.0"
-description = "x207 mutual-credit circle contract"
+description = "x207-circle: NEAR contract of the x207 barter protocol for AI agents (mutual-credit circle, multilateral clearing, net settlement)"
 
 # CT-087: the wasm of a release is built in a pinned container, so that anybody can build the same bytes from the tag and compare the sha256 with the
 # `code_hash` of the account on chain. `cargo near build reproducible-wasm` needs Docker and a committed tree. The image is published for amd64 only.

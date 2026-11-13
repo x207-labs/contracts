@@ -1,12 +1,12 @@
 # x207 contracts
 
-The `x207-circle` smart contract (Rust, NEAR) and the Sputnik DAO scripts of [x207](https://github.com/x207-labs/x207): the multilateral clearing layer for x402 agent payments.
+The `x207-circle` smart contract (Rust, NEAR), the `x207-locker` account locker and the Sputnik DAO scripts of [x207](https://github.com/x207-labs/x207), the barter protocol for AI agents on NEAR. The circle contract records trades as signed credit vouchers, checks the multilateral clearing that cancels trade loops, and settles only the net.
 
 ## Its role in x207
 
 The contract is the one place where the circle is true. It holds the members and their stakes, records the signed vouchers per pair, accepts a clearing proposal from any solver after checking it on chain, applies the best one, covers a default from the debtor's stake, and lets creditors claim USDT. Everything else in x207 (the [SDK](https://github.com/x207-labs/sdk), the [indexer and read API](https://github.com/x207-labs/backend), the [solver](https://github.com/x207-labs/solver), the [dashboard](https://github.com/x207-labs/frontend)) reads or calls it.
 
-- **Running now:** release [v0.0.13](https://github.com/x207-labs/contracts/releases/tag/v0.0.13), interface 0.0.13 (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`), as the circle `x207-v013.testnet` on NEAR testnet; tags v0.0.14 (EVM agents) and v0.0.15 (auto-settle from stake) run as `x207-v014.testnet` and `x207-v015.testnet`. No mainnet deploy has been made.
+- **Running now:** release [v0.0.18](https://github.com/x207-labs/contracts/releases/tag/v0.0.18), interface 0.0.18 (`INTERFACE_VERSION` in `x207-circle/src/lib.rs`, frozen in `abi.json`), as the circle `x207-v018.testnet` on NEAR testnet, where the barter ring of epoch 184 and the marketplace ran. The first release, [v0.0.13](https://github.com/x207-labs/contracts/releases/tag/v0.0.13), still runs as `x207-v013.testnet` (epoch 8 and the default read API); each release in between runs as its own circle ([status of every circle](https://github.com/x207-labs/x207/blob/main/docs/readme-details.md#status-of-every-circle)). No mainnet deploy has been made.
 - **Reproducible build:** the wasm is built in a pinned container, so two builds of one commit give the same bytes. v0.0.13 (commit `8799ebe`, built twice, byte-identical): sha256 `b9327f2b5d64b1180ba76dd619c6091ae57b48964f520a784e366c131e787054`, on-chain `code_hash` `DTw5rUUdJSbWjD361MmBxKW4nm4ETnNkex63mfUCjsjh`.
 
 ```mermaid
