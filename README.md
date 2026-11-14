@@ -18,7 +18,7 @@ The `x207-circle` smart contract (Rust, NEAR), the `x207-locker` account locker 
 | --- | --- |
 | **What** | `x207-circle` (Rust, NEAR), `x207-locker`, Sputnik DAO scripts |
 | **Role** | The one place where the circle is true |
-| **Run** | `cargo near build non-reproducible-wasm`, then `cargo test` |
+| **Run** | `cargo near build non-reproducible-wasm`, then `cargo test --lib` (unit tests, a few minutes); the full `cargo test` runs 68 sandbox test files and takes over an hour |
 | **Proof** | [What the release check proves](docs/verify-release.md) · [Evidence](#evidence) |
 
 One epoch, as the contract sees it:
@@ -39,7 +39,8 @@ Needs Rust 1.99.1 with the `wasm32-unknown-unknown` target (pinned in `rust-tool
 
 ```bash
 cargo near build non-reproducible-wasm
-cargo test
+cargo test --lib                 # unit tests of the contract, about 3 minutes with the build
+cargo test --test ct043_gas      # one sandbox test file; the full `cargo test` runs all 68 and takes over an hour
 ```
 
 More, including the reproducible build and the release check: [Build and test](#build-and-test).
@@ -124,7 +125,8 @@ Needs Rust 1.99.1 with the `wasm32-unknown-unknown` target (pinned in `rust-tool
 
 ```bash
 cargo near build non-reproducible-wasm
-cargo test
+cargo test --lib                 # unit tests of the contract, about 3 minutes with the build
+cargo test                       # everything: 68 sandbox test files, over an hour, each file 1 to 3 minutes; it is not stuck when a test says "has been running for over 60 seconds"
 ```
 
 Sandbox tests need the wasm from the build step. Check a release with `scripts/verify-release.sh`, or reproduce one from a clean clone with `scripts/repro-build.sh` (needs Docker).
